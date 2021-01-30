@@ -116,7 +116,7 @@ function mountEveryTick() {
  * Support abstract task-taken objects.
  * @typedef {"static" | "expand" | "shrinkToEnergyAvailable" | "shrinkToEnergyCapacity"} CreepSpawnMode
  * @typedef { { minimumNumber : number, maximumNumber : number, estimateProfitPerTurn : (object : GameObject) => number, estimateWorkingTicks : (object : GameObject) => number, tag ? : string, groupTag ? : string, allowEmptyTag ? : boolean, allowOtherTags ? : Array<string>} } CommonRoleDescription `tag` is used for hiring specific `creep`. Those creeps with defined tag will not be hired into `role` without tag. `groupTag` is used to control the spawning of creeps.
- * @typedef { { bodyMinimumRequirements : {[body in BodyPartConstant]? : number}, bodyBoostRequirements? : {[body in BodyPartConstant]? : { [compound in ResourceConstant]? : number }}, expandFunction? : (availableEnergy : number) => {[body in BodyPartConstant]? : number}, mode? : CreepSpawnMode } & CommonRoleDescription } CreepRoleDescription
+ * @typedef { { bodyMinimumRequirements : {[body in BodyPartConstant]? : number}, bodyBoostRequirements? : {[body in BodyPartConstant]? : { [compound in ResourceConstant]? : number }}, expandFunction? : (availableEnergy : number) => {[body in BodyPartConstant]? : number}, mode? : CreepSpawnMode, confinedInRoom? : boolean, workingPos? : RoomPosition } & CommonRoleDescription } CreepRoleDescription
  * `expandFunction` allows much more flexibility into the setup for bodies of creeps, since it sets up the upper line instead of the bottom line and can adjust the body settings according to instant condition in the room. NOTICE : `move` parts should be specified. Values in `bodyBoostRequirements` are interpreted as ratio between satisfied bodyparts and total bodyparts. Higher level compound is calculated at higher priority, while bodypart with higher level compound is compatible with requirement of lower level compound, if it is not counted.
  * @typedef { { isSatisfied : (object : GameObject) => Boolean} & CommonRoleDescription } ObjectRoleDescription - Exclude Creep
  * @typedef { {[role : string] : CreepRoleDescription | ObjectRoleDescription } } RoleDescription
@@ -246,6 +246,7 @@ class TaskDescriptor {
 }
 /**
  * Class Representation for Descriptor of Task
+ * @interface
  */
 class TaskCreepDescriptor {
     get BodyRequirements() {
@@ -275,6 +276,12 @@ class TaskCreepDescriptor {
     }
     get Mode() {
         return this.roleDescription.mode || "static";
+    }
+    get IsConfinedInRoom() {
+        return this.roleDescription.confinedInRoom || false;
+    }
+    get WorkingPos() {
+        return this.roleDescription.workingPos;
     }
     /**
      * @param {Task} task

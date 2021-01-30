@@ -1,11 +1,6 @@
-/**
- * @type { (room : Room) => Boolean }
- */
-const isMyRoom                      =   require('util').isMyRoom;
-/**
- * @type { (bodyDescription : {[body in BodyPartConstant]? : number}) => Array<BodyPartConstant> }
- */
-const parseBodyPartsConfiguration   = require('util').parseBodyPartsConfiguration;
+const isMyRoom                      =   require('./util').isMyRoom;
+const parseBodyPartsConfiguration   = require('./util').parseBodyPartsConfiguration;
+const { EVENT_TYPES }               = require("./lucy.log");
 /**
  * $ converts Object in Screeps into Object in Lucy.
  */
@@ -16,18 +11,106 @@ function $() {
     global.Lucy = {};
     global.Lucy.Rules = require("lucy.rules");
     global.Lucy.Logs = new (require("lucy.log").LogPool)();
+    global.Lucy.InitSignals = function() {
+        global.signals = {
+            IsStructureDestroy : {},
+            IsConstructionSiteCancel : {},
+            IsNewStructure : {},
+            IsNewConstructionSite : {}
+        };
+    }.bind(global.Lucy);
     global.Lucy.Spawn = function() {
         for (const roomName in Game.rooms) {
             const room = Game.rooms[roomName];
             if (!isMyRoom(room)) continue;
             // NOTICE : Query Creep is time-consuming, and it is unnecessary when no spawn is available.
-            if (room.spawns.filter(s => !s.spawning).length === 0) continue;
+            /** @type {Array<StructureSpawn>} */
+            const candidateSpawns = room.spawns.filter(s => !s.spawning);
+            if (candidateSpawns.length === 0) continue;
             // NOTICE : In order to avoid energy-consumption-overlapping, for each tick, only one Spawn will be allowed to spawn Creep.
+            /** @type {{} | { body : {[body in BodyPartConstant]? : number}, memory : {}, workingPos? : RoomPosition} } */
             const spawnedCreep = global.CreepSpawnManager.Query(roomName);
             if (!spawnedCreep.body) continue;
-            for (const spawn of room.spawns) {
-                if (spawn.spawning) continue;
-                if (spawn.spawnCreep(parseBodyPartsConfiguration(spawnedCreep.body), `@${Game.shard.name}-${roomName}-${Game.time}`, { memory : spawnedCreep.memory }) === OK) break;
+            if (spawnedCreep.workingPos) candidateSpawns.sort((a, b) => a.pos.getRangeTo(spawnedCreep.workingPos) - b.pos.getRangeTo(spawnedCreep.workingPos));
+            candidateSpawns[0].spawnCreep(
+                parseBodyPartsConfiguration(spawnedCreep.body),
+                `@${Game.shard.name}-${roomName}-${Game.time}`,
+                {
+                    memory : spawnedCreep.memory,
+                    directions:
+                        [
+                            spawnedCreep.workingPos ?
+                                (candidateSpawns[0].pos.getRangeTo(spawnedCreep.workingPos) === 1 ?
+                                    candidateSpawns[0].pos.getDirectionTo(spawnedCreep.workingPos):
+                                    candidateSpawns[0].room.centralSpawn.SpawnDirection(candidateSpawns[0])) :
+                                candidateSpawns[0].room.centralSpawn.SpawnDirection(candidateSpawns[0])
+                        ]
+                }
+            );
+        }
+    }.bind(global.Lucy);
+    global.Lucy.HandleEvent = function() {
+        /**
+         * @type {import("./lucy.log").Event}
+         */
+        let event = undefined;
+        while (event = this.Logs.Pool.pop()) {
+            /* Trigger ConstructionSites */
+            if (event.Type === EVENT_TYPES.OBJECT_CONSTRUCT && event.ObjectType === "ConstructionSite") {
+                global.MapMonitorManager.FetchConstructionSites(event.Pos.roomName, event.Pos.y, event.Pos.x).forEach(c => c.triggerBuilding());
+            }
+            /* Trigger New-built Structures */
+            if (event.Type === EVENT_TYPES.OBJECT_CONSTRUCT && event.ObjectType === "Structure") {
+                /* Special Case for Spawn */
+                if (event.StructureType === STRUCTURE_SPAWN && Game.rooms[event.Pos.roomName].find(FIND_STRUCTURES, { filter : {structureType : STRUCTURE_SPAWN} }).length > 1) continue;
+                const structures = global.MapMonitorManager.FetchStructure(event.Pos.roomName, event.Pos.y, event.Pos.x).filter(s => s.structureType === event.StructureType);
+                structures.forEach(s => {
+                    console.log(`<p style="display:inline;color:gray;">[Log]</p> Detect Newly Constructed Structure ${s} with trigger ${s.register}`);
+                    if (s.register !== undefined) s.register();
+                });
+                structures.forEach(s => {
+                    console.log(`<p style="display:inline;color:gray;">[Log]</p> Detect Newly Constructed Structure ${s} with trigger ${s.trigger}`);
+                    if (s.trigger !== undefined) s.trigger();
+                });
+            }
+        }
+    }.bind(global.Lucy);
+    global.Lucy.PlanInitRoom = function() {
+        for (const roomName in Game.rooms) {
+            if (isMyRoom(Game.rooms[roomName])) {
+                global.Map.AutoPlan(roomName);
+                Game.rooms[roomName].init();
+            }
+        }
+    }.bind(global.Lucy);
+    global.Lucy.FetchTasks = function() {
+        /* Creep */
+        for (const creepName in Game.creeps) {
+            const creep = Game.creeps[creepName];
+            if (!creep.task) {
+                const ret = global.TaskManager.Query(creep);
+                if (ret) creep.task = ret;
+                else {
+                    creep.say("🚬");
+                    if (!creep.task) creep.checkIn();
+                }
+            }
+        }
+    }.bind(global.Lucy);
+    global.Lucy.SolveHotPush = function() {
+        /**
+         * @type {import("./lucy.log").Event}
+         */
+        let hotEvent = null;
+        while ((hotEvent = this.HotPoolTop)) {
+            if (hotEvent.Type === EVENT_TYPES.TASK_OF_OBJECT_STATUS_CHANGE) {
+                if (hotEvent.Status === "fired") {
+                    /**
+                     * `fired` objects could fetch `task` at the same tick to avoid duplicate spawning.
+                     * NOTICE : There could be reduntant such events while `fired` objects have taken some tasks. Thus, double check is compulsory.
+                     */
+                    if (!hotEvent.Obj.task) hotEvent.Obj.task = global.TaskManager.Query(hotEvent.Obj);
+                }
             }
         }
     }.bind(global.Lucy);

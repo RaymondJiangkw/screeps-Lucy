@@ -353,18 +353,16 @@ module.exports = {
             const MOVE_COEFFICIENT = 2;
             const work = Math.min(Math.floor(50 / (1 + 1 / MOVE_COEFFICIENT) / (1 + energyConsumptionPerUnitPerTick / CARRY_CAPACITY)), Math.floor(availableEnergy / CREEP_LIFE_TIME / energyConsumptionPerUnitPerTick));
             const carry = Math.floor(work * energyConsumptionPerUnitPerTick / CARRY_CAPACITY);
-            const move = Math.ceil((work + carry) / MOVE_COEFFICIENT);
             // In fact, MOVE >= 2 would be a better option, despite some loss of accuracy.
             // It allows much more flexibility.
             const workNum = work >= 1 ? work : 1;
             const carryNum = carry >= 1 ? carry : 1;
-            const moveNum = Math.min(50 - workNum - carryNum, Math.max(2, move));
+            const moveNum = Math.min(50 - workNum - carryNum, Math.max(2, Math.ceil((workNum + carryNum) / MOVE_COEFFICIENT)));
             return {
                 [WORK] : workNum,
                 [CARRY] : carryNum,
                 [MOVE] : moveNum
             };
         }
-        
     }
 };

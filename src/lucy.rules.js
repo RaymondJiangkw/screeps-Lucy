@@ -28,5 +28,15 @@ module.exports = {
         UPGRADE_ONLY            : "forUpgrade",
         TRANSFER_ONLY           : "forTransfer",
         BUILD_ONLY              : "forBuild"
+    },
+    storage : {
+        [RESOURCE_ENERGY] : 0.5,
+        [RESOURCE_HYDROGEN] : 0.2,
+        [RESOURCE_OXYGEN] : 0.2,
+        [RESOURCE_KEANIUM] : 0.2,
+        [RESOURCE_UTRIUM] : 0.2,
+        [RESOURCE_LEMERGIUM] : 0.2,
+        [RESOURCE_ZYNTHIUM] : 0.2,
+        [RESOURCE_CATALYST] : 0.4
     }
 };

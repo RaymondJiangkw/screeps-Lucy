@@ -52,7 +52,7 @@ function setupMemory(profileType, duration, filter) {
     Memory.profiler = {
       map: {},
       totalTime: 0,
-      enabledTick: Game.time + 1,
+      enabledTick: Game.time,
       disableTick,
       type: profileType,
       filter,

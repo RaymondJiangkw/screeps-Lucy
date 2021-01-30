@@ -1,5 +1,5 @@
 # Screeps-Lucy
-## Implements
+## Implementations
 - Automatic Plan
     - Unit-based, which allows for flexibility.
     - Run at every tick for some cases, while employing caching to speed up.
@@ -14,4 +14,6 @@
     - Resource, comprised of `retrieve` and `store`, implementing `Resource Reserve`.
 - Structure Memory
     - Periodical or Computation-oriented Recycle.
+- Fast Energy-Filling
+    - Imitate the layout of `tigga`.
 - *Flag Trigger* (Under Development ⛏️)

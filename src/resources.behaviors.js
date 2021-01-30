@@ -3,8 +3,9 @@
  * 
  * This module defines the basic behaviors for Resources.
  */
-const isMyRoom = require('./util').isMyRoom;
-const ResourceDescriptor = require('./manager.resources').ResourceDescriptor;
+const isMyRoom                  = require('./util').isMyRoom;
+const ResourceDescriptor        = require('./manager.resources').ResourceDescriptor;
+const StoringDescriptor         = require('./manager.resources').StoringDescriptor;
 const RESOURCE_POSSESSING_TYPES = require('./manager.resources').RESOURCE_POSSESSING_TYPES;
 function giveContainerBehaviors() {
     /**
@@ -20,10 +21,28 @@ function giveContainerBehaviors() {
         if (storingResourceType) global.ResourceManager.Register(new ResourceDescriptor(this, RESOURCE_POSSESSING_TYPES.STORING, storingResourceType, this.memory.tag === global.Lucy.Rules.arrangements.SPAWN_ONLY? global.Lucy.Rules.arrangements.SPAWN_ONLY : "default", function(container) {
             return container.store[this.resourceType];
         }));
+        /* Register for Storing Additional Energy */
+        // "default" enables containers to be found by searching structures for storing energy.
+        if (this.memory.tag === global.Lucy.Rules.arrangements.SPAWN_ONLY) global.ResourceManager.Register(new StoringDescriptor(this, RESOURCE_ENERGY, "default", function (container) {
+            return container.store.getFreeCapacity(RESOURCE_ENERGY);
+        }));
+    }
+}
+function giveStorageBehaviors() {
+    StructureStorage.prototype.register = function() {
+        global.ResourceManager.Register(new StoringDescriptor(this, "all", "default", function (storage) {
+            return storage.store.getFreeCapacity();
+        }));
+        for (const resourceType of RESOURCES_ALL) {
+            global.ResourceManager.Register(new ResourceDescriptor(this, RESOURCE_POSSESSING_TYPES.STORING, resourceType, "default", function (storage) {
+                return storage.store[this.resourceType];
+            }));
+        }
     }
 }
 function mount() {
     giveContainerBehaviors();
+    giveStorageBehaviors();
     /**
      * @type {import('./manager.resources').ResourceManager}
      */
@@ -36,7 +55,13 @@ function mount() {
                     return source.energy;
                 }));
             });
+            /**
+             * NOTICE : Mineral should only be harvested by specific `harvest` task.
+             * If other tasks require usage of some mineral, they must wait until some storage/container/terminal/... in room possess them.
+             * Thus, there is no need to register mineral into ResourceManager.
+             */
             room["containers"].forEach(c => c.register());
+            if (room.storage) room.storage.register();
         }
     }
 }

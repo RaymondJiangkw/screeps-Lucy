@@ -2,6 +2,7 @@
  * @module manager.creeps
  * 
  * @typedef {CreepSpawnManager} CreepSpawnManager
+ * @typedef {SpecialCreepScheme} SpecialCreepScheme
  */
 /**
  * @type { (timeout: number, offset : number) => number }
@@ -68,7 +69,7 @@ class CreepSpawnManager {
      * Query returns the spawnable creep.
      * After querying, specific role from which the returned configuration is gotten will be ignored in the same tick in order to avoid over-production.
      * @param {string} roomName - Room Under Control
-     * @returns { {} | { body : {[body in BodyPartConstant]? : number}, memory : {}} }
+     * @returns { {} | { body : {[body in BodyPartConstant]? : number}, memory : {}, workingPos? : RoomPosition} }
      */
     Query(roomName) {
         /**
@@ -120,6 +121,7 @@ class CreepSpawnManager {
              * @type {Array<import("./task.prototype").TaskCreepDescriptor>}
              */
             let totalRequestingRoles = this.room2creepSpawns[room]
+                .filter(a => room === roomName || !a.IsConfinedInRoom)
                 .filter(a => a.CurrentAmount < a.MinimumAmount)
                 .filter(a => evaluateCost(parseBodyParts(a, Game.rooms[room])) <= (Game.rooms[room].energyAvailable - Game.rooms[room]._instantEnergyCost));
             for (const groupTag in this.room2creepSpawnsPatch[room]) {
@@ -129,11 +131,12 @@ class CreepSpawnManager {
                  *  - When MinimumAmount = 1, expectedNum should be 1.
                  *  - When MinimumAmount = e^2, expectedNum should be 2.
                  */
-                const expectedNum = Math.ceil(Math.log(this.room2creepSpawnsPatch[room][groupTag].MinimumAmount) * 0.5 + 1);
+                const expectedNum = Math.floor(Math.log(this.room2creepSpawnsPatch[room][groupTag].MinimumAmount) * 0.5 + 1);
                 if (this.room2creepSpawnsPatch[room][groupTag].CurrentAmount >= expectedNum) continue;
-                console.log(`[${room}] ${groupTag} is not saturated ${this.room2creepSpawnsPatch[room][groupTag].CurrentAmount}:${expectedNum}.`);
+                console.log(`[${room}] ${groupTag} is not saturated ${this.room2creepSpawnsPatch[room][groupTag].CurrentAmount}:${expectedNum} ${this.room2creepSpawnsPatch[room][groupTag].map(d => d.boundTask.mountObj)}.`);
                 totalRequestingRoles = totalRequestingRoles.concat(
                     this.room2creepSpawnsPatch[room][groupTag]
+                        .filter(a => room === roomName || !a.IsConfinedInRoom)
                         .filter(a => a.CurrentAmount < a.MinimumAmount)
                         .filter(a => evaluateCost(parseBodyParts(a, Game.rooms[room])) <= (Game.rooms[room].energyAvailable - Game.rooms[room]._instantEnergyCost))
                 );
@@ -145,6 +148,7 @@ class CreepSpawnManager {
                 chosen.body = parseBodyParts(descriptor, Game.rooms[room]);
                 /* Prepare Initial Memory */
                 chosen.memory = {};
+                chosen.workingPos = descriptor.WorkingPos || undefined;
                 if (descriptor.Tag) chosen.memory.tag = descriptor.Tag;
                 descriptor._spawnTick = Game.time;
                 break;

@@ -85,7 +85,7 @@ class TaskManager {
          *  - When # working tasks = 1, expectedNum should be 1.
          *  - When # working tasks = e^2, expectedNum should be 2.
          */
-        const expectedNum = Math.log(tasks.length) * 0.5 + 1;
+        const expectedNum = Math.floor(Math.log(tasks.length) * 0.5 + 1);
         const workingNum = tasks.filter(task => task.State === "working").length;
         /**
          * NOTICE : For a group of Task, there could be the case that some of them still needs more workers and, when

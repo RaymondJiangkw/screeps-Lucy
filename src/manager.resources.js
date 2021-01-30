@@ -195,8 +195,8 @@ class ResourceManager {
      * @param {ResourceDescriptor | StoringDescriptor} descriptor
      */
     Register(descriptor) {
-        const descriptorType = descriptor instanceof ResourceDescriptor ? "Provider" : "Receiver";
-        console.log(`<p style="color:lightblue;display:inline;">[Register]</p> Registering ${descriptor.Obj}'s ${descriptor.ResourceType} into ResourceManager as ${descriptorType}...`);
+        // const descriptorType = descriptor instanceof ResourceDescriptor ? "Provider" : "Receiver";
+        // console.log(`<p style="color:lightblue;display:inline;">[Register]</p> Registering ${descriptor.Obj}'s ${descriptor.ResourceType} into ResourceManager as ${descriptorType}...`);
         if (descriptor instanceof ResourceDescriptor) {
             this.resourceType2Resources[descriptor.ResourceType] = this.resourceType2Resources[descriptor.ResourceType] || {};
             this.resourceType2Resources[descriptor.ResourceType][descriptor.Obj.id] = descriptor;
@@ -238,11 +238,11 @@ class ResourceManager {
      * @param {import("./task.prototype").GameObject} subject
      * @param {ResourceConstant | "all"} resourceType "all" here is peculiar to `storing` objects
      * @param {number} amount Retrieving Amount | Storing Amount
-     * @param { { key? : string, confinedInRoom? : boolean, allowStore? : boolean, allowToHarvest? : boolean, type : "retrieve" | "store" } } [options = { key : "default", confinedInRoom : false, allowStore : true, allowToHarvest : true }] "default" has access to all registered resources, but those with specific tag will be penaltized. `allowStore` and `allowToHarvest` are useful while `type` === "retrieve".
+     * @param { { key? : string, confinedInRoom? : boolean, allowStore? : boolean, allowToHarvest? : boolean, type : "retrieve" | "store", excludeDefault? : boolean } } [options = { key : "default", confinedInRoom : false, allowStore : true, allowToHarvest : true }] "default" has access to all registered resources, but those with specific tag will be penaltized. `allowStore` and `allowToHarvest` are useful while `type` === "retrieve".
      * @returns {import("./task.prototype").GameObject | null}
      */
     Query(subject, resourceType, amount, options) {
-        _.defaults(options, {key : "default", confinedInRoom : false, allowStore : true, allowToHarvest : true});
+        _.defaults(options, {key : "default", confinedInRoom : false, allowStore : true, allowToHarvest : true, excludeDefault : false});
         /**
          * Query will first check out whether `subject` has physical location.
          * If so, it will go through several standards orderly to return the first matched:
@@ -290,13 +290,13 @@ class ResourceManager {
                  */
                 let totalAvailableResourceObjects = [];
                 if (options.type === "retrieve") totalAvailableResourceObjects = this.room2resourceTypes[room][resourceType]
-                    .filter(a => a.Obj !== subject && a.Amount > 0)
-                    .filter(a => options.key === "default" || a.Key === options.key)
+                    .filter(a => a.Obj.id !== subject.id && a.Amount > 0)
+                    .filter(a => (a.Key === "default" && !options.excludeDefault) || a.Key === options.key)
                     .filter(a => (options.allowStore && a.Obj.store !== undefined) || (options.allowToHarvest && isHarvestable(a.Obj))) // I suppose there is nothing which is harvestable and also has `store`
                     .sort((a,b) => calcInRoomDistance(a.Obj.pos, subject.pos) * 2 * getPrice("cpu") / 5 + (amount - a.Amount) * getPrice(resourceType) / 1000 + calcKeyPenalty(a) - calcInRoomDistance(b.Obj.pos, subject.pos) * 2 * getPrice("cpu") / 5 - (amount - b.Amount) * getPrice(resourceType) / 1000 - calcKeyPenalty(b));
                 else if (options.type === 'store') totalAvailableResourceObjects = this.room2StoringResourceTypes[room][resourceType]
-                    .filter(a => a.Obj !== subject && a.FreeAmount > 0)
-                    .filter(a => options.key === "default" || a.Key === options.key)
+                    .filter(a => a.Obj.id !== subject.id && a.FreeAmount > 0)
+                    .filter(a => (a.Key === "default" && !options.excludeDefault) || a.Key === options.key)
                     .sort((a,b) => calcInRoomDistance(a.Obj.pos, subject.pos) * 2 * getPrice("cpu") / 5 + (amount - a.FreeAmount) * getPrice(resourceType) / 1000 + calcKeyPenalty(a) - calcInRoomDistance(b.Obj.pos, subject.pos) * 2 * getPrice("cpu") / 5 - (amount - b.FreeAmount) * getPrice(resourceType) / 1000 - calcKeyPenalty(b));
                 if (totalAvailableResourceObjects.length === 0) continue;
                 const adequateResourceObjects = _.filter(totalAvailableResourceObjects, d => (options.type === "retrieve" ? d.Amount : d.FreeAmount) >= amount);
@@ -311,13 +311,11 @@ class ResourceManager {
         for (const roomName in this.room2resourceTypes) {
             for (const resourceType in this.room2resourceTypes[roomName]) {
                 for (const descriptor of this.room2resourceTypes[roomName][resourceType]) {
-                    if (descriptor.Type === 1) {
-                        new RoomVisual(descriptor.Obj.pos.roomName).text(descriptor.Amount, descriptor.Obj.pos, {color : "yellow"});
-                    } else if (descriptor.Type === 0) {
-                        /**
-                         * @TODO
-                         */
-                    }
+                    if (descriptor.Obj.structureType === STRUCTURE_STORAGE || descriptor.Obj.structureType === STRUCTURE_TERMINAL) continue;
+                    /**
+                     * @TODO
+                     */
+                    new RoomVisual(descriptor.Obj.pos.roomName).text(descriptor.Amount, descriptor.Obj.pos, {color : "yellow"});
                 }
             }
         }
