@@ -610,9 +610,17 @@ class Planer {
         const x1 = Math.min(_x1, _x2), x2 = Math.max(_x1, _x2);
         if (!this.roomOccupiedSpace[roomName]) this.roomOccupiedSpace[roomName] = constructArray([50,50], false);
         if (!this.roomStructureRegistered[roomName]) this.roomStructureRegistered[roomName] = {};
+        if (!this.room2avoidPoses[roomName]) this.room2avoidPoses[roomName] = [];
         for (let y = y1; y <= y2; ++y) for (let x = x1; x <= x2; ++x) {
             const containPureRoad = unit.Fetch(y - y1, x - x1).length === 1 && unit.Fetch(y - y1, x - x1)[0] === STRUCTURE_ROAD;
-            if (unit.Fetch(y - y1, x - x1).indexOf(unit.PLACE_ANY) === -1 && unit.Fetch(y - y1, x - x1).length > 0 && (!containPureRoad || (containPureRoad && unit.Options.avoidOtherToOverLapRoad))) this.roomOccupiedSpace[roomName][y][x] = true;
+            if (unit.Fetch(y - y1, x - x1).indexOf(unit.PLACE_ANY) === -1 && unit.Fetch(y - y1, x - x1).length > 0 && (!containPureRoad || (containPureRoad && unit.Options.avoidOtherToOverLapRoad))) {
+                this.roomOccupiedSpace[roomName][y][x] = true;
+                /* Update CostFinder. Road here is not considered as obstacles, however. */
+                if (unit.Fetch(y - y1, x - x1).filter(v => v !== STRUCTURE_ROAD && v !== STRUCTURE_CONTAINER && v !== STRUCTURE_RAMPART).length > 0) {
+                    // console.log(`Disable (${x}, ${y})`);
+                    this.room2avoidPoses[roomName].push(new RoomPosition(x, y, roomName));
+                }
+            }
             unit.Fetch(y - y1, x- x1).filter(s => s !== unit.PLACE_ANY && s !== unit.PLACE_VACANT && s !== unit.PLACE_WALL).forEach(s => {
                 if (!this.roomStructureRegistered[roomName][s]) this.roomStructureRegistered[roomName][s] = [];
                 this.roomStructureRegistered[roomName][s].push({x, y});
@@ -824,7 +832,7 @@ class Planer {
                 });
             }
         }
-        return true;
+        return false;
     }
     /**
      * @param {string} roomName
@@ -846,6 +854,9 @@ class Planer {
         if (!this.units2pos[roomName]) this.units2pos[roomName] = {};
         if (!this._unit2unit[roomName]) this._unit2unit[roomName] = {};
         if (!this._unit2unit[roomName][unitType]) this._unit2unit[roomName][unitType] = {};
+        if (!Memory._plannerCache._unit2unit) Memory._plannerCache._unit2unit = {};
+        if (!Memory._plannerCache._unit2unit[roomName]) Memory._plannerCache._unit2unit[roomName] = {};
+        if (!Memory._plannerCache._unit2unit[roomName][unitType]) Memory._plannerCache._unit2unit[roomName][unitType] = {};
         if (!this.units2pos[roomName][unitType]) {
             /** Memory Caching */
             if (options.readFromMemory && Memory.autoPlan[roomName][unitType]) this.units2pos[roomName][unitType] = Memory.autoPlan[roomName][unitType];
@@ -891,7 +902,6 @@ class Planer {
              * @param {RoomPosition} posV
              */
             const distance = (posU, posV) => {
-                if (!this.roomRoadCache.get(roomName, posU.x, posU.y, posV.x, posV.y)) this.updateLinkedRoad(roomName, posU, posV);
                 return this.roomRoadCache.get(roomName, posU.x, posU.y, posV.x, posV.y).length;
             };
             /**
@@ -899,9 +909,20 @@ class Planer {
              */
             const fetchBestNode = (targetPosition) => {
                 if (!this._bestNodeCache) this._bestNodeCache = {};
-                if (!this._bestNodeCache[unitType]) this._bestNodeCache[unitType] = {};
-                if (this._bestNodeCache[unitType][targetPosition]) return this._bestNodeCache[unitType][targetPosition];
-                else return this._bestNodeCache[unitType][targetPosition] = unit.FetchStructurePos(STRUCTURE_ROAD).map(p => new RoomPosition(p[1] + candidatePoses[i][1], p[0] + candidatePoses[i][0], roomName)).sort((a, b) => distance(a, targetPosition) - distance(b, targetPosition))[0];
+                if (!this._bestNodeCache[roomName]) this._bestNodeCache[roomName] = {};
+                if (!this._bestNodeCache[roomName][unitType]) this._bestNodeCache[roomName][unitType] = {};
+                if (this._bestNodeCache[roomName][unitType][Map.prototype.roomPosition2String(targetPosition)]) return this._bestNodeCache[roomName][unitType][Map.prototype.roomPosition2String(targetPosition)];
+                else {
+                    if (options.readFromMemory && (Memory._plannerCache._bestNodeCache && Memory._plannerCache._bestNodeCache[roomName] && Memory._plannerCache._bestNodeCache[roomName][unitType] && Memory._plannerCache._bestNodeCache[roomName][unitType][Map.prototype.roomPosition2String(targetPosition)])) return this._bestNodeCache[roomName][unitType][Map.prototype.roomPosition2String(targetPosition)] = Memory._plannerCache._bestNodeCache[roomName][unitType][Map.prototype.roomPosition2String(targetPosition)];
+                    this._bestNodeCache[roomName][unitType][Map.prototype.roomPosition2String(targetPosition)] = unit.FetchStructurePos(STRUCTURE_ROAD).map(p => new RoomPosition(p[1] + candidatePoses[i][1], p[0] + candidatePoses[i][0], roomName)).sort((a, b) => distance(a, targetPosition) - distance(b, targetPosition))[0];
+                    if (options.writeToMemory) {
+                        if (!Memory._plannerCache._bestNodeCache) Memory._plannerCache._bestNodeCache = {};
+                        if (!Memory._plannerCache._bestNodeCache[roomName]) Memory._plannerCache._bestNodeCache[roomName] = {};
+                        if (!Memory._plannerCache._bestNodeCache[roomName][unitType]) Memory._plannerCache._bestNodeCache[roomName][unitType] = {};
+                        Memory._plannerCache._bestNodeCache[roomName][unitType][Map.prototype.roomPosition2String(targetPosition)] = this._bestNodeCache[roomName][unitType][Map.prototype.roomPosition2String(targetPosition)];
+                    }
+                    return this._bestNodeCache[roomName][unitType][Map.prototype.roomPosition2String(targetPosition)];
+                }
             };
             /**
              * @param {RoomPosition} targetPosition
@@ -915,11 +936,12 @@ class Planer {
             };
             /**
              * @param {RoomPosition} targetPosition
+             * @param {string} color
              */
-            const displayRoad2Position = (targetPosition) => {
+            const displayRoad2Position = (targetPosition, color = "lightblue") => {
                 const roadPosition = fetchBestNode(targetPosition);
                 if (!roadPosition) return;
-                this.displayRoad(roomName, this.roomRoadCache.get(roomName, roadPosition.x, roadPosition.y, targetPosition.x, targetPosition.y));
+                this.displayRoad(roomName, this.roomRoadCache.get(roomName, roadPosition.x, roadPosition.y, targetPosition.x, targetPosition.y), color);
             };
             for (const pos of options.linkedRoomPosition) {
                 if (options.road) linkToPosition(pos);
@@ -938,10 +960,17 @@ class Planer {
                 if (!this._unit2unit[roomName][unitType][candidatePoses[i][0] + "," + candidatePoses[i][1]]) this._unit2unit[roomName][unitType][candidatePoses[i][0] + "," + candidatePoses[i][1]] = {};
                 const cachedPoses = this._unit2unit[roomName][unitType][candidatePoses[i][0] + "," + candidatePoses[i][1]];
                 if (cachedPoses[entry] === undefined) {
-                    cachedPoses[entry] = [];
-                    for (const pos of this.units2pos[roomName][entry]) {
-                        const selectedPos = linkedUnit.FetchConnectionNodes().map(p => new RoomPosition(p[1] + pos[1], p[0] + pos[0], roomName)).sort((a,b)=>distance(a, fetchBestNode(a)) - distance(b, fetchBestNode(b)))[0];
-                        if (selectedPos) cachedPoses[entry].push(selectedPos);
+                    if (options.readFromMemory && Memory._plannerCache._unit2unit[roomName][unitType][candidatePoses[i][0] + "," + candidatePoses[i][1]] && Memory._plannerCache._unit2unit[roomName][unitType][candidatePoses[i][0] + "," + candidatePoses[i][1]][entry]) cachedPoses[entry] = Memory._plannerCache._unit2unit[roomName][unitType][candidatePoses[i][0] + "," + candidatePoses[i][1]][entry];
+                    else {
+                        cachedPoses[entry] = [];
+                        for (const pos of this.units2pos[roomName][entry]) {
+                            const selectedPos = linkedUnit.FetchConnectionNodes().map(p => new RoomPosition(p[1] + pos[1], p[0] + pos[0], roomName)).sort((a,b)=>distance(a, fetchBestNode(a)) - distance(b, fetchBestNode(b)))[0];
+                            if (selectedPos) cachedPoses[entry].push(selectedPos);
+                        }
+                        if (options.writeToMemory) {
+                            if (!Memory._plannerCache._unit2unit[roomName][unitType][candidatePoses[i][0] + "," + candidatePoses[i][1]]) Memory._plannerCache._unit2unit[roomName][unitType][candidatePoses[i][0] + "," + candidatePoses[i][1]] = {};
+                            Memory._plannerCache._unit2unit[roomName][unitType][candidatePoses[i][0] + "," + candidatePoses[i][1]][entry] = cachedPoses[entry];
+                        }
                     }
                 }
                 const chosenNodes = cachedPoses[entry];
@@ -966,11 +995,14 @@ class Planer {
      * @param {RoomPosition} posV
      */
     updateLinkedRoad(roomName, posU, posV) {
+        PathFinder.use(false);
         let path = Game.rooms[roomName].findPath(posU, posV, {
+            plainCost : 0,
+            swampCost : 0,
             ignoreCreeps : true,
             ignoreDestructibleStructures : false,
-            plainCost : 0,
-            swampCost : 0
+            avoid : this.room2avoidPoses[roomName] || [],
+            maxOps : 200
         });
         path.unshift({x : posU.x, y : posU.y, dx : 0, dy : 0, direction : null});
         this.roomRoadCache.set(roomName ,posU.x, posU.y, posV.x, posV.y, path);
@@ -1007,9 +1039,10 @@ class Planer {
      * @private
      * @param {string} roomName
      * @param {Array<PathStep} path
+     * @param {string} color
      */
-    displayRoad(roomName, path) {
-        for (let i = 1; i < path.length; ++i) new RoomVisual(roomName).line(path[i].x, path[i].y, path[i - 1].x, path[i - 1].y, {width : 0.5, color : "lightblue"});
+    displayRoad(roomName, path, color = "lightblue") {
+        for (let i = 1; i < path.length; ++i) new RoomVisual(roomName).line(path[i].x, path[i].y, path[i - 1].x, path[i - 1].y, {width : 0.5, color : color});
     }
     constructor() {
         /**
@@ -1035,7 +1068,9 @@ class Planer {
             if (!this[roomName][x_1][y_1][x_2]) this[roomName][x_1][y_1][x_2] = {};
             this[roomName][x_1][y_1][x_2][y_2] = path;
         }.bind(this.roomRoadCache);
+        const that = this;
         this.roomRoadCache.get = function(roomName, x_1, y_1, x_2, y_2) {
+            if (!this[roomName] || ((!this[roomName][x_1] || !this[roomName][x_1][y_1] || !this[roomName][x_1][y_1][x_2] || !this[roomName][x_1][y_1][x_2][y_2]) && (!this[roomName][x_2] || !this[roomName][x_2][y_2] || !this[roomName][x_2][y_2][x_1] || !this[roomName][x_2][y_2][x_1][y_1]))) that.updateLinkedRoad(roomName, new RoomPosition(x_1, y_1, roomName), new RoomPosition(x_2, y_2, roomName));
             if (this[roomName] && this[roomName][x_1] && this[roomName][x_1][y_1] && this[roomName][x_1][y_1][x_2] && this[roomName][x_1][y_1][x_2][y_2]) {
                 this[roomName][x_1][y_1][x_2][y_2].get = function(index) {
                     return this[index];
@@ -1070,6 +1105,10 @@ class Planer {
          * @type { {[roomName : string] : {[unitType : string] : {[pos : string] : {[entry : string] : RoomPosition | null}}}} }
          */
         this._unit2unit = {};
+        /**
+         * @type { {[roomName : string] : Array<RoomPosition>} }
+         */
+        this.room2avoidPoses = {};
     }
 };
 /* Room Design Type */
@@ -1105,13 +1144,13 @@ planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "towers", new Unit(
 
 planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "extensionUnit", new Unit(
     [
-        [Unit.prototype.PLACE_ANY, Unit.prototype.PLACE_ANY, STRUCTURE_ROAD, Unit.prototype.PLACE_ANY, Unit.prototype.PLACE_ANY],
-        [Unit.prototype.PLACE_ANY, STRUCTURE_ROAD, STRUCTURE_EXTENSION, STRUCTURE_ROAD, Unit.prototype.PLACE_ANY],
         [STRUCTURE_ROAD, STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, STRUCTURE_ROAD],
-        [Unit.prototype.PLACE_ANY, STRUCTURE_ROAD, STRUCTURE_EXTENSION, STRUCTURE_ROAD, Unit.prototype.PLACE_ANY],
-        [Unit.prototype.PLACE_ANY, Unit.prototype.PLACE_ANY, STRUCTURE_ROAD, Unit.prototype.PLACE_ANY, Unit.prototype.PLACE_ANY]
+        [STRUCTURE_EXTENSION, STRUCTURE_ROAD, STRUCTURE_EXTENSION, STRUCTURE_ROAD, STRUCTURE_EXTENSION],
+        [STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, STRUCTURE_ROAD, STRUCTURE_EXTENSION, STRUCTURE_EXTENSION],
+        [STRUCTURE_EXTENSION, STRUCTURE_ROAD, STRUCTURE_EXTENSION, STRUCTURE_ROAD, STRUCTURE_EXTENSION],
+        [STRUCTURE_ROAD, STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, STRUCTURE_ROAD]
     ]
-    , "extension", "🟡", "yellow", {type : "distanceSum", objects : [STRUCTURE_SPAWN, STRUCTURE_STORAGE, STRUCTURE_TERMINAL], subjects : [STRUCTURE_EXTENSION]}));
+    , "extension", "🟡", "yellow", {type : "distanceSum", objects : [STRUCTURE_SPAWN, STRUCTURE_STORAGE, STRUCTURE_TERMINAL], subjects : [STRUCTURE_EXTENSION]}, {avoidOtherToOverLapRoad : true, avoidOverLapRoad : true}));
 
 planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "labUnit", new Unit(
     [
@@ -1311,7 +1350,7 @@ class Map {
                 if (!this.planCache[roomName].feedbacks["centralSpawn"]) this.planCache[roomName].feedbacks["centralSpawn"] = {};
                 this.planCache[roomName].feedbacks["centralSpawn"] = planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "centralSpawn", {
                     display : true,
-                    tag : options.structureConstruct,
+                    tag : parseRet(this.planCache[roomName].feedbacks["centralSpawn"]["tag"]) || options.structureConstruct,
                     build : parseRet(this.planCache[roomName].feedbacks["centralSpawn"]["build"]) || (options.objectDestroy),
                     road : parseRet(this.planCache[roomName].feedbacks["centralSpawn"]["road"]) || (options.objectDestroy),
                     num : 1,
@@ -1341,11 +1380,12 @@ class Map {
                 /* Plan For StructureController's Link */
                 if (!this.planCache[roomName].feedbacks["controllerLink"]) this.planCache[roomName].feedbacks["controllerLink"] = {};
                 if (parseRet(this.planCache[roomName].feedbacks["controllerLink"][Game.rooms[roomName].controller.id]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["controllerLink"][Game.rooms[roomName].controller.id] = planForAroundLink(Game.rooms[roomName].controller, "forController");
+                doneRet(this.planCache[roomName].feedbacks["controllerLink"]);
                 /* Plan For CentralTransfer Unit */
                 if (!this.planCache[roomName].feedbacks["centralTransfer"]) this.planCache[roomName].feedbacks["centralTransfer"] = {};
                 this.planCache[roomName].feedbacks["centralTransfer"] = planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "centralTransfer", {
                     display : true,
-                    tag : options.structureConstruct,
+                    tag : parseRet(this.planCache[roomName].feedbacks["centralTransfer"]["tag"]) || options.structureConstruct,
                     build : parseRet(this.planCache[roomName].feedbacks["centralTransfer"]["build"]) || (options.objectDestroy),
                     road : parseRet(this.planCache[roomName].feedbacks["centralTransfer"]["road"]) || (options.objectDestroy),
                     num : 1,
@@ -1358,7 +1398,7 @@ class Map {
                 if (!this.planCache[roomName].feedbacks["towers"]) this.planCache[roomName].feedbacks["towers"] = {};
                 this.planCache[roomName].feedbacks["towers"] = planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "towers", {
                     display : true,
-                    tag : options.structureConstruct,
+                    tag : parseRet(this.planCache[roomName].feedbacks["towers"]["tag"]) || options.structureConstruct,
                     build : parseRet(this.planCache[roomName].feedbacks["towers"]["build"]) || (options.objectDestroy),
                     road : parseRet(this.planCache[roomName].feedbacks["towers"]["road"]) || (options.objectDestroy),
                     num : 6,
@@ -1371,7 +1411,7 @@ class Map {
                 /* Preplan for Central Lab (Reserve Space) */
                 if (!this.planCache[roomName].feedbacks["labUnit"]) this.planCache[roomName].feedbacks["labUnit"] = {};
                 this.planCache[roomName].feedbacks["labUnit"] = planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "labUnit", {
-                    tag : options.structureConstruct,
+                    tag : parseRet(this.planCache[roomName].feedbacks["labUnit"]["tag"]) || options.structureConstruct,
                     build : parseRet(this.planCache[roomName].feedbacks["labUnit"]["build"]) || (options.objectDestroy),
                     road : parseRet(this.planCache[roomName].feedbacks["labUnit"]["road"]) || (options.objectDestroy),
                     num : 1,
@@ -1379,18 +1419,56 @@ class Map {
                     writeToMemory : true,
                     readFromMemory : true
                 });
+                doneRet(this.planCache[roomName].feedbacks["labUnit"]);
+                /* Plan for Extensions */
+                if (!this.planCache[roomName].feedbacks[`extensionUnit_${0}`]) this.planCache[roomName].feedbacks[`extensionUnit_${0}`] = {};
+                this.planCache[roomName].feedbacks[`extensionUnit_${0}`] = planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "extensionUnit", {
+                    tag : parseRet(this.planCache[roomName].feedbacks["labUnit"]["tag"]) || options.structureConstruct,
+                    build : parseRet(this.planCache[roomName].feedbacks["labUnit"]["build"]) || (options.objectDestroy),
+                    road : parseRet(this.planCache[roomName].feedbacks["labUnit"]["road"]) || (options.objectDestroy),
+                    num : 1,
+                    linkedUnits : ["centralTransfer"],
+                    writeToMemory : true,
+                    readFromMemory : true,
+                    unitTypeAlias : `extensionUnit_${0}`
+                });
+                doneRet(this.planCache[roomName].feedbacks[`extensionUnit_${0}`]);
             }
             if (level >= 5) {
 
             }
             if (level >= 6) {
-
+                /* Plan for Extensions */
+                if (!this.planCache[roomName].feedbacks[`extensionUnit_${1}`]) this.planCache[roomName].feedbacks[`extensionUnit_${1}`] = {};
+                this.planCache[roomName].feedbacks[`extensionUnit_${1}`] = planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "extensionUnit", {
+                    tag : parseRet(this.planCache[roomName].feedbacks["labUnit"]["tag"]) || options.structureConstruct,
+                    build : parseRet(this.planCache[roomName].feedbacks["labUnit"]["build"]) || (options.objectDestroy),
+                    road : parseRet(this.planCache[roomName].feedbacks["labUnit"]["road"]) || (options.objectDestroy),
+                    num : 1,
+                    linkedUnits : ["centralTransfer"],
+                    writeToMemory : true,
+                    readFromMemory : true,
+                    unitTypeAlias : `extensionUnit_${1}`
+                });
+                doneRet(this.planCache[roomName].feedbacks[`extensionUnit_${1}`]);
             }
             if (level >= 7) {
 
             }
             if (level >= 8) {
-
+                /* Plan for Extensions */
+                if (!this.planCache[roomName].feedbacks[`extensionUnit_${2}`]) this.planCache[roomName].feedbacks[`extensionUnit_${2}`] = {};
+                this.planCache[roomName].feedbacks[`extensionUnit_${2}`] = planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "extensionUnit", {
+                    tag : parseRet(this.planCache[roomName].feedbacks["labUnit"]["tag"]) || options.structureConstruct,
+                    build : parseRet(this.planCache[roomName].feedbacks["labUnit"]["build"]) || (options.objectDestroy),
+                    road : parseRet(this.planCache[roomName].feedbacks["labUnit"]["road"]) || (options.objectDestroy),
+                    num : 1,
+                    linkedUnits : ["centralTransfer"],
+                    writeToMemory : true,
+                    readFromMemory : true,
+                    unitTypeAlias : `extensionUnit_${2}`
+                });
+                doneRet(this.planCache[roomName].feedbacks[`extensionUnit_${2}`]);
             }
             // DEBUG
             // console.log(JSON.stringify(planer.FetchRoomPlannedStructures(roomName, STRUCTURE_SPAWN)))
@@ -1432,6 +1510,8 @@ profiler.registerClass(Unit, "Unit");
 profiler.registerClass(MapMonitor, "MapMonitor");
 profiler.registerClass(Planer, "Planer");
 profiler.registerClass(Map, "Map");
+
+if (!Memory._plannerCache) Memory._plannerCache = {};
 
 module.exports = {
     mount : mount

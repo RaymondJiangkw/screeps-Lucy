@@ -44,6 +44,7 @@ class CreepSpawnManager {
             /* Preprossessing */
             this.room2creepSpawnsPatch[roomName][groupTag] = _.filter(this.room2creepSpawnsPatch[roomName][groupTag], a => a.IsFunctioning);
             this.room2creepSpawnsPatch[roomName][groupTag].CurrentAmount = _.sum(this.room2creepSpawnsPatch[roomName][groupTag].map(a => a.CurrentAmount));
+            // console.log(this.room2creepSpawnsPatch[roomName][groupTag].CurrentAmount, "|", this.room2creepSpawnsPatch[roomName][groupTag].map(a => a.CurrentAmount));
             this.room2creepSpawnsPatch[roomName][groupTag].MinimumAmount = _.sum(this.room2creepSpawnsPatch[roomName][groupTag].map(a => a.MinimumAmount));
         } else this.room2creepSpawnsPatch[roomName] = {};
     }
@@ -95,11 +96,12 @@ class CreepSpawnManager {
          * @returns {{[body in BodyPartConstant]? : number}}
          */
         const shrinkBodyParts = (body, maximumEnergy) => {
-            let sumOfEnergy = 0;
-            for (const bodyPart in body) sumOfEnergy += BODYPART_COST[bodyPart] * body[bodyPart];
+            if (evaluateCost(body) <= maximumEnergy) return body;
+            let sumOfEnergy = evaluateCost(body);
+            if (sumOfEnergy <= maximumEnergy) return body;
             const ret = {};
             for (const bodyPart in body) {
-                ret[bodyPart] = Math.max(1, Math.min(body[bodyPart], Math.floor(maximumEnergy * (BODYPART_COST[bodyPart] * body[bodyPart] / sumOfEnergy) / BODYPART_COST[bodyPart])));
+                ret[bodyPart] = Math.max(1, Math.min(body[bodyPart], Math.floor((maximumEnergy / sumOfEnergy) * body[bodyPart])));
             }
             return ret;
         };
@@ -112,7 +114,7 @@ class CreepSpawnManager {
             if (creepDescriptor.Mode === "static") return supplyMoveBodyParts(creepDescriptor.BodyRequirements);
             else if (creepDescriptor.Mode === "shrinkToEnergyAvailable") return shrinkBodyParts(supplyMoveBodyParts(creepDescriptor.BodyRequirements), room.energyAvailable);
             else if (creepDescriptor.Mode === "shrinkToEnergyCapacity") return shrinkBodyParts(supplyMoveBodyParts(creepDescriptor.BodyRequirements), room.energyCapacityAvailable);
-            else if (creepDescriptor.Mode === "expand") return creepDescriptor.ExpandFunction(room.energyAvailable);
+            else if (creepDescriptor.Mode === "expand") return creepDescriptor.ExpandFunction(room);
         };
         let chosen = {};
         for (const room of adjacentRooms) {

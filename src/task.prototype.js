@@ -7,39 +7,14 @@
  * @typedef {TaskDescriptor} TaskDescriptor
  * @typedef {TaskCreepDescriptor} TaskCreepDescriptor
  */
-
-/**
- * @type {import("./lucy.log").EventTaskOfObjectStatusChange}
- */
-const EventTaskOfObjectStatusChange = require("lucy.log").EventTaskOfObjectStatusChange;
-/**
- * @type {import("./lucy.log").module:lucy/log~EventTaskStatusChange}
- */
-const EventTaskStatusChange         = require("lucy.log").EventTaskStatusChange;
-/**
- * @type { (resource : ResourceConstant | "cpu") => number }
- */
-const getPrice              = require('util').getPrice;
-/**
- * @type { (posU : RoomPosition, posV : RoomPosition) => number }
- */
-const calcCrossRoomDistance = require('util').calcCrossRoomDistance;
-/**
- * @type { (posU : RoomPosition, posV : RoomPosition, room? : Room | null) => number }
- */
-const calcInRoomDistance    = require('util').calcInRoomDistance;
-/**
- * @type { (obj : GameObject) => boolean }
- */
-const isCreep               = require('util').isCreep;
-/**
- * @type { (obj : GameObject) => boolean }
- */
-const isStructure           = require('util').isStructure;
-/**
- * @type { (obj : import("./task.prototype").GameObject) => Boolean }
- */
-const isConstructionSite    =   require('util').isConstructionSite;
+const EventTaskOfObjectStatusChange = require("./lucy.log").EventTaskOfObjectStatusChange;
+const EventTaskStatusChange         = require("./lucy.log").EventTaskStatusChange;
+const getPrice                      = require('./util').getPrice;
+const calcCrossRoomDistance         = require('./util').calcCrossRoomDistance;
+const calcInRoomDistance            = require('./util').calcInRoomDistance;
+const isCreep                       = require('./util').isCreep;
+const isStructure                   = require('./util').isStructure;
+const isConstructionSite            = require('./util').isConstructionSite;
 const profiler = require("./screeps-profiler");
 /**
  * @type { {[id : string] : Task} }
@@ -114,9 +89,9 @@ function mountEveryTick() {
  * Class representing a Descriptor for Task.
  * @TODO
  * Support abstract task-taken objects.
- * @typedef {"static" | "expand" | "shrinkToEnergyAvailable" | "shrinkToEnergyCapacity"} CreepSpawnMode
+ * @typedef {"static" | "expand" | "shrinkToEnergyAvailable" | "shrinkToEnergyCapacity"} CreepSpawnMode Notice that in "expand" mode, only `tag` will be considered.
  * @typedef { { minimumNumber : number, maximumNumber : number, estimateProfitPerTurn : (object : GameObject) => number, estimateWorkingTicks : (object : GameObject) => number, tag ? : string, groupTag ? : string, allowEmptyTag ? : boolean, allowOtherTags ? : Array<string>} } CommonRoleDescription `tag` is used for hiring specific `creep`. Those creeps with defined tag will not be hired into `role` without tag. `groupTag` is used to control the spawning of creeps.
- * @typedef { { bodyMinimumRequirements : {[body in BodyPartConstant]? : number}, bodyBoostRequirements? : {[body in BodyPartConstant]? : { [compound in ResourceConstant]? : number }}, expandFunction? : (availableEnergy : number) => {[body in BodyPartConstant]? : number}, mode? : CreepSpawnMode, confinedInRoom? : boolean, workingPos? : RoomPosition } & CommonRoleDescription } CreepRoleDescription
+ * @typedef { { bodyMinimumRequirements : {[body in BodyPartConstant]? : number}, bodyBoostRequirements? : {[body in BodyPartConstant]? : { [compound in ResourceConstant]? : number }}, expandFunction? : (room : Room) => {[body in BodyPartConstant]? : number}, mode? : CreepSpawnMode, confinedInRoom? : boolean, workingPos? : RoomPosition } & CommonRoleDescription } CreepRoleDescription
  * `expandFunction` allows much more flexibility into the setup for bodies of creeps, since it sets up the upper line instead of the bottom line and can adjust the body settings according to instant condition in the room. NOTICE : `move` parts should be specified. Values in `bodyBoostRequirements` are interpreted as ratio between satisfied bodyparts and total bodyparts. Higher level compound is calculated at higher priority, while bodypart with higher level compound is compatible with requirement of lower level compound, if it is not counted.
  * @typedef { { isSatisfied : (object : GameObject) => Boolean} & CommonRoleDescription } ObjectRoleDescription - Exclude Creep
  * @typedef { {[role : string] : CreepRoleDescription | ObjectRoleDescription } } RoleDescription
@@ -172,6 +147,13 @@ class TaskDescriptor {
                     return false;
                 }
                 if (!((object.memory.tag === undefined && this.roleDescription[role].allowEmptyTag) || object.memory.tag === this.roleDescription[role].tag || (this.roleDescription[role].allowOtherTags || []).indexOf(object.memory.tag) !== -1) || !this.isBodySatisfied(object, role, true)) return false;
+            } else if (this.roleDescription[role].mode && this.roleDescription[role].mode === "expand") {
+                if (!this.roleDescription[role].tag) {
+                    console.log(`<p style="display:inline;color:red;">Error:</p> For role "${role}" whose mode is "expand", the tag of it could not be empty.`);
+                    return false;
+                }
+                if (object.memory.tag === this.roleDescription[role].tag) return true;
+                else return false;
             } else {
                 // Checking whether `role` is intended to be taken by creep is incorporated in `isBodySatisfied`
                 if (!this.isBodySatisfied(object, role)) return false;
@@ -293,7 +275,7 @@ class TaskCreepDescriptor {
          * @private
          */
         this.boundTask = task;
-        if (!this.boundTask.Descriptor.RoleDescription[role] || !this.boundTask.Descriptor.RoleDescription[role].bodyMinimumRequirements) console.log(`<p style="color:red;display:inline;">Fail to create creep descriptor for Role : ${role} of Task : ${task}</p>`);
+        if (!this.boundTask.Descriptor.RoleDescription[role] || (!this.boundTask.Descriptor.RoleDescription[role].bodyMinimumRequirements && !this.boundTask.Descriptor.RoleDescription[role].expandFunction)) console.log(`<p style="color:red;display:inline;">Fail to create creep descriptor for Role : ${role} of Task : ${task}</p>`);
         /**
          * @private
          */
@@ -456,18 +438,20 @@ class Task {
         return this.roles[role];
     }
     /**
+     * @param { string } name
      * @param { string } mountRoomName
      * @param { GameObject } mountObj
      * @param { TaskDescriptor } descriptor
      * @param { {selfCheck: () => "working" | "dead", run: import("./task.modules").Project | () => Array<GameObject>, calcCommutingTicks? : (obj : GameObject) => number } } [funcs] calcCommutingTicks will only be used when !`mountObj` or !`mountObj.pos` or !`obj` or `obj.pos`
      * @param { {} } data
      */
-    constructor(mountRoomName, mountObj, descriptor, funcs, data = {}) {
+    constructor(name, mountRoomName, mountObj, descriptor, funcs, data = {}) {
         _.defaults(funcs, {
             selfCheck: () => "dead",
             run : () => [],
             calcCommutingTicks: () => Infinity
         });
+        if (typeof funcs.run === "function") funcs.run = profiler.registerFN(funcs.run, name);
         /**
          * @private
          * Double-Bind
@@ -593,7 +577,7 @@ class Task {
          */
         for (const role in this.descriptor.RoleDescription) {
             /* Creep Role */
-            if (this.descriptor.RoleDescription[role].bodyMinimumRequirements) {
+            if (this.descriptor.RoleDescription[role].bodyMinimumRequirements || this.descriptor.RoleDescription[role].expandFunction) {
                 global.CreepSpawnManager.Register({creepDescriptor : new TaskCreepDescriptor(this, role, this.descriptor.RoleDescription[role].groupTag), roomName : this.mountRoomName});
             }
             /**

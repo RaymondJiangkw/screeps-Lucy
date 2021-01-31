@@ -31,9 +31,9 @@ module.exports = function() {
         money_mount();
         task_mount();
         rooms_behaviors_mount();
+        creeps_behaviors_mount();
         resources_behaviors_mount();
         structures_behaviors_mount();
-        creeps_behaviors_mount();
     }
     /**
      * Mount of Game should be executed at every tick, since Game is refreshed at every tick.

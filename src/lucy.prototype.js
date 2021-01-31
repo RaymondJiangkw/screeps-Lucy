@@ -102,7 +102,8 @@ function $() {
          * @type {import("./lucy.log").Event}
          */
         let hotEvent = null;
-        while ((hotEvent = this.HotPoolTop)) {
+        while ((hotEvent = this.Logs.HotPoolTop)) {
+            // console.log(hotEvent.Type, hotEvent.Status, hotEvent.Obj);
             if (hotEvent.Type === EVENT_TYPES.TASK_OF_OBJECT_STATUS_CHANGE) {
                 if (hotEvent.Status === "fired") {
                     /**

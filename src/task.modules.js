@@ -322,7 +322,8 @@ function ConstructWithdrawHarvestResourceComponent(resourceType) {
         // console.log(`${object} : ${target}`);
         if (!target) return ConstructSignal(ERR_INVALID_ARGS, attachedData);
         if (!object.store) return ConstructSignal(ERR_INVALID_ARGS, attachedData);
-        if (object.store.getFreeCapacity() === 0) return ConstructSignal(OK, attachedData);
+        const checkForFreeStore = require('./util').checkForFreeStore;
+        if (checkForFreeStore(object) === 0) return ConstructSignal(OK, attachedData);
         if (checkForStore(target, attachedData.resourceType || resourceType) === 0) return ConstructSignal(ERR_NOT_ENOUGH_RESOURCES, attachedData);
         if (isHarvestable(target)) {
             object.harvest(target);
@@ -386,13 +387,15 @@ function ConstructStaticTargetComponent(targetId, key = "targetId") {
 }
 /**
  * @param {Function} func
+ * @param {string} [targetKey = "targetId"]
+ * @param {string} [paramKey = "params"]
  */
-function ConstructDoSomethingComponent(func) {
+function ConstructDoSomethingComponent(func, targetKey = "targetId", paramKey = "params") {
     const component = new Component(function(object, task) {
         const attachedData = this.attachedData[object.id] || {};
-        const target = Game.getObjectById(attachedData.targetId);
+        const target = Game.getObjectById(attachedData[targetKey]);
         if (!target) return ConstructSignal(ERR_INVALID_ARGS, attachedData);
-        const ret = func.apply(object, [target].concat(attachedData.params || []));
+        const ret = func.apply(object, [target].concat(attachedData[paramKey] || []));
         if (ret === OK) return null;
         else return ConstructSignal(ret, attachedData);
     });

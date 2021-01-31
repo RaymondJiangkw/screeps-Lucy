@@ -13,15 +13,21 @@ function giveContainerBehaviors() {
      */
     StructureContainer.prototype.register = function() {
         /* Register */
-        let storingResourceType = null;
-        if (this.memory.tag === global.Lucy.Rules.arrangements.SPAWN_ONLY) storingResourceType = RESOURCE_ENERGY;
-        else if (this.memory.tag === "forSource") storingResourceType = RESOURCE_ENERGY;
-        else if (this.memory.tag === "forMineral") storingResourceType = room.mineral.mineralType;
+        let storingResourceTypes = [];
+        if (this.memory.tag === global.Lucy.Rules.arrangements.SPAWN_ONLY) storingResourceTypes = [RESOURCE_ENERGY];
+        else if (this.memory.tag === "forSource") storingResourceTypes = [RESOURCE_ENERGY];
+        else if (this.memory.tag === "forMineral") storingResourceTypes = [room.mineral.mineralType];
+        else if (this.memory.tag === "labs") storingResourceTypes = Object.keys(REACTION_TIME);
         else console.log(`<p style="display:inline;color:red;">Error:</p> Unable to recognize container ${this} whose tag is ${this.memory.tag}`);
-        if (storingResourceType) global.ResourceManager.Register(new ResourceDescriptor(this, RESOURCE_POSSESSING_TYPES.STORING, storingResourceType, this.memory.tag === global.Lucy.Rules.arrangements.SPAWN_ONLY? global.Lucy.Rules.arrangements.SPAWN_ONLY : "default", function(container) {
-            return container.store[this.resourceType];
-        }));
-        /* Register for Storing Additional Energy */
+        if (storingResourceTypes.length > 0) {
+            for (const storingResourceType of storingResourceTypes) {
+                global.ResourceManager.Register(new ResourceDescriptor(this, RESOURCE_POSSESSING_TYPES.STORING, storingResourceType, this.memory.tag === global.Lucy.Rules.arrangements.SPAWN_ONLY? global.Lucy.Rules.arrangements.SPAWN_ONLY : "default", function(container) {
+                    return container.store[this.resourceType];
+                }));
+            }
+        }
+        /* Register for Storing Additional Resources */
+        // NOTICE : `labs` tagged containers are not used for actively storing additional resources. Their input is solely determined by `unboost`.
         // "default" enables containers to be found by searching structures for storing energy.
         if (this.memory.tag === global.Lucy.Rules.arrangements.SPAWN_ONLY) global.ResourceManager.Register(new StoringDescriptor(this, RESOURCE_ENERGY, "default", function (container) {
             return container.store.getFreeCapacity(RESOURCE_ENERGY);

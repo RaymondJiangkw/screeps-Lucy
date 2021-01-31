@@ -86,7 +86,7 @@ function giveSpawnBehaviors() {
                         [MOVE] : 16
                     };
                 }
-                new Task(this.pos.roomName, this, new TaskDescriptor(Lucy.Rules.arrangements.SPAWN_ONLY, {
+                new Task(`[${this.room.name}:nearSpawnEnergyFilling]`, this.pos.roomName, this, new TaskDescriptor(Lucy.Rules.arrangements.SPAWN_ONLY, {
                     worker : {
                         minimumNumber : 1,
                         maximumNumber : Infinity,
@@ -194,7 +194,12 @@ function giveSpawnBehaviors() {
          * General Filling, which will fill those near spawns, but at lower priorities.
          */
         const issueFarFromSpawnEnergyFilling = function() {
-            const farFromSpawnExtensions = _.filter(this.room.extensions, e => e.memory.tag !== global.Lucy.Rules.arrangements.SPAWN_ONLY);
+            let includeTransferExtension = false;
+            if (this.room.centralTransfer.Extension && this.room.centralTransfer.Extension.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+                if (!this.room.centralTransfer.GetFetchStructure(RESOURCE_ENERGY)) includeTransferExtension = true;
+                else this.room.centralTransfer.PushOrder({from : "any", to : STRUCTURE_EXTENSION, resourceType : RESOURCE_ENERGY, amount : this.room.centralTransfer.Extension.store.getFreeCapacity(RESOURCE_ENERGY)});
+            }
+            const farFromSpawnExtensions = _.filter(this.room.extensions, e => e.memory.tag !== global.Lucy.Rules.arrangements.SPAWN_ONLY && (e.memory.tag !== global.Lucy.Rules.arrangements.TRANSFER_ONLY || (e.memory.tag === global.Lucy.Rules.arrangements.TRANSFER_ONLY && includeTransferExtension)));
             const farFromSpawnExtensionsLackingEnergy = _.sum(farFromSpawnExtensions.map(e => e.store.getCapacity(RESOURCE_ENERGY) - e.store.getUsedCapacity(RESOURCE_ENERGY)));
             if (!farFromSpawnExtensionsLackingEnergy) return;
             /**
@@ -227,7 +232,7 @@ function giveSpawnBehaviors() {
                     [MOVE] : 16
                 };
             }
-            new Task(this.pos.roomName, this, new TaskDescriptor(Lucy.Rules.arrangements.SPAWN_ONLY, {
+            new Task(`[${this.room.name}:farFromSpawnEnergyFilling]`, this.pos.roomName, this, new TaskDescriptor(Lucy.Rules.arrangements.SPAWN_ONLY, {
                 worker : {
                     minimumNumber : 1,
                     maximumNumber : Infinity,
@@ -253,7 +258,12 @@ function giveSpawnBehaviors() {
                 selfCheck : function() {
                     const _selfCheck = function() {
                         if (!this.mountObj || !Game.getObjectById(this.taskData.targetId)) return "dead";
-                        const farFromSpawnExtensions = _.filter(this.mountObj.room.extensions, e => e.memory.tag !== global.Lucy.Rules.arrangements.SPAWN_ONLY);
+                        let includeTransferExtension = false;
+                        if (this.mountObj.room.centralTransfer.Extension && this.mountObj.room.centralTransfer.Extension.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+                            if (!this.mountObj.room.centralTransfer.GetFetchStructure(RESOURCE_ENERGY)) includeTransferExtension = true;
+                            else this.mountObj.room.centralTransfer.PushOrder({from : "any", to : STRUCTURE_EXTENSION, resourceType : RESOURCE_ENERGY, amount : this.mountObj.room.centralTransfer.Extension.store.getFreeCapacity(RESOURCE_ENERGY)});
+                        }
+                        const farFromSpawnExtensions = _.filter(this.mountObj.room.extensions, e => e.memory.tag !== global.Lucy.Rules.arrangements.SPAWN_ONLY && (e.memory.tag !== global.Lucy.Rules.arrangements.TRANSFER_ONLY || (e.memory.tag === global.Lucy.Rules.arrangements.TRANSFER_ONLY && includeTransferExtension)));
                         const farFromSpawnExtensionsLackingEnergy = _.sum(farFromSpawnExtensions.map(e => e.store.getCapacity(RESOURCE_ENERGY) - e.store.getUsedCapacity(RESOURCE_ENERGY)));
                         if (farFromSpawnExtensionsLackingEnergy > 0 && checkForStore(Game.getObjectById(this.taskData.targetId), RESOURCE_ENERGY) === 0) {
                             Lucy.Timer.add(Game.time + getCacheExpiration(nextFillingTIMEOUT, nextFillingOFFSET), issueFarFromSpawnEnergyFilling, this.mountObj.id, [], "Filling Energies for far-from-spawn Structures");
@@ -371,7 +381,12 @@ function giveControllerBehaviors() {
         /**
          * Decide whether needs to upgrade Controller is done in `selfCheck` because of automatic downgrading.
          */
-        // if (this.level === maximumLevel && this.ticksToDowngrade > CREEP_LIFE_TIME) return;
+        if (this.level === maximumLevel && this.ticksToDowngrade > CREEP_LIFE_TIME * 5) {
+            /* Because of the threat of downgrading, still, there should arrange scheduled recheck task */
+            const nextTaskStartedTick = Game.time + getCacheExpiration(Math.max(this.ticksToDowngrade - 5 * CREEP_LIFE_TIME, nextUpgradeTIMEOUT), nextUpgradeOFFSET);
+            Lucy.Timer.add(nextTaskStartedTick, this.triggerUpgrading, this.id, [], `Upgrading Controller of Room ${this.room.name}`);
+            return;
+        }
         /**
          * @type {(amount : number) => Source | StructureContainer | StructureStorage | StructureLink}
          */
@@ -383,7 +398,7 @@ function giveControllerBehaviors() {
         /* Use Data to Determine Body */
         const availableEnergy = global.ResourceManager.Sum(this.pos.roomName, RESOURCE_ENERGY, {type : "retrieve", allowToHarvest : false, key : Lucy.Rules.arrangements.UPGRADE_ONLY});
         const energyConsumptionPerUnitPerTick = 1;
-        new Task(this.pos.roomName, this, new TaskDescriptor("default", {
+        new Task(`[${this.room.name}:ControllerUpgrade]`, this.pos.roomName, this, new TaskDescriptor("default", {
             worker : {
                 minimumNumber : 1,
                 maximumNumber : global.MapMonitorManager.FetchVacantSpaceCnt(this.pos.roomName, Math.max(this.pos.y - 1, 1), Math.max(this.pos.x - 1, 1), Math.min(this.pos.y + 1, 48), Math.min(this.pos.x + 1, 48)),
@@ -391,11 +406,11 @@ function giveControllerBehaviors() {
                     function (object) {
                         /* At least one creep should upgrade Controller in order to avoid downgrading. */
                         if (this.EmployeeAmount === 0) return Infinity;
-                        else return getPrice("energy") * object.store.getCapacity();
+                        else return -Infinity;
                     },
                 estimateWorkingTicks :
                     (object) => object.store.getCapacity() / (evaluateAbility(object, "upgradeController")),
-                bodyMinimumRequirements : bodyPartDetermination({type : "exhuastEnergy", availableEnergy, energyConsumptionPerUnitPerTick}),
+                bodyMinimumRequirements : bodyPartDetermination({type : "exhuastEnergy", availableEnergy, energyConsumptionPerUnitPerTick, sustainTick : global.MapMonitorManager.FetchStructureWithTag(this.room.name, "forController", STRUCTURE_LINK).length > 0 ? 1 : undefined}),
                 tag : `${energyConsumptionPerUnitPerTick}-worker`,
                 allowEmptyTag : true,
                 mode : "shrinkToEnergyAvailable",
@@ -414,7 +429,7 @@ function giveControllerBehaviors() {
                 /* Achieve Desired Goal */
                 if (this.mountObj.level === maximumLevel && CONTROLLER_DOWNGRADE[maximumLevel] - this.mountObj.ticksToDowngrade <= satisfiedDownGradeGap) {
                     /* Because of the threat of downgrading, still, there should arrange scheduled recheck task */
-                    const nextTaskStartedTick = Game.time + getCacheExpiration(Math.max(this.mountObj.ticksToDowngrade - satisfiedDownGradeGap, nextUpgradeTIMEOUT), nextUpgradeOFFSET);
+                    const nextTaskStartedTick = Game.time + getCacheExpiration(Math.max(this.mountObj.ticksToDowngrade - 5 * CREEP_LIFE_TIME, nextUpgradeTIMEOUT), nextUpgradeOFFSET);
                     Lucy.Timer.add(nextTaskStartedTick, this.mountObj.triggerUpgrading, this.mountObj.id, [], `Upgrading Controller of Room ${this.mountObj.room.name}`);
                     console.log(`<p style="color:gray;display:inline;">[Log]</p> "Upgrading Controller" task in ${this.mountObj.room.name} finished. New one is scheduled at ${nextTaskStartedTick}.`);
                     return "dead";
@@ -442,7 +457,7 @@ function giveConstructionSiteBehaviors() {
         /* Use Data to Determine Body */
         const availableEnergy = global.ResourceManager.Sum(this.pos.roomName, RESOURCE_ENERGY, {type : "retrieve", allowToHarvest : false, key : Lucy.Rules.arrangements.BUILD_ONLY});
         const energyConsumptionPerUnitPerTick = 5;
-        new Task(this.pos.roomName, this, new TaskDescriptor("Construct", {
+        new Task(`[${this.room.name}:ConstructionSitesBuild]`, this.pos.roomName, this, new TaskDescriptor("Construct", {
             worker : {
                 minimumNumber : 1,
                 maximumNumber : Infinity,
@@ -500,7 +515,7 @@ function giveRoadBehaviors() {
         /* Use Data to Determine Body */
         const availableEnergy = global.ResourceManager.Sum(this.pos.roomName, RESOURCE_ENERGY, {type : "retrieve", allowToHarvest : false, key : "default"});
         const energyConsumptionPerUnitPerTick = 1;
-        new Task(this.pos.roomName, this, new TaskDescriptor("Repair", {
+        new Task(`[${this.room.name}:RoadRepair]`, this.pos.roomName, this, new TaskDescriptor("Repair", {
             worker : {
                 minimumNumber : 1,
                 maximumNumber : 1,
@@ -566,7 +581,7 @@ function giveContainerBehaviors() {
         /* Use Data to Determine Body */
         const availableEnergy = global.ResourceManager.Sum(this.pos.roomName, RESOURCE_ENERGY, {type : "retrieve", allowToHarvest : false, key : "default"});
         const energyConsumptionPerUnitPerTick = 1;
-        new Task(this.pos.roomName, this, new TaskDescriptor("Repair", {
+        new Task(`[${this.room.name}:ContainerRepair]`, this.pos.roomName, this, new TaskDescriptor("Repair", {
             worker : {
                 minimumNumber : 1,
                 maximumNumber : 1,
@@ -606,7 +621,7 @@ function giveContainerBehaviors() {
     StructureContainer.prototype.triggerHarvesting = function() {
         let target = null;
         if (this.memory.tag === "forSource") {
-            target = this.room.energies.filter(e => e.pos.getRangeTo(this.pos) === 1)[0];
+            target = this.room.energies.filter(e => e.pos.getRangeTo(this.pos) === 1)[0] || null;
         } else if (this.memory.tag === "forMineral") {
             if (!this.room[STRUCTURE_EXTRACTOR]) return;
             target = this.room.mineral;
@@ -623,7 +638,7 @@ function giveContainerBehaviors() {
          */
         const workBodyParts = isMineral(target) ? 5 : (evaluateSource(target) / 300 / 2);
         /* No Transaction should be dealt here */
-        new Task(this.room.name, target, new TaskDescriptor("default", {
+        new Task(`[${this.room.name}:${this.memory.tag}Harvest]`, this.room.name, target, new TaskDescriptor("default", {
             worker : {
                 minimumNumber : 1,
                 maximumNumber : 1,
@@ -663,23 +678,23 @@ function giveContainerBehaviors() {
                 }
                 return "working";
             },
-            run :
-                new Project()
-                    .InsertLayer({[OK] : Constructors.ConstructStaticTargetComponent(this.id)})
-                    .InsertLayer({[OK] : Constructors.ConstructMoveToComponent(0)})
-                    .InsertLayer({[OK] : Constructors.ConstructStaticTargetComponent(target.id)})
-                    .InsertLayer({[OK] : Constructors.ConstructStaticTargetComponent(this.id, "storeId")})
-                    .InsertLayer({[OK] :
-                        new Project()
-                            .InsertLayer({[OK] : Constructors.ConstructObjectStoreFullCheckComponent(target.mineralType || RESOURCE_ENERGY)})
-                            .InsertLayer({
-                                [ERR_NOT_ENOUGH_RESOURCES] : Constructors.ConstructDoSomethingComponent(Creep.prototype.harvest),
-                                [OK] : Constructors.ConstructNullComponent()
-                            })
-                            .InsertLayer({[ERR_FULL] : Constructors.ConstructNullComponent()})
-                            .Mode("refresh")
-                        })
-        }, { containerId : this.id });
+            run : // Because of StructureLink, function is used here.
+                function() {
+                    /** @type {Creep} */
+                    const worker = Object.keys(this.employee2role).map(Game.getObjectById)[0];
+                    if (!worker) return [];
+                    /** @type {StructureContainer} */
+                    const container = Game.getObjectById(this.taskData.containerId);
+                    /** @type {Source | Mineral} */
+                    const target = Game.getObjectById(this.taskData.targetId);
+                    /** @type {StructureLink | null} */
+                    const link = this.taskData.tag === "forSource" ? global.MapMonitorManager.FetchStructureWithTag(container.pos.roomName, "forSource", STRUCTURE_LINK).filter(l => l.pos.getRangeTo(container) === 1)[0] || null : null;
+                    if (worker.pos.getRangeTo(container) !== 0) worker.travelTo(container);
+                    if (link && link.store.getFreeCapacity(RESOURCE_ENERGY) > 0) worker.transfer(link, RESOURCE_ENERGY);
+                    if (container.store.getFreeCapacity(RESOURCE_ENERGY) > 0 || worker.store.getFreeCapacity(RESOURCE_ENERGY) > 0) worker.harvest(target);
+                    return [];
+                }
+        }, { containerId : this.id, targetId : target.id, tag : this.memory.tag });
     };
     const FILLING_ENERGY = "fillingEnergy";
     StructureContainer.prototype.triggerFillingEnergy = function() {
@@ -705,7 +720,7 @@ function giveContainerBehaviors() {
             Lucy.Timer.add(nextTaskStartedTick, this.triggerFillingEnergy, this.id, [], `Fast-Filling Energy for ${this}`);
             return;
         }
-        new Task(this.pos.roomName, this, new TaskDescriptor("default", {
+        new Task(`[${this.room.name}:SpawnContainerEnergyFilling]`, this.pos.roomName, this, new TaskDescriptor("default", {
             worker : {
                 minimumNumber : 1,
                 maximumNumber : Infinity,
@@ -781,7 +796,7 @@ function giveTowerBehaviors() {
                 [MOVE] : 16
             };
         }
-        new Task(this.pos.roomName, this, new TaskDescriptor("forDefense",{
+        new Task(`[${this.room.name}:TowerEnergyFilling]`, this.pos.roomName, this, new TaskDescriptor("forDefense",{
             worker : {
                 minimumNumber : 1,
                 maximumNumber : 1,
@@ -815,6 +830,10 @@ function giveTowerBehaviors() {
 function giveStorageBehaviors() {
     const FILLING_ENERGY = "fillingEnergy";
     const FILLING_MINERAL = "fillingMineral";
+    /**
+     * @todo
+     * Need more robust function, considering centralTransferUnit.
+     */
     StructureStorage.prototype.trigger = function() {
         this.triggerFillingEnergy();
         this.triggerFillingMineral();
@@ -843,7 +862,7 @@ function giveStorageBehaviors() {
             Lucy.Timer.add(nextTaskStartedTick, this.triggerFillingMineral, this.id, [], `Filling Mineral for ${this}`);
             return;
         }
-        new Task(this.pos.roomName, this, new TaskDescriptor("default", {
+        new Task(`[${this.room.name}:StorageMineralFilling]`, this.pos.roomName, this, new TaskDescriptor("default", {
             worker : {
                 minimumNumber : 1,
                 maximumNumber : Infinity,
@@ -903,7 +922,7 @@ function giveStorageBehaviors() {
             Lucy.Timer.add(nextTaskStartedTick, this.triggerFillingEnergy, this.id, [], `Filling Energy for ${this}`);
             return;
         }
-        new Task(this.pos.roomName, this, new TaskDescriptor("default", {
+        new Task(`[${this.room.name}:StorageEnergyFilling]`, this.pos.roomName, this, new TaskDescriptor("default", {
             worker : {
                 minimumNumber : 1,
                 maximumNumber : Infinity,

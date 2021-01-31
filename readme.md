@@ -16,4 +16,6 @@
     - Periodical or Computation-oriented Recycle.
 - Fast Energy-Filling
     - Imitate the layout of `tigga`.
+- Central Transfer Unit
+    - Enable flexible and fast transferring of Resources
 - *Flag Trigger* (Under Development ⛏️)

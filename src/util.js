@@ -191,8 +191,13 @@ module.exports = {
      */
     checkForFreeStore : function(obj, resourceType) {
         if (obj.store) {
-            if (!resourceType) return obj.store.getFreeCapacity();
-            else return obj.store.getFreeCapacity(resourceType) || 0;
+            if (!resourceType) {
+                if (obj.structureType) {
+                    if (obj.structureType === STRUCTURE_LINK) return obj.store.getFreeCapacity(RESOURCE_ENERGY);
+                    else if (obj.structureType === STRUCTURE_EXTENSION) return obj.store.getFreeCapacity(RESOURCE_ENERGY);
+                }
+                return obj.store.getFreeCapacity();
+            } else return obj.store.getFreeCapacity(resourceType) || 0;
         }
         return 0;
     },
@@ -318,13 +323,18 @@ module.exports = {
     },
     /**
      * @TODO Consider Boosts
-     * @param { {type : "exhuastEnergy", availableEnergy : number, energyConsumptionPerUnitPerTick : number} } mode
+     * @param { {type : "exhuastEnergy", availableEnergy : number, energyConsumptionPerUnitPerTick : number, sustainTick? : number} } mode
      * @returns { {[bodypart in BodyPartConstant]? : number} }
      */
     bodyPartDetermination(mode) {
         if (mode.type === "exhuastEnergy") {
+            /* Capacity of a single CARRY */
+            const CARRY_CAPACITY = 50;
+            /* Number of bodyparts a MOVE can boost */
+            const MOVE_COEFFICIENT = 2;
             const availableEnergy = mode.availableEnergy;
             const energyConsumptionPerUnitPerTick = mode.energyConsumptionPerUnitPerTick;
+            const sustainTick = mode.sustainTick || (CARRY_CAPACITY / energyConsumptionPerUnitPerTick);
             /**
              * [WORK] : x
              * [CARRY] : y = x * energyConsumptionPerUnitPerTick / 50
@@ -347,21 +357,19 @@ module.exports = {
              *      x >= Math.max(1, Math.floor(50 / c)) && x <= Math.min(Math.floor(50 / 1.5 / (1 + c / 50)), Math.floor(availableEnergy / 1500 / c))
              *      Notice : x >= 1 && y >= 1 is guaranteed in a different way, in practice.
              */
-            /* Capacity of a single CARRY */
-            const CARRY_CAPACITY = 50;
-            /* Number of bodyparts a MOVE can boost */
-            const MOVE_COEFFICIENT = 2;
             const work = Math.min(Math.floor(50 / (1 + 1 / MOVE_COEFFICIENT) / (1 + energyConsumptionPerUnitPerTick / CARRY_CAPACITY)), Math.floor(availableEnergy / CREEP_LIFE_TIME / energyConsumptionPerUnitPerTick));
-            const carry = Math.floor(work * energyConsumptionPerUnitPerTick / CARRY_CAPACITY);
+            const carry = Math.floor(work * energyConsumptionPerUnitPerTick * sustainTick / CARRY_CAPACITY);
             // In fact, MOVE >= 2 would be a better option, despite some loss of accuracy.
             // It allows much more flexibility.
             const workNum = work >= 1 ? work : 1;
             const carryNum = carry >= 1 ? carry : 1;
-            const moveNum = Math.min(50 - workNum - carryNum, Math.max(2, Math.ceil((workNum + carryNum) / MOVE_COEFFICIENT)));
+            const moveNum = Math.max(2, Math.ceil((workNum + carryNum) / MOVE_COEFFICIENT));
+            /* Shrink to 50 BODYPARTS */
+            const sumOfBodyParts = workNum + carryNum + moveNum;
             return {
-                [WORK] : workNum,
-                [CARRY] : carryNum,
-                [MOVE] : moveNum
+                [WORK] : Math.floor(workNum * Math.min(50 / sumOfBodyParts, 1)),
+                [CARRY] : Math.floor(carryNum * Math.min(50 / sumOfBodyParts, 1)),
+                [MOVE] : Math.floor(moveNum * Math.min(50 / sumOfBodyParts, 1))
             };
         }
     }
