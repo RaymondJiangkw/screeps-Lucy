@@ -1379,7 +1379,7 @@ class Map {
             if (level >= 3) {
                 /* Plan For StructureController's Link */
                 if (!this.planCache[roomName].feedbacks["controllerLink"]) this.planCache[roomName].feedbacks["controllerLink"] = {};
-                if (parseRet(this.planCache[roomName].feedbacks["controllerLink"][Game.rooms[roomName].controller.id]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["controllerLink"][Game.rooms[roomName].controller.id] = planForAroundLink(Game.rooms[roomName].controller, "forController");
+                if (parseRet(this.planCache[roomName].feedbacks["controllerLink"][Game.rooms[roomName].controller.id]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["controllerLink"][Game.rooms[roomName].controller.id] = planForAroundLink(Game.rooms[roomName].controller, global.Lucy.Rules.arrangements.UPGRADE_ONLY);
                 doneRet(this.planCache[roomName].feedbacks["controllerLink"]);
                 /* Plan For CentralTransfer Unit */
                 if (!this.planCache[roomName].feedbacks["centralTransfer"]) this.planCache[roomName].feedbacks["centralTransfer"] = {};

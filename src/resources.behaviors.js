@@ -36,19 +36,32 @@ function giveContainerBehaviors() {
 }
 function giveStorageBehaviors() {
     StructureStorage.prototype.register = function() {
-        global.ResourceManager.Register(new StoringDescriptor(this, "all", "default", function (storage) {
-            return storage.store.getFreeCapacity();
-        }));
+        for (const resourceType of RESOURCES_ALL) {
+            global.ResourceManager.Register(new StoringDescriptor(this, resourceType, "default", function (storage) {
+                return storage.store.getFreeCapacity(this.resourceType);
+            }));
+        }
         for (const resourceType of RESOURCES_ALL) {
             global.ResourceManager.Register(new ResourceDescriptor(this, RESOURCE_POSSESSING_TYPES.STORING, resourceType, "default", function (storage) {
                 return storage.store[this.resourceType];
             }));
         }
-    }
+    };
+}
+function giveLinkBehaviors() {
+    StructureLink.prototype.register = function() {
+        if (this.memory.tag === global.Lucy.Rules.arrangements.UPGRADE_ONLY) {
+            global.ResourceManager.Register(new ResourceDescriptor(this, RESOURCE_POSSESSING_TYPES.STORING, RESOURCE_ENERGY, Lucy.Rules.arrangements.UPGRADE_ONLY, function (link) {
+                return link.store[RESOURCE_ENERGY];
+            }));
+        }
+        global.LinkManager.Register(this);
+    };
 }
 function mount() {
     giveContainerBehaviors();
     giveStorageBehaviors();
+    giveLinkBehaviors();
     /**
      * @type {import('./manager.resources').ResourceManager}
      */
@@ -68,6 +81,7 @@ function mount() {
              */
             room["containers"].forEach(c => c.register());
             if (room.storage) room.storage.register();
+            room["links"].forEach(l => l.register());
         }
     }
 }

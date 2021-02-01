@@ -20,6 +20,7 @@ const task_mountEveryTick                   = require("./task.prototype").mountE
 global.TaskManager                          = new (require('./manager.tasks').TaskManager)();
 global.ResourceManager                      = new (require('./manager.resources').ResourceManager)();
 global.CreepSpawnManager                    = new (require('./manager.creeps').CreepSpawnManager)();
+global.LinkManager                          = new (require('./manager.links').LinkManager)();
 module.exports = function() {
     if (!global.mounted) {
         console.log(`<p style="color:red;display:inline;">[mount]</p> Successfully Remount.`);

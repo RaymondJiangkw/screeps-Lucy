@@ -36,6 +36,10 @@ class CentralSpawnUnit {
         else if (key === "extensions") return this.signals.extensions;
         else return this.signals.extensions[key];
     }
+    /** @returns {StructureLink | null} */
+    get Link() {
+        return global.MapMonitorManager.FetchStructureWithTag(this.room.name, global.Lucy.Rules.arrangements.SPAWN_ONLY, STRUCTURE_LINK)[0] || null;
+    }
     /** @private */
     issueTasks() {
         const poses = [
@@ -264,7 +268,19 @@ class CentralTransferUnit {
                 }
                 /** @type {CentralTransferUnit} */
                 const centralTransferUnit = this.taskData.centralTransferUnit;
-                if (!worker.memory.flags.order) worker.memory.flags.order = centralTransferUnit.FetchOrder();
+                if (!worker.memory.flags.order && !worker.memory.dying) worker.memory.flags.order = centralTransferUnit.FetchOrder();
+                // Since Resources transferred among CentralTransferUnit are usually valuable, it is important
+                // to make sure creep carries nothing, when it is going to die.
+                if (!worker.memory.dying && Object.keys(worker.store).length + 1 >= worker.ticksToLive) {
+                    if (worker.memory.flags.order) {
+                        centralTransferUnit.PushOrder(worker.memory.flags.order);
+                        worker.memory.flags = {};
+                    }
+                    worker.memory.dying = true;
+                }
+                if (worker.memory.dying) {
+                    for (const resourceType in worker.store) if (worker.transfer(centralTransferUnit.GetStoreStructure(), resourceType) === OK) return [];
+                }
                 // Check Validity
                 while (worker.memory.flags.order) {
                     /** @type {TransferOrder} */
@@ -288,10 +304,10 @@ class CentralTransferUnit {
                         console.log(`<p style="display:inline;color:red;">Error: </p>Unable to carry out "Transfer" task of ${centralTransferUnit.room.name} from ${order.from} to ${order.to}`);
                         if (order.callback) order.callback();
                         worker.memory.flags = {};
-                    } else if (worker.memory.flags.working && checkForFreeStore(toTarget) === 0 && worker.store.getUsedCapacity() > 0) {
+                    } else if (checkForFreeStore(toTarget) === 0) {
                         if (order.callback) order.callback();
                         worker.memory.flags = {};
-                    } else if (!worker.memory.flags.working && worker.store[order.resourceType] === 0 && (fromTarget.store.getUsedCapacity(order.resourceType) || 0) === 0) {
+                    } else if (worker.store[order.resourceType] === 0 && (fromTarget.store.getUsedCapacity(order.resourceType) || 0) === 0) {
                         // Potential Switch
                         if (order.from === "any") {
                             const fromTarget = centralTransferUnit.GetFetchStructure(order.resourceType, order.amount);
@@ -305,7 +321,7 @@ class CentralTransferUnit {
                             worker.memory.flags = {};
                         }
                     }
-                    if (!worker.memory.flags.order) worker.memory.flags.order = centralTransferUnit.FetchOrder();
+                    if (!worker.memory.flags.order && !worker.memory.dying) worker.memory.flags.order = centralTransferUnit.FetchOrder();
                     else break;
                 }
                 if (worker.memory.flags.order) {
@@ -314,12 +330,11 @@ class CentralTransferUnit {
                     /** Store Irrelated Resources */
                     if (worker.store[order.resourceType] !== worker.store.getUsedCapacity()) for (const resourceType in worker.store) if (resourceType !== order.resourceType && worker.transfer(centralTransferUnit.GetStoreStructure(), resourceType) === OK) return [];
                     /** Special Case for Having Stored resourceType */
-                    if ((worker.store.getFreeCapacity(order.resourceType) === 0 || worker.store[order.resourceType] >= order.amount) && !worker.memory.flags.working) worker.memory.flags.working = true;
+                    if (!worker.memory.flags.working && (worker.store.getFreeCapacity(order.resourceType) === 0 || worker.store[order.resourceType] >= order.amount)) worker.memory.flags.working = true;
                     if (!worker.memory.flags.working) {
                         const fromTarget = Game.getObjectById(worker.memory.flags.fromTargetId);
                         const amount = Math.min(fromTarget.store[order.resourceType], order.amount, worker.store.getFreeCapacity());
                         const retCode = worker.withdraw(fromTarget, order.resourceType, amount);
-                        worker.memory.flags.amount = amount;
                         if (retCode !== OK) {
                             console.log(`<p style="display:inline;color:red;">Error: </p>Fail to carry out "Transfer" Task of ${centralTransferUnit.room.name} with ${JSON.stringify(order)} while Withdrawing with return Code ${retCode}`);
                             if (order.callback) order.callback();
@@ -331,7 +346,7 @@ class CentralTransferUnit {
                     }
                     if (worker.memory.flags.working) {
                         const toTarget = Game.getObjectById(worker.memory.flags.toTargetId);
-                        const amount = Math.min(worker.store[order.resourceType], checkForFreeStore(toTarget), worker.memory.flags.amount || worker.store[order.resourceType]);
+                        const amount = Math.min(worker.store[order.resourceType], checkForFreeStore(toTarget), order.amount);
                         const retCode = worker.transfer(toTarget, order.resourceType, amount);
                         if (retCode !== OK) {
                             console.log(`<p style="display:inline;color:red;">Error: </p>Fail to carry out "Transfer" Task of ${centralTransferUnit.room.name} with ${JSON.stringify(order)} while Transfering with return Code ${retCode}`);
@@ -483,9 +498,15 @@ function mount() {
             if (!centralTransferUnits[this.name]) centralTransferUnits[this.name] = new CentralTransferUnit(this);
             return centralTransferUnits[this.name];
         }
+    });
+    Object.defineProperty(Room.prototype, "controllerLink", {
+        configurable : false,
+        enumerable : false,
+        get : function() {
+            return global.MapMonitorManager.FetchStructureWithTag(this.name, "forController", STRUCTURE_LINK)[0] || null;
+        }
     })
 }
-
 module.exports = {
     mount : mount
 };

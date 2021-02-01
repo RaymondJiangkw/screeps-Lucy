@@ -113,7 +113,7 @@ class StoringDescriptor {
     }
     /**
      * @param {import("./task.prototype").GameObject} obj
-     * @param {ResourceConstant | "all"} resourceType 
+     * @param {ResourceConstant} resourceType 
      * @param {string} [key = "default"] used to identify a specific group
      * @param {(resource : import("./task.prototype").GameObject) => number} checkForFreeAmountFunc this is not required to implement the exclusion of preoccupasion by dealt resources, which is still under transportation.
      */
@@ -142,7 +142,7 @@ class StoringDescriptor {
             /**
              * @type { Array<import("./money.prototype").Transaction> }
              */
-            const dealingResourcesTransaction = this.Obj.account.Query("asBuyer", {transactionType : "resource"}, t => t.State === TRANSACTION_STATE.WORKING && (this.ResourceType === "all" || t.Description.info.resourceType === this.ResourceType));
+            const dealingResourcesTransaction = this.Obj.account.Query("asBuyer", {transactionType : "resource"}, t => t.State === TRANSACTION_STATE.WORKING && t.Description.info.resourceType === this.ResourceType);
             let sumOfDealtAmount = 0;
             for (const t of dealingResourcesTransaction) sumOfDealtAmount += t.Description.info.amount;
             return possessingNumber - sumOfDealtAmount;
@@ -161,7 +161,7 @@ class ResourceManager {
     /**
      * @private
      * @param {string} roomName
-     * @param {ResourceConstant | "all"} resourceType
+     * @param {ResourceConstant} resourceType
      * updateRoomCache updates caching for Retrieving and Storing.
      */
     updateRoomCache(roomName, resourceType) {
@@ -211,7 +211,7 @@ class ResourceManager {
      * Currently, only those resources within the `roomName` are calculated. It should be extended into the calculation of
      * all truly available resources in the future.
      * @param {string} roomName
-     * @param {ResourceConstant | "all"} resourceType "all" here is peculiar to `storing` objects
+     * @param {ResourceConstant} resourceType
      * @param { {key ? : string, type : "retrieve" | "store", allowStore? : boolean, allowToHarvest? : boolean, confinedInRoom : boolean, excludeDefault? : boolean} } [options = {key : "default", allowStore : true, allowToHarvest : true, confinedInRoom : true, excludeDefault : false}] "default" has access to all registered resources. `allowStore` and `allowToHarvest` are useful while `type` === "retrieve".
      * @returns {Number}
      */
@@ -236,13 +236,13 @@ class ResourceManager {
      * Query returns the best suitable object to be extracted or to store.
      * After querying, `amount` of that object will be locked, if transaction is dealt.
      * @param {import("./task.prototype").GameObject} subject
-     * @param {ResourceConstant | "all"} resourceType "all" here is peculiar to `storing` objects
+     * @param {ResourceConstant} resourceType
      * @param {number} amount Retrieving Amount | Storing Amount
-     * @param { { key? : string, confinedInRoom? : boolean, allowStore? : boolean, allowToHarvest? : boolean, type : "retrieve" | "store", excludeDefault? : boolean } } [options = { key : "default", confinedInRoom : false, allowStore : true, allowToHarvest : true }] "default" has access to all registered resources, but those with specific tag will be penaltized. `allowStore` and `allowToHarvest` are useful while `type` === "retrieve".
+     * @param { { key? : string, confinedInRoom? : boolean, allowStore? : boolean, allowToHarvest? : boolean, type : "retrieve" | "store", excludeDefault? : boolean, allowStructureTypes? : Array<StructureConstant> } } [options = { key : "default", confinedInRoom : false, allowStore : true, allowToHarvest : true }] "default" has access to all registered resources, but those with specific tag will be penaltized. `allowStore` and `allowToHarvest` are useful while `type` === "retrieve". 0 length of allowStructureTypes indicate that all are allowed.
      * @returns {import("./task.prototype").GameObject | null}
      */
     Query(subject, resourceType, amount, options) {
-        _.defaults(options, {key : "default", confinedInRoom : false, allowStore : true, allowToHarvest : true, excludeDefault : false});
+        _.defaults(options, {key : "default", confinedInRoom : false, allowStore : true, allowToHarvest : true, excludeDefault : false, allowStructureTypes : []});
         /**
          * Query will first check out whether `subject` has physical location.
          * If so, it will go through several standards orderly to return the first matched:
@@ -289,13 +289,15 @@ class ResourceManager {
                  * @type {Array<ResourceDescriptor> | Array<StoringDescriptor>}
                  */
                 let totalAvailableResourceObjects = [];
-                if (options.type === "retrieve") totalAvailableResourceObjects = this.room2resourceTypes[room][resourceType]
+                if (options.type === "retrieve") totalAvailableResourceObjects = (this.room2resourceTypes[room][resourceType] || [])
                     .filter(a => a.Obj.id !== subject.id && a.Amount > 0)
+                    .filter(a => !a.Obj.structureType || options.allowStructureTypes.length === 0 || options.allowStructureTypes.indexOf(a.Obj.structureType) !== -1)
                     .filter(a => (a.Key === "default" && !options.excludeDefault) || a.Key === options.key)
                     .filter(a => (options.allowStore && a.Obj.store !== undefined) || (options.allowToHarvest && isHarvestable(a.Obj))) // I suppose there is nothing which is harvestable and also has `store`
                     .sort((a,b) => calcInRoomDistance(a.Obj.pos, subject.pos) * 2 * getPrice("cpu") / 5 + (amount - a.Amount) * getPrice(resourceType) / 1000 + calcKeyPenalty(a) - calcInRoomDistance(b.Obj.pos, subject.pos) * 2 * getPrice("cpu") / 5 - (amount - b.Amount) * getPrice(resourceType) / 1000 - calcKeyPenalty(b));
-                else if (options.type === 'store') totalAvailableResourceObjects = this.room2StoringResourceTypes[room][resourceType]
+                else if (options.type === 'store') totalAvailableResourceObjects = (this.room2StoringResourceTypes[room][resourceType] || [])
                     .filter(a => a.Obj.id !== subject.id && a.FreeAmount > 0)
+                    .filter(a => !a.Obj.structureType || options.allowStructureTypes.length === 0 || options.allowStructureTypes.indexOf(a.Obj.structureType) !== -1)
                     .filter(a => (a.Key === "default" && !options.excludeDefault) || a.Key === options.key)
                     .sort((a,b) => calcInRoomDistance(a.Obj.pos, subject.pos) * 2 * getPrice("cpu") / 5 + (amount - a.FreeAmount) * getPrice(resourceType) / 1000 + calcKeyPenalty(a) - calcInRoomDistance(b.Obj.pos, subject.pos) * 2 * getPrice("cpu") / 5 - (amount - b.FreeAmount) * getPrice(resourceType) / 1000 - calcKeyPenalty(b));
                 if (totalAvailableResourceObjects.length === 0) continue;
@@ -341,19 +343,16 @@ class ResourceManager {
         /**
          * @type { {[resourceType : string] : {[id : string] : StoringDescriptor}} }
          * @private
-         * NOTICE : resourceType here includes "all"
          */
         this.resourceType2StoringResources          = {};
         /**
          * @type { {[roomName : string] : {[resourceType : string] : Array<StoringDescriptor>}} }
          * @private
-         * NOTICE : resourceType here includes "all"
          */
         this.room2StoringResourceTypes              = {};
         /**
          * @type { {[roomName : string] : {[resourceType : string] : number}} }
          * @private
-         * NOTICE : resourceType here includes "all"
          */
         this.room2StoringResourceTypesExpiration    = {};
     }

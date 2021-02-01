@@ -25,7 +25,7 @@ module.exports = {
     /* It is recorded under structure's memory : "tag" */
     arrangements : {
         SPAWN_ONLY              : "forSpawn",
-        UPGRADE_ONLY            : "forUpgrade",
+        UPGRADE_ONLY            : "forController",
         TRANSFER_ONLY           : "forTransfer",
         BUILD_ONLY              : "forBuild"
     },
@@ -37,6 +37,7 @@ module.exports = {
         [RESOURCE_UTRIUM] : 0.2,
         [RESOURCE_LEMERGIUM] : 0.2,
         [RESOURCE_ZYNTHIUM] : 0.2,
-        [RESOURCE_CATALYST] : 0.4
+        [RESOURCE_CATALYST] : 0.4,
+        "collectSpareCapacity" : 100000
     }
 };

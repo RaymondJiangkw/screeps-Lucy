@@ -2,7 +2,6 @@ require("lucy.prototype");
 const mount = require("mount");
 const profiler = require("screeps-profiler");
 profiler.enable();
-const { EVENT_TYPES } = require("./lucy.log");
 module.exports.loop = function() {
     profiler.wrap(function() {
         mount();
