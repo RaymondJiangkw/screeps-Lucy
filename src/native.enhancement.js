@@ -844,6 +844,7 @@ class Planer {
      */
     Plan(roomName, roomType, unitType, options) {
         _.defaults(options, {display : true, tag : false, build : false, road : false, writeToMemory : false, readFromMemory : false, num : 1, linkedRoomPosition : [], linkedUnits : [], unitTypeAlias : undefined});
+        // console.log(roomName, unitType, JSON.stringify(options));
         const originalUnitType = unitType;
         if (!this.units[roomType] || !this.units[roomType][originalUnitType]) return null;
         unitType = options.unitTypeAlias || unitType;
@@ -1002,7 +1003,7 @@ class Planer {
             ignoreCreeps : true,
             ignoreDestructibleStructures : false,
             avoid : this.room2avoidPoses[roomName] || [],
-            maxOps : 200
+            maxOps : 2000
         });
         path.unshift({x : posU.x, y : posU.y, dx : 0, dy : 0, direction : null});
         this.roomRoadCache.set(roomName ,posU.x, posU.y, posV.x, posV.y, path);
@@ -1155,8 +1156,8 @@ planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "extensionUnit", new Unit(
 planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "labUnit", new Unit(
     [
         [Unit.prototype.PLACE_ANY, STRUCTURE_LAB, STRUCTURE_LAB, Unit.prototype.PLACE_ANY],
-        [STRUCTURE_LAB, STRUCTURE_LAB, [STRUCTURE_ROAD, STRUCTURE_CONTAINER], STRUCTURE_LAB],
-        [STRUCTURE_LAB, [STRUCTURE_ROAD, STRUCTURE_CONTAINER], STRUCTURE_LAB, STRUCTURE_LAB],
+        [STRUCTURE_LAB, STRUCTURE_LAB, STRUCTURE_ROAD, STRUCTURE_LAB],
+        [STRUCTURE_LAB, STRUCTURE_ROAD, STRUCTURE_LAB, STRUCTURE_LAB],
         [Unit.prototype.PLACE_ANY, STRUCTURE_LAB, STRUCTURE_LAB, Unit.prototype.PLACE_ANY]
     ]
     , "labs", "🟣", "purple", {type : "distanceSum", objects : [STRUCTURE_SPAWN], subjects : [STRUCTURE_LAB]}, {avoidOverLapRoad : true}));
@@ -1296,6 +1297,13 @@ class Map {
                     if (componentRet[key]["ret"] === "need_to_call_again") componentRet[key]["recallTick"] = Game.time + getCacheExpiration(TIMEOUT, OFFSET);
                 }
             };
+            const mergeRet = (storedFeedbacks, newFeedbacks) => {
+                for (const key in newFeedbacks) {
+                    if (!storedFeedbacks[key]) storedFeedbacks[key] = newFeedbacks[key];
+                    else if (storedFeedbacks[key] === false) storedFeedbacks[key] = newFeedbacks[key];
+                    else if (newFeedbacks[key] === "need_to_call_again") storedFeedbacks[key] = newFeedbacks[key];
+                }
+            };
             /**
              * @param { {pos : RoomPosition} } object
              * @param {string} tag
@@ -1348,7 +1356,7 @@ class Map {
             if (level >= 1) {
                 /* Plan For CentralSpawn Unit */
                 if (!this.planCache[roomName].feedbacks["centralSpawn"]) this.planCache[roomName].feedbacks["centralSpawn"] = {};
-                this.planCache[roomName].feedbacks["centralSpawn"] = planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "centralSpawn", {
+                mergeRet(this.planCache[roomName].feedbacks["centralSpawn"], planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "centralSpawn", {
                     display : true,
                     tag : parseRet(this.planCache[roomName].feedbacks["centralSpawn"]["tag"]) || options.structureConstruct,
                     build : parseRet(this.planCache[roomName].feedbacks["centralSpawn"]["build"]) || (options.objectDestroy),
@@ -1361,7 +1369,8 @@ class Map {
                     ),
                     writeToMemory : true,
                     readFromMemory : true
-                });
+                }));
+                // console.log(JSON.stringify(this.planCache[roomName].feedbacks["centralSpawn"]));
                 doneRet(this.planCache[roomName].feedbacks["centralSpawn"]);
             }
             if (level >= 2) {
@@ -1383,7 +1392,7 @@ class Map {
                 doneRet(this.planCache[roomName].feedbacks["controllerLink"]);
                 /* Plan For CentralTransfer Unit */
                 if (!this.planCache[roomName].feedbacks["centralTransfer"]) this.planCache[roomName].feedbacks["centralTransfer"] = {};
-                this.planCache[roomName].feedbacks["centralTransfer"] = planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "centralTransfer", {
+                mergeRet(this.planCache[roomName].feedbacks["centralTransfer"], planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "centralTransfer", {
                     display : true,
                     tag : parseRet(this.planCache[roomName].feedbacks["centralTransfer"]["tag"]) || options.structureConstruct,
                     build : parseRet(this.planCache[roomName].feedbacks["centralTransfer"]["build"]) || (options.objectDestroy),
@@ -1392,11 +1401,11 @@ class Map {
                     linkedUnits : ["centralSpawn"],
                     writeToMemory : true,
                     readFromMemory : true
-                });
+                }));
                 doneRet(this.planCache[roomName].feedbacks["centralTransfer"]);
                 /* Plan For Tower Unit */
                 if (!this.planCache[roomName].feedbacks["towers"]) this.planCache[roomName].feedbacks["towers"] = {};
-                this.planCache[roomName].feedbacks["towers"] = planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "towers", {
+                mergeRet(this.planCache[roomName].feedbacks["towers"], planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "towers", {
                     display : true,
                     tag : parseRet(this.planCache[roomName].feedbacks["towers"]["tag"]) || options.structureConstruct,
                     build : parseRet(this.planCache[roomName].feedbacks["towers"]["build"]) || (options.objectDestroy),
@@ -1404,13 +1413,13 @@ class Map {
                     num : 6,
                     writeToMemory : true,
                     readFromMemory : true
-                });
+                }));
                 doneRet(this.planCache[roomName].feedbacks["towers"]);
             }
             if (level >= 4) {
                 /* Preplan for Central Lab (Reserve Space) */
                 if (!this.planCache[roomName].feedbacks["labUnit"]) this.planCache[roomName].feedbacks["labUnit"] = {};
-                this.planCache[roomName].feedbacks["labUnit"] = planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "labUnit", {
+                mergeRet(this.planCache[roomName].feedbacks["labUnit"], planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "labUnit", {
                     tag : parseRet(this.planCache[roomName].feedbacks["labUnit"]["tag"]) || options.structureConstruct,
                     build : parseRet(this.planCache[roomName].feedbacks["labUnit"]["build"]) || (options.objectDestroy),
                     road : parseRet(this.planCache[roomName].feedbacks["labUnit"]["road"]) || (options.objectDestroy),
@@ -1418,11 +1427,11 @@ class Map {
                     linkedUnits : ["centralSpawn"],
                     writeToMemory : true,
                     readFromMemory : true
-                });
+                }));
                 doneRet(this.planCache[roomName].feedbacks["labUnit"]);
                 /* Plan for Extensions */
                 if (!this.planCache[roomName].feedbacks[`extensionUnit_${0}`]) this.planCache[roomName].feedbacks[`extensionUnit_${0}`] = {};
-                this.planCache[roomName].feedbacks[`extensionUnit_${0}`] = planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "extensionUnit", {
+                mergeRet(this.planCache[roomName].feedbacks[`extensionUnit_${0}`], planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "extensionUnit", {
                     tag : parseRet(this.planCache[roomName].feedbacks["labUnit"]["tag"]) || options.structureConstruct,
                     build : parseRet(this.planCache[roomName].feedbacks["labUnit"]["build"]) || (options.objectDestroy),
                     road : parseRet(this.planCache[roomName].feedbacks["labUnit"]["road"]) || (options.objectDestroy),
@@ -1431,7 +1440,7 @@ class Map {
                     writeToMemory : true,
                     readFromMemory : true,
                     unitTypeAlias : `extensionUnit_${0}`
-                });
+                }));
                 doneRet(this.planCache[roomName].feedbacks[`extensionUnit_${0}`]);
             }
             if (level >= 5) {
@@ -1440,7 +1449,7 @@ class Map {
             if (level >= 6) {
                 /* Plan for Extensions */
                 if (!this.planCache[roomName].feedbacks[`extensionUnit_${1}`]) this.planCache[roomName].feedbacks[`extensionUnit_${1}`] = {};
-                this.planCache[roomName].feedbacks[`extensionUnit_${1}`] = planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "extensionUnit", {
+                mergeRet(this.planCache[roomName].feedbacks[`extensionUnit_${1}`], planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "extensionUnit", {
                     tag : parseRet(this.planCache[roomName].feedbacks["labUnit"]["tag"]) || options.structureConstruct,
                     build : parseRet(this.planCache[roomName].feedbacks["labUnit"]["build"]) || (options.objectDestroy),
                     road : parseRet(this.planCache[roomName].feedbacks["labUnit"]["road"]) || (options.objectDestroy),
@@ -1449,8 +1458,11 @@ class Map {
                     writeToMemory : true,
                     readFromMemory : true,
                     unitTypeAlias : `extensionUnit_${1}`
-                });
+                }));
                 doneRet(this.planCache[roomName].feedbacks[`extensionUnit_${1}`]);
+                /** @type {Mineral} */
+                const mineral = Game.rooms[roomName].mineral;
+                if (!Game.rooms[roomName][STRUCTURE_EXTRACTOR] && Game.rooms[roomName].controller.level >= 6 && mapMonitor.Fetch(roomName, mineral.pos.y, mineral.pos.x).filter(s => s.structureType === STRUCTURE_EXTRACTOR).length === 0) Game.rooms[roomName].createConstructionSite(mineral.pos, STRUCTURE_EXTRACTOR);
             }
             if (level >= 7) {
 
@@ -1458,7 +1470,7 @@ class Map {
             if (level >= 8) {
                 /* Plan for Extensions */
                 if (!this.planCache[roomName].feedbacks[`extensionUnit_${2}`]) this.planCache[roomName].feedbacks[`extensionUnit_${2}`] = {};
-                this.planCache[roomName].feedbacks[`extensionUnit_${2}`] = planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "extensionUnit", {
+                mergeRet(this.planCache[roomName].feedbacks[`extensionUnit_${2}`], planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "extensionUnit", {
                     tag : parseRet(this.planCache[roomName].feedbacks["labUnit"]["tag"]) || options.structureConstruct,
                     build : parseRet(this.planCache[roomName].feedbacks["labUnit"]["build"]) || (options.objectDestroy),
                     road : parseRet(this.planCache[roomName].feedbacks["labUnit"]["road"]) || (options.objectDestroy),
@@ -1467,7 +1479,7 @@ class Map {
                     writeToMemory : true,
                     readFromMemory : true,
                     unitTypeAlias : `extensionUnit_${2}`
-                });
+                }));
                 doneRet(this.planCache[roomName].feedbacks[`extensionUnit_${2}`]);
             }
             // DEBUG

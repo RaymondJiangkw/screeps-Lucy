@@ -398,7 +398,7 @@ function giveControllerBehaviors() {
         new Task(`[${this.room.name}:ControllerUpgrade]`, this.pos.roomName, this, new TaskDescriptor("default", {
             worker : {
                 minimumNumber : 1,
-                maximumNumber : global.MapMonitorManager.FetchVacantSpaceCnt(this.pos.roomName, Math.max(this.pos.y - 1, 1), Math.max(this.pos.x - 1, 1), Math.min(this.pos.y + 1, 48), Math.min(this.pos.x + 1, 48)),
+                maximumNumber : global.MapMonitorManager.FetchVacantSpaceCnt(this.pos.roomName, Math.max(this.pos.y - 1, 1), Math.max(this.pos.x - 1, 1), Math.min(this.pos.y + 1, 48), Math.min(this.pos.x + 1, 48)), // Infinity is not suitable here. Given that `repair` creeps can take this task too, when all `repair` creeps are taking this task and another `repair` task issued, spawn needs to spawn another creep to fill in the gap, leading to over-spawning.
                 estimateProfitPerTurn :
                     function (object) {
                         /* At least one creep should upgrade Controller in order to avoid downgrading. */
@@ -687,7 +687,7 @@ function giveContainerBehaviors() {
                     /** @type {StructureLink | null} */
                     const link = this.taskData.tag === "forSource" ? global.MapMonitorManager.FetchStructureWithTag(container.pos.roomName, "forSource", STRUCTURE_LINK).filter(l => l.pos.getRangeTo(container) === 1)[0] || null : null;
                     if (worker.pos.getRangeTo(container) !== 0) worker.travelTo(container);
-                    if (link && link.store.getFreeCapacity(RESOURCE_ENERGY) > 0) worker.transfer(link, RESOURCE_ENERGY);
+                    if (link && worker.store.getFreeCapacity() === 0 && link.store.getFreeCapacity(RESOURCE_ENERGY) > 0) worker.transfer(link, RESOURCE_ENERGY);
                     if (container.store.getFreeCapacity(RESOURCE_ENERGY) > 0 || worker.store.getFreeCapacity(RESOURCE_ENERGY) > 0) worker.harvest(target);
                     return [];
                 }
@@ -814,8 +814,8 @@ function giveTowerBehaviors() {
                 if (!this.mountObj) return "dead";
                 /** Schedule For Next One */
                 if (this.mountObj.store.getFreeCapacity(RESOURCE_ENERGY) <= 10) {
-                    Lucy.Timer.add(Game.time + getCacheExpiration(nextFillingTIMEOUT, nextFillingOFFSET), this.triggerFillingEnergy, this.id, [], `Filling Energy for ${this}`);
-                    console.log(`<p style="color:gray;display:inline;">[Log]</p> "Energy Filling for container ${this}" task in ${this.room.name} finishes.`);
+                    Lucy.Timer.add(Game.time + getCacheExpiration(nextFillingTIMEOUT, nextFillingOFFSET), this.mountObj.triggerFillingEnergy, this.id, [], `Filling Energy for ${this.mountObj}`);
+                    console.log(`<p style="color:gray;display:inline;">[Log]</p> "Energy Filling for container ${this.mountObj}" task in ${this.mountObj.room.name} finishes.`);
                     return "dead";
                 }
                 return "working";
@@ -915,7 +915,6 @@ function giveStorageBehaviors() {
             return resource;
         }.bind(this);
         const resourceIndicator = requestResource(1);
-        console.log(this, resourceIndicator);
         if (!resourceIndicator) {
             const nextTaskStartedTick = Game.time + getCacheExpiration(NEXT_FILLING_ENERGY_TIMEOUT, NEXT_FILLING_ENERGY_OFFSET);
             Lucy.Timer.add(nextTaskStartedTick, this.triggerFillingEnergy, this.id, [], `Filling Energy for ${this}`);
@@ -954,6 +953,22 @@ function giveStorageBehaviors() {
         }, {requestResource : requestResource});
     };
 }
+function giveLinkBehaviors() {
+    StructureLink.prototype.trigger = function() {
+        if (this.store.getFreeCapacity(RESOURCE_ENERGY) < CARRY_CAPACITY) {
+            if (this.memory.tag === global.Lucy.Rules.arrangements.SPAWN_ONLY) {
+                this.room.centralSpawn.SetSignal("fromLink", true);
+            } else if (this.memory.tag === global.Lucy.Rules.arrangements.TRANSFER_ONLY) {
+                /** @type {import('./rooms.behaviors').CentralTransferUnit} */
+                const centralTransfer = this.room.centralTransfer;
+                let to = null;
+                if (centralTransfer.Storage && centralTransfer.Storage.store.getFreeCapacity() >= global.Lucy.Rules.storage["collectSpareCapacity"] && centralTransfer.Storage.store[RESOURCE_ENERGY] / centralTransfer.Storage.store.getCapacity() <= global.Lucy.Rules.storage[RESOURCE_ENERGY]) to = STRUCTURE_STORAGE;
+                else if (centralTransfer.Terminal && centralTransfer.Terminal.store.getFreeCapacity() >= global.Lucy.Rules.terminal["collectSpareCapacity"] && centralTransfer.Terminal.store[RESOURCE_ENERGY] / centralTransfer.Terminal.store.getCapacity() <= global.Lucy.Rules.terminal[RESOURCE_ENERGY]) to = STRUCTURE_TERMINAL;
+                if (to) centralTransfer.PushOrder({from : "link", to : to, resourceType : RESOURCE_ENERGY, amount : amount});
+            }
+        }
+    };
+}
 function mount() {
     giveControllerBehaviors();
     giveSpawnBehaviors();
@@ -963,6 +978,7 @@ function mount() {
     giveContainerBehaviors();
     giveTowerBehaviors();
     giveStorageBehaviors();
+    giveLinkBehaviors();
     /**
      * Instant Check while Reloading, considering the loss of all undergoing tasks
      */
@@ -976,6 +992,7 @@ function mount() {
             room["containers"].forEach(c => c.trigger());
             room["towers"].forEach(t => t.trigger());
             if (room.storage) room.storage.trigger();
+            room["links"].forEach(l => l.trigger());
         }
     }
 }

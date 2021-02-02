@@ -16,7 +16,7 @@ function giveContainerBehaviors() {
         let storingResourceTypes = [];
         if (this.memory.tag === global.Lucy.Rules.arrangements.SPAWN_ONLY) storingResourceTypes = [RESOURCE_ENERGY];
         else if (this.memory.tag === "forSource") storingResourceTypes = [RESOURCE_ENERGY];
-        else if (this.memory.tag === "forMineral") storingResourceTypes = [room.mineral.mineralType];
+        else if (this.memory.tag === "forMineral") storingResourceTypes = [this.room.mineral.mineralType];
         else if (this.memory.tag === "labs") storingResourceTypes = Object.keys(REACTION_TIME);
         else console.log(`<p style="display:inline;color:red;">Error:</p> Unable to recognize container ${this} whose tag is ${this.memory.tag}`);
         if (storingResourceTypes.length > 0) {

@@ -65,7 +65,7 @@ function $() {
                 if (event.StructureType === STRUCTURE_SPAWN && Game.rooms[event.Pos.roomName].find(FIND_STRUCTURES, { filter : {structureType : STRUCTURE_SPAWN} }).length > 1) continue;
                 const structures = global.MapMonitorManager.FetchStructure(event.Pos.roomName, event.Pos.y, event.Pos.x).filter(s => s.structureType === event.StructureType);
                 structures.forEach(s => {
-                    console.log(`<p style="display:inline;color:gray;">[Log]</p> Detect Newly Constructed Structure ${s} with trigger ${s.register}`);
+                    console.log(`<p style="display:inline;color:gray;">[Log]</p> Detect Newly Constructed Structure ${s} with register ${s.register}`);
                     if (s.register !== undefined) s.register();
                 });
                 structures.forEach(s => {
@@ -113,6 +113,11 @@ function $() {
                     if (!hotEvent.Obj.task) hotEvent.Obj.task = global.TaskManager.Query(hotEvent.Obj);
                 }
             }
+        }
+    }.bind(global.Lucy);
+    global.Lucy.LinkRun = function() {
+        for (const roomName in Game.rooms) {
+            if (isMyRoom(Game.rooms[roomName]) && Game.rooms[roomName].links.length > 1) global.LinkManager.Run(roomName);
         }
     }.bind(global.Lucy);
     /**

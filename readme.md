@@ -12,11 +12,14 @@
     - Spawn of Creep, implementing `GroupPatch Constraint`.
     - Task, implementing `GroupPatch Constraint`.
     - Resource, comprised of `retrieve` and `store`, implementing `Resource Reserve`.
+    - Link, implementing `Source Destination Mechanisms` and `Trigger-Driven Response`.
 - Structure Memory
     - Periodical or Computation-oriented Recycle.
 - Fast Energy-Filling
     - Imitate the layout of `tigga`.
+
+    <div style="text-align:center;"><img src="./demo/fast-energy-filling.PNG" alt="Fast Energy Filling Layout" /></div>
 - Central Transfer Unit
     - Enable flexible and fast transferring of Resources
+- Dynamic BodyParts
 - *Flag Trigger* (Under Development ⛏️)
-- *Link System* (Under Development ⛏️)

@@ -52,6 +52,22 @@ function mount() {
         }
         return ret;
     };
+    const withdraw = Creep.prototype.withdraw;
+    Creep.prototype.withdraw = function(target, resourceType, amount) {
+        const ret = withdraw.apply(this, arguments);
+        if (ret === OK) {
+            target._hasBeenWithdrawn = true;
+        }
+        return ret;
+    };
+    const transfer = Creep.prototype.transfer;
+    Creep.prototype.transfer = function(target, resourceType, amount) {
+        const ret = transfer.apply(this, arguments);
+        if (ret === OK) {
+            target._hasBeenTransferred = true;
+        }
+        return ret;
+    };
     const towerAttack = StructureTower.prototype.attack;
     const towerHeal = StructureTower.prototype.heal;
     const towerRepair = StructureTower.prototype.repair;
@@ -81,6 +97,33 @@ function mount() {
         if (ret === OK) {
             if (store >= TOWER_CAPACITY / 2 && store - TOWER_ENERGY_COST < TOWER_CAPACITY / 2) {
                 global.Lucy.Timer.add(Game.time + 1, this.trigger, this.id, [], `Filling Energy for ${this}`);
+            }
+        }
+        return ret;
+    }
+    const transferEnergy = StructureLink.prototype.transferEnergy;
+    StructureLink.prototype.transferEnergy = function(target, amount) {
+        amount = amount || Math.min(this.store[RESOURCE_ENERGY], target.store.getFreeCapacity(RESOURCE_ENERGY));
+        const ret = transferEnergy.apply(this, arguments);
+        if (ret === OK) {
+            this._hasTransferred = true;
+            target._hasBeenTransferred = true;
+            /** Link of CentralSpawnUnit */
+            if (target.memory.tag === global.Lucy.Rules.arrangements.SPAWN_ONLY) {
+                global.Lucy.Timer.add(Game.time + 1, function(roomName) {
+                    Game.rooms[roomName].centralSpawn.SetSignal("fromLink", true);
+                }, undefined, [target.room.name], `Filling Energy of Container in CentralSpawn of ${target.room.name} via Link`);
+            } else if (target.memory.tag === global.Lucy.Rules.arrangements.TRANSFER_ONLY) {
+                global.Lucy.Timer.add(Game.time + 1, function(roomName, amount) {
+                    /** @type {Room} */
+                    const room = Game.rooms[roomName];
+                    /** @type {import('./rooms.behaviors').CentralTransferUnit} */
+                    const centralTransfer = room.centralTransfer;
+                    let to = null;
+                    if (centralTransfer.Storage && centralTransfer.Storage.store.getFreeCapacity() >= global.Lucy.Rules.storage["collectSpareCapacity"] && centralTransfer.Storage.store[RESOURCE_ENERGY] / centralTransfer.Storage.store.getCapacity() <= global.Lucy.Rules.storage[RESOURCE_ENERGY]) to = STRUCTURE_STORAGE;
+                    else if (centralTransfer.Terminal && centralTransfer.Terminal.store.getFreeCapacity() >= global.Lucy.Rules.terminal["collectSpareCapacity"] && centralTransfer.Terminal.store[RESOURCE_ENERGY] / centralTransfer.Terminal.store.getCapacity() <= global.Lucy.Rules.terminal[RESOURCE_ENERGY]) to = STRUCTURE_TERMINAL;
+                    if (to) centralTransfer.PushOrder({from : "link", to : to, resourceType : RESOURCE_ENERGY, amount : amount});
+                }, undefined, [target.room.name, amount], `Transfer Energy into CentralTransfer of ${target.room.name} via Link`);
             }
         }
         return ret;

@@ -2,6 +2,7 @@
  * @module rooms.prototype
  * Define some Special Behaviors within a Room
  * @typedef {CentralSpawnUnit} CentralSpawnUnit
+ * @typedef {CentralTransferUnit} CentralTransferUnit
  */
 const Task = require('./task.prototype').Task;
 const TaskDescriptor = require('./task.prototype').TaskDescriptor;
@@ -35,6 +36,10 @@ class CentralSpawnUnit {
         if (key === "fromLink" || key === "toLink") return this.signals[key];
         else if (key === "extensions") return this.signals.extensions;
         else return this.signals.extensions[key];
+    }
+    /** @returns {Array<StructureContainer>} */
+    get Containers() {
+        return global.MapMonitorManager.FetchStructureWithTag(this.room.name, global.Lucy.Rules.arrangements.SPAWN_ONLY, STRUCTURE_CONTAINER);
     }
     /** @returns {StructureLink | null} */
     get Link() {
@@ -98,15 +103,31 @@ class CentralSpawnUnit {
                     estimateWorkingTicks : (object) => object.ticksToLive || CREEP_LIFE_TIME,
                     tag : `centralSpawn-${i}`,
                     bodyMinimumRequirements : {
-                        [CARRY] : 3,
+                        [CARRY] : 4,
                         [MOVE] : 1
                     },
-                    mode : "static",
+                    expandFunction : function(room) {
+                        if (room.controller.level <= 3) return {[CARRY] : 1, [MOVE] : 1};
+                        else if (room.controller.level <= 5) return {[CARRY] : 3, [MOVE] : 1};
+                        else return {[CARRY] : 4, [MOVE] : 1};
+                    },
+                    mode : "expand",
                     workingPos : poses[i],
                     confinedInRoom : true
                 }
             }), {
-                selfCheck : () => "working",
+                selfCheck : function () {
+                    /** @type {CentralSpawnUnit} */
+                    const centralSpawn = this.taskData.centralSpawn;
+                    if (centralSpawn.Containers.length === 0) {
+                        const NEXT_CENTRAL_SPAWN_TIMEOUT = 100;
+                        const NEXT_CENTRAL_SPAWN_OFFSET  = 5;
+                        const nextTaskStartedTick = Game.time + getCacheExpiration(NEXT_CENTRAL_SPAWN_TIMEOUT, NEXT_CENTRAL_SPAWN_OFFSET);
+                        Lucy.Timer.add(nextTaskStartedTick, centralSpawn.issueTasks, centralSpawn, [], `CentralSpawnUnit of ${centralSpawn.room.name}`);
+                        return "dead";
+                    }
+                    return "working";
+                },
                 run : function() {
                     /** @type {Creep} */
                     const worker = Object.keys(this.employee2role).map(Game.getObjectById)[0];
@@ -131,22 +152,62 @@ class CentralSpawnUnit {
                         return [];
                     }
                     if (!worker.memory.flags) worker.memory.flags = {};
-                    /** Tweak Signals @TODO */
-                    if (centralSpawn.GetSignal(index) === true) {
+                    /** Tweak Signals */
+                    let isActionDone = false;
+                    if (!isActionDone && centralSpawn.GetSignal(index) === true) { // High Priority : Exhaust Container
                         /** @type {Array<StructureExtension>} */
-                        const extensions = extensionPoses.map(p => global.MapMonitorManager.FetchStructure(p.roomName, p.y, p.x)[0] || null).filter(e => e && e.store.getFreeCapacity(RESOURCE_ENERGY) > 0 && !e._transfered);
+                        const extensions = extensionPoses.map(p => global.MapMonitorManager.FetchStructure(p.roomName, p.y, p.x)[0] || null).filter(e => e && e.store.getFreeCapacity(RESOURCE_ENERGY) > 0 && !e._hasBeenTransferred);
                         /** @type {StructureContainer | null} */
                         const container = global.MapMonitorManager.FetchStructure(containerPos.roomName, containerPos.y, containerPos.x)[0] || null;
+                        /** @type {StructureLink | null} */
+                        const link = global.MapMonitorManager.FetchStructure(linkPos.roomName, linkPos.y, linkPos.x)[0] || null;
                         if (extensions.length === 0) {
-                            if (container && worker.store[RESOURCE_ENERGY] > 0) worker.transfer(container, RESOURCE_ENERGY);
+                            if (worker.store[RESOURCE_ENERGY] > 0) {
+                                if (container && container.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+                                    worker.transfer(container, RESOURCE_ENERGY);
+                                    isActionDone = true;
+                                } else if (link && link.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+                                    worker.transfer(link, RESOURCE_ENERGY);
+                                    isActionDone = true;
+                                }
+                            }
                             centralSpawn.SetSignal(index, false);
                         } else if (container) {
-                            if (worker.memory.flags.working && worker.store[RESOURCE_ENERGY] === 0) worker.memory.flags.working = false;
-                            if (!worker.memory.flags.working && worker.store[RESOURCE_ENERGY] > 0) worker.memory.flags.working = true; // NOTICE : Full is not required.
-                            if (!worker.memory.flags.working) worker.withdraw(container, RESOURCE_ENERGY);
-                            if (worker.memory.flags.working) {
-                                worker.transfer(extensions[0], RESOURCE_ENERGY);
-                                extensions[0]._transfered = true;
+                            if (container.store.getUsedCapacity() > 0) {
+                                if (worker.memory.flags.working && worker.store[RESOURCE_ENERGY] === 0) worker.memory.flags.working = false;
+                                if (!worker.memory.flags.working && worker.store[RESOURCE_ENERGY] > 0) worker.memory.flags.working = true; // NOTICE : Full is not required.
+                                if (!worker.memory.flags.working) {
+                                    worker.withdraw(container, RESOURCE_ENERGY);
+                                    centralSpawn.SetSignal("fromLink", true);
+                                }
+                                if (worker.memory.flags.working) worker.transfer(extensions[0], RESOURCE_ENERGY);
+                                isActionDone = true;
+                            } else centralSpawn.SetSignal("fromLink", true);
+                        }
+                    }
+                    if (!isActionDone && centralSpawn.GetSignal("fromLink") === true) { // Low Priority : Fill Container
+                        /** @type {StructureLink | null} */
+                        const link = global.MapMonitorManager.FetchStructure(linkPos.roomName, linkPos.y, linkPos.x)[0] || null;
+                        /** @type {StructureContainer | null} */
+                        const container = global.MapMonitorManager.FetchStructure(containerPos.roomName, containerPos.y, containerPos.x)[0] || null;
+                        if (!link || link.store[RESOURCE_ENERGY] === 0 || (_.sum(centralSpawn.Containers.map(c => c.store.getFreeCapacity())) === 0 && centralSpawn.GetSignal(0) === false && centralSpawn.GetSignal(1) === false && centralSpawn.GetSignal(2) === false && centralSpawn.GetSignal(3) === false)) {
+                            if (worker.store[RESOURCE_ENERGY] > 0) {
+                                if (container && container.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+                                    worker.transfer(container, RESOURCE_ENERGY);
+                                    isActionDone = true;
+                                } else if (link && link.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+                                    worker.transfer(link, RESOURCE_ENERGY);
+                                    isActionDone = true;
+                                }
+                            }
+                            centralSpawn.SetSignal("fromLink", false);
+                        } else {
+                            if (container.store.getFreeCapacity() > 0) {
+                                if (worker.memory.flags.working && worker.store[RESOURCE_ENERGY] === 0) worker.memory.flags.working = false;
+                                if (!worker.memory.flags.working && worker.store[RESOURCE_ENERGY] > 0) worker.memory.flags.working = true; // NOTICE : Full is not required.
+                                if (!worker.memory.flags.working) worker.withdraw(link, RESOURCE_ENERGY);
+                                if (worker.memory.flags.working) worker.transfer(container, RESOURCE_ENERGY);
+                                isActionDone = true;
                             }
                         }
                     }
@@ -223,7 +284,7 @@ class CentralSpawnUnit {
 }
 /**
  * @typedef {STRUCTURE_LINK | STRUCTURE_TERMINAL | STRUCTURE_STORAGE | STRUCTURE_FACTORY | "any"} FromTarget
- * @typedef {STRUCTURE_LINK | STRUCTURE_TERMINAL | STRUCTURE_STORAGE | STRUCTURE_FACTORY | STRUCTURE_EXTENSION | STRUCTURE_NUKER | STRUCTURE_POWER_SPAWN} ToTarget
+ * @typedef {STRUCTURE_LINK | STRUCTURE_TERMINAL | STRUCTURE_STORAGE | STRUCTURE_FACTORY | STRUCTURE_EXTENSION | STRUCTURE_NUKER | STRUCTURE_POWER_SPAWN | "any"} ToTarget
  * @typedef { {from : FromTarget, to : ToTarget, resourceType : ResourceConstant, amount : number, callback ? : Function} } TransferOrder
  * NOTICE : There is no Transaction in CentralTransferUnit. It should be confirmed before issuing order.
  */
@@ -268,7 +329,6 @@ class CentralTransferUnit {
                 }
                 /** @type {CentralTransferUnit} */
                 const centralTransferUnit = this.taskData.centralTransferUnit;
-                if (!worker.memory.flags.order && !worker.memory.dying) worker.memory.flags.order = centralTransferUnit.FetchOrder();
                 // Since Resources transferred among CentralTransferUnit are usually valuable, it is important
                 // to make sure creep carries nothing, when it is going to die.
                 if (!worker.memory.dying && Object.keys(worker.store).length + 1 >= worker.ticksToLive) {
@@ -280,7 +340,9 @@ class CentralTransferUnit {
                 }
                 if (worker.memory.dying) {
                     for (const resourceType in worker.store) if (worker.transfer(centralTransferUnit.GetStoreStructure(), resourceType) === OK) return [];
+                    return [];
                 }
+                if (!worker.memory.flags.order && !worker.memory.dying) worker.memory.flags.order = centralTransferUnit.FetchOrder();
                 // Check Validity
                 while (worker.memory.flags.order) {
                     /** @type {TransferOrder} */
@@ -292,7 +354,9 @@ class CentralTransferUnit {
                         if (fromTarget) worker.memory.flags.fromTargetId = fromTarget.id;
                     }
                     if (!worker.memory.flags.toTargetId) {
-                        let toTarget = centralTransferUnit.GetStructure(order.to);
+                        let toTarget = null;
+                        if (order.to === "any") toTarget = centralTransferUnit.GetStoreStructure(order.amount, order.from);
+                        else toTarget = centralTransferUnit.GetStructure(order.to);
                         if (toTarget) worker.memory.flags.toTargetId = toTarget.id;
                     }
                     const fromTarget = Game.getObjectById(worker.memory.flags.fromTargetId);
@@ -305,8 +369,17 @@ class CentralTransferUnit {
                         if (order.callback) order.callback();
                         worker.memory.flags = {};
                     } else if (checkForFreeStore(toTarget) === 0) {
-                        if (order.callback) order.callback();
-                        worker.memory.flags = {};
+                        if (order.to === "any") {
+                            const toTarget = centralTransferUnit.GetStoreStructure(order.amount, order.from);
+                            if (toTarget) worker.memory.flags.toTargetId = toTarget.id;
+                            else {
+                                if (order.callback) order.callback();
+                                worker.memory.flags = {};
+                            }
+                        } else {
+                            if (order.callback) order.callback();
+                            worker.memory.flags = {};
+                        }
                     } else if (worker.store[order.resourceType] === 0 && (fromTarget.store.getUsedCapacity(order.resourceType) || 0) === 0) {
                         // Potential Switch
                         if (order.from === "any") {
@@ -333,6 +406,8 @@ class CentralTransferUnit {
                     if (!worker.memory.flags.working && (worker.store.getFreeCapacity(order.resourceType) === 0 || worker.store[order.resourceType] >= order.amount)) worker.memory.flags.working = true;
                     if (!worker.memory.flags.working) {
                         const fromTarget = Game.getObjectById(worker.memory.flags.fromTargetId);
+                        // Special Case of fromTarget : fromTarget is link, and has executed transferEnergy.
+                        if (fromTarget._hasTransferred) return [];
                         const amount = Math.min(fromTarget.store[order.resourceType], order.amount, worker.store.getFreeCapacity());
                         const retCode = worker.withdraw(fromTarget, order.resourceType, amount);
                         if (retCode !== OK) {
@@ -399,12 +474,16 @@ class CentralTransferUnit {
         return global.MapMonitorManager.FetchStructureWithTag(this.room.name, global.Lucy.Rules.arrangements.TRANSFER_ONLY, structureType)[0] || null;
     }
     /**
+     * @param {number} amount
+     * @param {STRUCTURE_STORAGE | STRUCTURE_TERMINAL | null} [self = null]
      * @returns {StructureStorage | StructureTerminal | null}
      */
-    GetStoreStructure() {
-        if (this.Storage && this.Storage.store.getFreeCapacity() > 0) return this.Storage;
-        else if (this.Terminal && this.Terminal.store.getFreeCapacity() > 0) return this.Terminal;
-        else return null;
+    GetStoreStructure(amount = 1, self = null) {
+        if (self !== STRUCTURE_STORAGE && this.Storage && this.Storage.store.getFreeCapacity() >= amount) return this.Storage;
+        else if (self !== STRUCTURE_TERMINAL && this.Terminal && this.Terminal.store.getFreeCapacity() >= amount) return this.Terminal;
+        if (self !== STRUCTURE_STORAGE && this.Storage && this.Storage.store.getFreeCapacity() > 0) return this.Storage;
+        else if (self !== STRUCTURE_TERMINAL && this.Terminal && this.Terminal.store.getFreeCapacity() > 0) return this.Terminal;
+        return null;
     }
     /**
      * Used to respond to `any`
@@ -440,21 +519,13 @@ class CentralTransferUnit {
      * @returns {boolean}
      */
     IsBelongTo(structure) {
-        if (!structure.structureType) return false;
+        if (!structure || !structure.structureType) return false;
         if (structure.room.name !== this.room.name) return false;
         const structureType = structure.structureType;
         if (structureType === STRUCTURE_STORAGE || structureType === STRUCTURE_TERMINAL || structureType === STRUCTURE_POWER_SPAWN || structureType === STRUCTURE_FACTORY) return true;
         if (this.Link && structure.id === this.Link.id) return true;
         if (this.Extension && structure.id === this.Extension.id) return true;
         return false;
-    }
-    /**
-     * @todo
-     * Used to replace specific Task of transfering among centralTransferUnit.
-     * @returns {boolean}
-     */
-    IssueTask() {
-
     }
     /** @param {Room} room */
     constructor(room) {

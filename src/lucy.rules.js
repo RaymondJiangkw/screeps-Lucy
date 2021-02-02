@@ -38,6 +38,10 @@ module.exports = {
         [RESOURCE_LEMERGIUM] : 0.2,
         [RESOURCE_ZYNTHIUM] : 0.2,
         [RESOURCE_CATALYST] : 0.4,
-        "collectSpareCapacity" : 100000
+        "collectSpareCapacity" : STORAGE_CAPACITY / 10
+    },
+    terminal : {
+        [RESOURCE_ENERGY] : 0.5,
+        "collectSpareCapacity" : TERMINAL_CAPACITY / 10
     }
 };

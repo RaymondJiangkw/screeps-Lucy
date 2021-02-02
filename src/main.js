@@ -20,6 +20,8 @@ module.exports.loop = function() {
         global.Lucy.HandleEvent();
         /** Fetch Tasks */
         global.Lucy.FetchTasks();
+        /** Link Transfer */
+        global.Lucy.LinkRun();
         /** Task Routine */
         global.TaskManager.Run();
         /**

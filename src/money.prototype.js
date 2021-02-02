@@ -258,7 +258,7 @@ const TRANSACTION_STATE = Object.freeze({
 class Transaction {
     /**
      * Confirm confirms this transaction enters `working` state after checking feasibility.
-     * @returns {boolean}
+     * @returns {boolean | "no_specific_transfer_involved"}
      */
     Confirm() {
         if (this.state === TRANSACTION_STATE.DEAD) return false;
@@ -270,6 +270,18 @@ class Transaction {
         this.state = TRANSACTION_STATE.WORKING;
         this.Buyer.account.Make("asBuyer", this);
         this.Seller.account.Make("asSeller", this);
+        /**
+         * Fast Resource Transfer among CentralTransferUnit
+         */
+        if (this.Buyer.pos && this.Seller.pos && this.Buyer.pos.roomName === this.Seller.pos.roomName) {
+            const room = Game.rooms[this.Buyer.pos.roomName];
+            /** @type {import('./rooms.behaviors').CentralTransferUnit} */
+            const centralTransferUnit = room.centralTransfer;
+            if (centralTransferUnit.IsBelongTo(this.Buyer) && centralTransferUnit.IsBelongTo(this.Seller)) {
+                centralTransferUnit.PushOrder({from : this.Seller.structureType, to : this.Buyer.structureType, resourceType : this.description.info.resourceType, amount : this.description.info.amount, callback : function() { this.Done(); }.bind(this)});
+                return "no_specific_transfer_involved";
+            }
+        }
         return true;
     }
     /**
