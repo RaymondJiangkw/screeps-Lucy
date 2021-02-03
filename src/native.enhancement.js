@@ -669,10 +669,10 @@ class Planer {
                 // Structure
                 // Structure Road is Ignored, however.
                 if (terrain[y][x] === TERRAIN_MASK_WALL) return -1;
-                const matchedNum = _.filter(mapMonitor.Fetch(roomName,y,x),s => (s.structureType !== STRUCTURE_ROAD || !unit.Options.avoidOverLapRoad) && unit.Fetch(j,i).indexOf(s.structureType) !== -1).length;
+                if (_.filter(mapMonitor.Fetch(roomName,y,x),s => s.structureType !== STRUCTURE_ROAD && s.structureType !== STRUCTURE_RAMPART && unit.Fetch(j,i).indexOf(s.structureType) === -1).length > 0) return -1;
+                if (unit.Options.avoidOverLapRoad && unit.Fetch(j, i).indexOf(STRUCTURE_ROAD) === -1 && _.filter(mapMonitor.Fetch(roomName,y,x),s => s.structureType === STRUCTURE_ROAD).length > 0) return -1;
+                const matchedNum = _.filter(mapMonitor.Fetch(roomName,y,x),s => unit.Fetch(j,i).indexOf(s.structureType) !== -1).length;
                 if (matchedNum > 0) ret += matchedNum;
-                else if (_.filter(mapMonitor.Fetch(roomName,y,x),s => s.structureType !== STRUCTURE_ROAD && unit.Fetch(j,i).indexOf(s.structureType) === -1).length > 0) return -1;
-                else if (unit.Fetch(j, i).indexOf(STRUCTURE_ROAD) === -1 && _.filter(mapMonitor.Fetch(roomName,y,x),s => s.structureType === STRUCTURE_ROAD).length > 0) return -1;
             }
         }
         return ret;
@@ -784,6 +784,8 @@ class Planer {
         };
         let isThereAnyImpede = false;
         for (const structureType in scheduledConstructionSites) {
+            /** Require : STRUCTURE_RAMPART is only built after controller level reaches 3. */
+            if (structureType === STRUCTURE_RAMPART && Game.rooms[roomName].controller.level <= 3) continue;
             if (CONTROLLER_STRUCTURES[structureType][Game.rooms[roomName].controller.level] <= mapMonitor.FetchCnt(roomName, structureType)["total"]) continue;
             const cntInRoom = mapMonitor.FetchCnt(roomName, structureType);
             scheduledConstructionSites[structureType].sort((a,b)=>calSurroundedExistedNum(b[0],b[1])-calSurroundedExistedNum(a[0],a[1]));
@@ -1120,26 +1122,26 @@ const planer = new Planer();
 planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "centralSpawn", new Unit(
     [
         [Unit.prototype.PLACE_ANY, STRUCTURE_ROAD, STRUCTURE_ROAD, STRUCTURE_ROAD, STRUCTURE_ROAD, STRUCTURE_ROAD, Unit.prototype.PLACE_ANY],
-        [STRUCTURE_ROAD, STRUCTURE_EXTENSION,   STRUCTURE_EXTENSION,        STRUCTURE_SPAWN,        STRUCTURE_EXTENSION,        STRUCTURE_EXTENSION,    STRUCTURE_ROAD],
+        [STRUCTURE_ROAD, STRUCTURE_EXTENSION,   STRUCTURE_EXTENSION,        [STRUCTURE_SPAWN, STRUCTURE_RAMPART],        STRUCTURE_EXTENSION,        STRUCTURE_EXTENSION,    STRUCTURE_ROAD],
         [STRUCTURE_ROAD, STRUCTURE_EXTENSION,   Unit.prototype.PLACE_VACANT,STRUCTURE_EXTENSION,    Unit.prototype.PLACE_VACANT,STRUCTURE_EXTENSION,    STRUCTURE_ROAD],
         [STRUCTURE_ROAD, STRUCTURE_CONTAINER,   STRUCTURE_EXTENSION,        STRUCTURE_LINK,         STRUCTURE_EXTENSION,        STRUCTURE_CONTAINER,    STRUCTURE_ROAD],
-        [STRUCTURE_ROAD, STRUCTURE_SPAWN,       Unit.prototype.PLACE_VACANT,STRUCTURE_EXTENSION,    Unit.prototype.PLACE_VACANT,STRUCTURE_SPAWN,        STRUCTURE_ROAD],
+        [STRUCTURE_ROAD, [STRUCTURE_SPAWN, STRUCTURE_RAMPART],       Unit.prototype.PLACE_VACANT,STRUCTURE_EXTENSION,    Unit.prototype.PLACE_VACANT,[STRUCTURE_SPAWN, STRUCTURE_RAMPART],        STRUCTURE_ROAD],
         [STRUCTURE_ROAD, STRUCTURE_EXTENSION,   STRUCTURE_EXTENSION,        STRUCTURE_EXTENSION,    STRUCTURE_EXTENSION,        STRUCTURE_EXTENSION,    STRUCTURE_ROAD],
         [Unit.prototype.PLACE_ANY, STRUCTURE_ROAD, STRUCTURE_ROAD, STRUCTURE_ROAD, STRUCTURE_ROAD, STRUCTURE_ROAD, Unit.prototype.PLACE_ANY]
     ]
-    , global.Lucy.Rules.arrangements.SPAWN_ONLY, "🔴", "red", {type:"distanceSum", objects : [STRUCTURE_CONTROLLER, "mineral", "energies"], subjects : [STRUCTURE_SPAWN]}, {avoidOtherToOverLapRoad : true}));
+    , global.Lucy.Rules.arrangements.SPAWN_ONLY, "", "red", {type:"distanceSum", objects : [STRUCTURE_CONTROLLER, "mineral", "energies"], subjects : [STRUCTURE_SPAWN]}, {avoidOtherToOverLapRoad : true}));
 
 planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "centralTransfer", new Unit(
     [
-        [STRUCTURE_STORAGE, STRUCTURE_NUKER, STRUCTURE_POWER_SPAWN],
-        [STRUCTURE_TERMINAL, STRUCTURE_ROAD, STRUCTURE_EXTENSION],
-        [STRUCTURE_LINK, STRUCTURE_FACTORY, STRUCTURE_ROAD]
+        [[STRUCTURE_STORAGE, STRUCTURE_RAMPART], [STRUCTURE_NUKER, STRUCTURE_RAMPART], [STRUCTURE_POWER_SPAWN, STRUCTURE_RAMPART]],
+        [[STRUCTURE_TERMINAL, STRUCTURE_RAMPART], STRUCTURE_ROAD, STRUCTURE_EXTENSION],
+        [STRUCTURE_LINK, [STRUCTURE_FACTORY, STRUCTURE_RAMPART], STRUCTURE_ROAD]
     ]
-    , global.Lucy.Rules.arrangements.TRANSFER_ONLY, "🟠", "orange", {type:"distanceSum", objects : [STRUCTURE_CONTROLLER, STRUCTURE_SPAWN], subjects : [STRUCTURE_STORAGE, STRUCTURE_TERMINAL, STRUCTURE_FACTORY]}));
+    , global.Lucy.Rules.arrangements.TRANSFER_ONLY, "", "orange", {type:"distanceSum", objects : [STRUCTURE_CONTROLLER, STRUCTURE_SPAWN], subjects : [STRUCTURE_STORAGE, STRUCTURE_TERMINAL, STRUCTURE_FACTORY]}));
 
 planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "towers", new Unit(
     [
-        [STRUCTURE_TOWER]
+        [[STRUCTURE_TOWER, STRUCTURE_RAMPART]]
     ]
     , "defense", "⛫", "yellow", {type : "distanceSum", objects : [STRUCTURE_STORAGE, STRUCTURE_CONTAINER, STRUCTURE_TERMINAL], subjects : [STRUCTURE_TOWER]}, {alongRoad : true}));
 
@@ -1151,16 +1153,22 @@ planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "extensionUnit", new Unit(
         [STRUCTURE_EXTENSION, STRUCTURE_ROAD, STRUCTURE_EXTENSION, STRUCTURE_ROAD, STRUCTURE_EXTENSION],
         [STRUCTURE_ROAD, STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, STRUCTURE_ROAD]
     ]
-    , "extension", "🟡", "yellow", {type : "distanceSum", objects : [STRUCTURE_SPAWN, STRUCTURE_STORAGE, STRUCTURE_TERMINAL], subjects : [STRUCTURE_EXTENSION]}, {avoidOtherToOverLapRoad : true, avoidOverLapRoad : true}));
+    , "extension", "", "yellow", {type : "distanceSum", objects : [STRUCTURE_SPAWN, STRUCTURE_STORAGE, STRUCTURE_TERMINAL], subjects : [STRUCTURE_EXTENSION]}, {avoidOtherToOverLapRoad : true, avoidOverLapRoad : true}));
 
 planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "labUnit", new Unit(
     [
-        [Unit.prototype.PLACE_ANY, STRUCTURE_LAB, STRUCTURE_LAB, Unit.prototype.PLACE_ANY],
-        [STRUCTURE_LAB, STRUCTURE_LAB, STRUCTURE_ROAD, STRUCTURE_LAB],
-        [STRUCTURE_LAB, STRUCTURE_ROAD, STRUCTURE_LAB, STRUCTURE_LAB],
-        [Unit.prototype.PLACE_ANY, STRUCTURE_LAB, STRUCTURE_LAB, Unit.prototype.PLACE_ANY]
+        [Unit.prototype.PLACE_ANY, [STRUCTURE_LAB, STRUCTURE_RAMPART], [STRUCTURE_LAB, STRUCTURE_RAMPART], Unit.prototype.PLACE_ANY],
+        [[STRUCTURE_LAB, STRUCTURE_RAMPART], [STRUCTURE_LAB, STRUCTURE_RAMPART], STRUCTURE_ROAD, [STRUCTURE_LAB, STRUCTURE_RAMPART]],
+        [[STRUCTURE_LAB, STRUCTURE_RAMPART], STRUCTURE_ROAD, [STRUCTURE_LAB, STRUCTURE_RAMPART], [STRUCTURE_LAB, STRUCTURE_RAMPART]],
+        [Unit.prototype.PLACE_ANY, [STRUCTURE_LAB, STRUCTURE_RAMPART], [STRUCTURE_LAB, STRUCTURE_RAMPART], Unit.prototype.PLACE_ANY]
     ]
-    , "labs", "🟣", "purple", {type : "distanceSum", objects : [STRUCTURE_SPAWN], subjects : [STRUCTURE_LAB]}, {avoidOverLapRoad : true}));
+    , "labs", "", "purple", {type : "distanceSum", objects : [STRUCTURE_SPAWN], subjects : [STRUCTURE_LAB]}, {avoidOverLapRoad : true}));
+
+planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "extensions", new Unit(
+    [
+        [STRUCTURE_EXTENSION]
+    ]
+    , "extension", "🟡", "yellow", {type : "distanceSum", objects : [STRUCTURE_SPAWN, STRUCTURE_STORAGE, STRUCTURE_TERMINAL], subjects : [STRUCTURE_EXTENSION]}, {alongRoad : true}));
 const ROOM_DISTANCE_CACHE_TIMEOUT       = 50;
 const ROOM_DISTANCE_CACHE_OFFSET        = 5;
 
@@ -1314,12 +1322,13 @@ class Map {
                 /** @type {StructureRoad} */
                 const road = mapMonitor.FetchAroundStructure(roomName, pos.y, pos.x).filter(s => s.structureType === STRUCTURE_ROAD)[0];
                 if (!road) return {ret : "need_to_call_again"};
-                const vacantPos = mapMonitor.FetchAroundVacantPos(road.pos.roomName, road.pos.y, road.pos.x, [STRUCTURE_LINK])[0];
+                const vacantPos = mapMonitor.FetchAroundVacantPos(road.pos.roomName, road.pos.y, road.pos.x, [STRUCTURE_LINK, STRUCTURE_RAMPART])[0];
                 if (!vacantPos) {
                     console.log(`<p style="display:inline;color:red;">Error: </p>Unable to construct Link for ${object}`);
                     return {ret : "need_to_call_again"};
                 } else console.log(`${roomName}:${object}:link: ${vacantPos}`);
                 const link = mapMonitor.FetchStructure(roomName, vacantPos.y, vacantPos.x).concat(mapMonitor.FetchConstructionSites(roomName, vacantPos.y, vacantPos.x)).filter(s => s.structureType === STRUCTURE_LINK)[0];
+                const rampart = mapMonitor.FetchStructure(roomName, vacantPos.y, vacantPos.x).concat(mapMonitor.FetchConstructionSites(roomName, vacantPos.y, vacantPos.x)).filter(s => s.structureType === STRUCTURE_RAMPART)[0];
                 if (!link) {
                     if (CONTROLLER_STRUCTURES[STRUCTURE_LINK][Game.rooms[roomName].controller.level] === mapMonitor.FetchCnt(roomName, STRUCTURE_LINK)["total"]) return {ret : true};
                     Game.rooms[roomName].createConstructionSite(vacantPos.x, vacantPos.y, STRUCTURE_LINK);
@@ -1327,30 +1336,33 @@ class Map {
                 } else if (!isConstructionSite(link)) {
                     link.memory.tag = tag;
                     mapMonitor.registerStructureWithTag(link);
+                    if (Game.rooms[roomName].controller.level > 3 && !rampart) Game.rooms[roomName].createConstructionSite(vacantPos.x, vacantPos.y, STRUCTURE_RAMPART);
+                    else return {ret : true};
                     return {ret : false};
                 } else return {ret : "need_to_call_again"};
             };
             /**
              * @param { {pos : RoomPosition} } object
              * @param {string} tag
-             * @param {boolean} buildLink
              */
-            const planForAroundOverlapContainer = (object, tag, buildLink = true) => {
+            const planForAroundOverlapContainer = (object, tag) => {
                 /** @type {RoomPosition} */
                 const pos = object.pos;
                 /** @type {StructureRoad} */
                 const road = mapMonitor.FetchAroundStructure(roomName, pos.y, pos.x).filter(s => s.structureType === STRUCTURE_ROAD)[0];
                 if (!road) return {ret : "need_to_call_again"};
                 const container = mapMonitor.FetchStructure(roomName, road.pos.y, road.pos.x).concat(mapMonitor.FetchConstructionSites(roomName, road.pos.y, road.pos.x)).filter(s => s.structureType === STRUCTURE_CONTAINER)[0];
+                const rampart = mapMonitor.FetchStructure(roomName, road.pos.y, road.pos.x).concat(mapMonitor.FetchConstructionSites(roomName, road.pos.y, road.pos.x)).filter(s => s.structureType === STRUCTURE_RAMPART)[0];
                 if (!container) {
                     Game.rooms[roomName].createConstructionSite(road.pos.x, road.pos.y, STRUCTURE_CONTAINER);
                     return {ret : "need_to_call_again"};
                 } else if (!isConstructionSite(container)) {
                     container.memory.tag = tag;
                     mapMonitor.registerStructureWithTag(container);
+                    if (Game.rooms[roomName].controller.level > 3 && !rampart) Game.rooms[roomName].createConstructionSite(road.pos.x, road.pos.y, STRUCTURE_RAMPART);
+                    else return {ret : true};
                     if (!buildLink) return {ret : false};
                 } else return {ret : "need_to_call_again"};
-                if (buildLink) return planForAroundLink(object, tag);
             };
             const level = this.planCache[roomName].controllerLevel;
             if (level >= 1) {
@@ -1379,10 +1391,11 @@ class Map {
                 if (!this.planCache[roomName].feedbacks["harvestMineral"]) this.planCache[roomName].feedbacks["harvestMineral"] = {};
                 /* Plan For Container of Source and Mineral */
                 for (const source of Game.rooms[roomName].energies) {
-                    if (parseRet(this.planCache[roomName].feedbacks["harvestEnergy"][source.id]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["harvestEnergy"][source.id] = planForAroundOverlapContainer(source, "forSource");
+                    if (parseRet(this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "container"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "container"] = planForAroundOverlapContainer(source, "forSource");
+                    if (parseRet(this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "link"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "link"] = planForAroundLink(source, "forSource");
                 }
                 doneRet(this.planCache[roomName].feedbacks["harvestEnergy"]);
-                if (Game.rooms[roomName].controller.level >= 5 && (parseRet(this.planCache[roomName].feedbacks["harvestMineral"][Game.rooms[roomName].mineral.id]) || options.objectDestroy || options.structureConstruct)) this.planCache[roomName].feedbacks["harvestMineral"][Game.rooms[roomName].mineral.id] = planForAroundOverlapContainer(Game.rooms[roomName].mineral, "forMineral", false);
+                if (Game.rooms[roomName].controller.level >= 5 && (parseRet(this.planCache[roomName].feedbacks["harvestMineral"][Game.rooms[roomName].mineral.id]) || options.objectDestroy || options.structureConstruct)) this.planCache[roomName].feedbacks["harvestMineral"][Game.rooms[roomName].mineral.id] = planForAroundOverlapContainer(Game.rooms[roomName].mineral, "forMineral");
                 doneRet(this.planCache[roomName].feedbacks["harvestMineral"]);
             }
             if (level >= 3) {
@@ -1432,9 +1445,9 @@ class Map {
                 /* Plan for Extensions */
                 if (!this.planCache[roomName].feedbacks[`extensionUnit_${0}`]) this.planCache[roomName].feedbacks[`extensionUnit_${0}`] = {};
                 mergeRet(this.planCache[roomName].feedbacks[`extensionUnit_${0}`], planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "extensionUnit", {
-                    tag : parseRet(this.planCache[roomName].feedbacks["labUnit"]["tag"]) || options.structureConstruct,
-                    build : parseRet(this.planCache[roomName].feedbacks["labUnit"]["build"]) || (options.objectDestroy),
-                    road : parseRet(this.planCache[roomName].feedbacks["labUnit"]["road"]) || (options.objectDestroy),
+                    tag : parseRet(this.planCache[roomName].feedbacks[`extensionUnit_${0}`]["tag"]) || options.structureConstruct,
+                    build : parseRet(this.planCache[roomName].feedbacks[`extensionUnit_${0}`]["build"]) || (options.objectDestroy),
+                    road : parseRet(this.planCache[roomName].feedbacks[`extensionUnit_${0}`]["road"]) || (options.objectDestroy),
                     num : 1,
                     linkedUnits : ["centralTransfer"],
                     writeToMemory : true,
@@ -1444,15 +1457,12 @@ class Map {
                 doneRet(this.planCache[roomName].feedbacks[`extensionUnit_${0}`]);
             }
             if (level >= 5) {
-
-            }
-            if (level >= 6) {
                 /* Plan for Extensions */
                 if (!this.planCache[roomName].feedbacks[`extensionUnit_${1}`]) this.planCache[roomName].feedbacks[`extensionUnit_${1}`] = {};
                 mergeRet(this.planCache[roomName].feedbacks[`extensionUnit_${1}`], planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "extensionUnit", {
-                    tag : parseRet(this.planCache[roomName].feedbacks["labUnit"]["tag"]) || options.structureConstruct,
-                    build : parseRet(this.planCache[roomName].feedbacks["labUnit"]["build"]) || (options.objectDestroy),
-                    road : parseRet(this.planCache[roomName].feedbacks["labUnit"]["road"]) || (options.objectDestroy),
+                    tag : parseRet(this.planCache[roomName].feedbacks[`extensionUnit_${1}`]["tag"]) || options.structureConstruct,
+                    build : parseRet(this.planCache[roomName].feedbacks[`extensionUnit_${1}`]["build"]) || (options.objectDestroy),
+                    road : parseRet(this.planCache[roomName].feedbacks[`extensionUnit_${1}`]["road"]) || (options.objectDestroy),
                     num : 1,
                     linkedUnits : ["centralTransfer"],
                     writeToMemory : true,
@@ -1460,6 +1470,20 @@ class Map {
                     unitTypeAlias : `extensionUnit_${1}`
                 }));
                 doneRet(this.planCache[roomName].feedbacks[`extensionUnit_${1}`]);
+                /* Plan for Extensions */
+                if (!this.planCache[roomName].feedbacks[`extensionUnit_${2}`]) this.planCache[roomName].feedbacks[`extensionUnit_${2}`] = {};
+                mergeRet(this.planCache[roomName].feedbacks[`extensionUnit_${2}`], planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "extensions", {
+                    tag : parseRet(this.planCache[roomName].feedbacks[`extensionUnit_${2}`]["tag"]) || options.structureConstruct,
+                    build : parseRet(this.planCache[roomName].feedbacks[`extensionUnit_${2}`]["build"]) || (options.objectDestroy),
+                    road : parseRet(this.planCache[roomName].feedbacks[`extensionUnit_${2}`]["road"]) || (options.objectDestroy),
+                    num : 12,
+                    writeToMemory : true,
+                    readFromMemory : true,
+                    unitTypeAlias : `extensionUnit_${2}`
+                }));
+                doneRet(this.planCache[roomName].feedbacks[`extensionUnit_${2}`]);
+            }
+            if (level >= 6) {
                 /** @type {Mineral} */
                 const mineral = Game.rooms[roomName].mineral;
                 if (!Game.rooms[roomName][STRUCTURE_EXTRACTOR] && Game.rooms[roomName].controller.level >= 6 && mapMonitor.Fetch(roomName, mineral.pos.y, mineral.pos.x).filter(s => s.structureType === STRUCTURE_EXTRACTOR).length === 0) Game.rooms[roomName].createConstructionSite(mineral.pos, STRUCTURE_EXTRACTOR);
@@ -1468,19 +1492,7 @@ class Map {
 
             }
             if (level >= 8) {
-                /* Plan for Extensions */
-                if (!this.planCache[roomName].feedbacks[`extensionUnit_${2}`]) this.planCache[roomName].feedbacks[`extensionUnit_${2}`] = {};
-                mergeRet(this.planCache[roomName].feedbacks[`extensionUnit_${2}`], planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "extensionUnit", {
-                    tag : parseRet(this.planCache[roomName].feedbacks["labUnit"]["tag"]) || options.structureConstruct,
-                    build : parseRet(this.planCache[roomName].feedbacks["labUnit"]["build"]) || (options.objectDestroy),
-                    road : parseRet(this.planCache[roomName].feedbacks["labUnit"]["road"]) || (options.objectDestroy),
-                    num : 1,
-                    linkedUnits : ["centralTransfer"],
-                    writeToMemory : true,
-                    readFromMemory : true,
-                    unitTypeAlias : `extensionUnit_${2}`
-                }));
-                doneRet(this.planCache[roomName].feedbacks[`extensionUnit_${2}`]);
+                
             }
             // DEBUG
             // console.log(JSON.stringify(planer.FetchRoomPlannedStructures(roomName, STRUCTURE_SPAWN)))
@@ -1511,6 +1523,10 @@ class Map {
          * @type { {[id : string] : Array<RoomPosition>} }
          */
         this.creep2pos                  = {};
+        /**
+         * @type { {[roomName : string] : Array<Array<number>>} }
+         */
+        this.room2distance              = {};
     }
 };
 /** @global */

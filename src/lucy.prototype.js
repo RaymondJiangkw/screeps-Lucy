@@ -151,7 +151,7 @@ function $() {
                 console.log(`<p style="color:red;display:inline;">Error:</p> Scheduled Task "${info.description}" fails to execute because of failing to retrieve object with Id ${info.thisId}`);
                 continue;
             }
-            func.call(_this, info.params);
+            func.apply(_this, info.params);
         }
         delete this[Game.time];
     }.bind(global.Lucy.Timer);

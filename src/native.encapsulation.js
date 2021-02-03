@@ -111,7 +111,7 @@ function mount() {
             /** Link of CentralSpawnUnit */
             if (target.memory.tag === global.Lucy.Rules.arrangements.SPAWN_ONLY) {
                 global.Lucy.Timer.add(Game.time + 1, function(roomName) {
-                    Game.rooms[roomName].centralSpawn.SetSignal("fromLink", true);
+                    Game.rooms[roomName].centralSpawn.SetSignal("all", "fromLink", true);
                 }, undefined, [target.room.name], `Filling Energy of Container in CentralSpawn of ${target.room.name} via Link`);
             } else if (target.memory.tag === global.Lucy.Rules.arrangements.TRANSFER_ONLY) {
                 global.Lucy.Timer.add(Game.time + 1, function(roomName, amount) {

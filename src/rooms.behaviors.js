@@ -20,22 +20,22 @@ class CentralSpawnUnit {
         return global.signals.IsNewStructure[this.room.name] || false;
     }
     /**
-     * @param {"extensions" | "fromLink" | "toLink" | 0 | 1 | 2 | 3} key
+     * @param {number | "all"} index
+     * @param {"extensions" | "fromLink" | "toLink"} key
      * @param {boolean} value
      */
-    SetSignal(key, value) {
-        console.log(`<p style="display:inline;color:gray;">[Log]</p> CentralSpawnUnit of ${this.room.name} : Set ${key} into ${value}`);
-        if (key === "fromLink" || key === "toLink") this.signals[key] = value;
-        else if (key === "extensions") this.signals.extensions = [value, value, value, value];
-        else this.signals.extensions[key] = value;
+    SetSignal(index, key, value) {
+        console.log(`<p style="display:inline;color:gray;">[Log]</p> CentralSpawnUnit of ${this.room.name} : Set ${key}:${index} into ${value}`);
+        if (index === "all") {
+            this.signals[key] = [value, value, value, value];
+        } else this.signals[key][index] = value;
     }
     /**
-     * @param {"extensions" | "fromLink" | "toLink" | 0 | 1 | 2 | 3} key
+     * @param {number} index
+     * @param {"extensions" | "fromLink" | "toLink"} key
      */
-    GetSignal(key) {
-        if (key === "fromLink" || key === "toLink") return this.signals[key];
-        else if (key === "extensions") return this.signals.extensions;
-        else return this.signals.extensions[key];
+    GetSignal(index, key) {
+        return this.signals[key][index];
     }
     /** @returns {Array<StructureContainer>} */
     get Containers() {
@@ -154,9 +154,9 @@ class CentralSpawnUnit {
                     if (!worker.memory.flags) worker.memory.flags = {};
                     /** Tweak Signals */
                     let isActionDone = false;
-                    if (!isActionDone && centralSpawn.GetSignal(index) === true) { // High Priority : Exhaust Container
+                    if (!isActionDone && centralSpawn.GetSignal(index, "extensions") === true) { // High Priority : Exhaust Container
                         /** @type {Array<StructureExtension>} */
-                        const extensions = extensionPoses.map(p => global.MapMonitorManager.FetchStructure(p.roomName, p.y, p.x)[0] || null).filter(e => e && e.store.getFreeCapacity(RESOURCE_ENERGY) > 0 && !e._hasBeenTransferred);
+                        const extensions = extensionPoses.map(p => global.MapMonitorManager.FetchStructure(p.roomName, p.y, p.x).filter(s => s.structureType !== STRUCTURE_RAMPART)[0] || null).filter(e => e && e.store.getFreeCapacity(RESOURCE_ENERGY) > 0 && !e._hasBeenTransferred);
                         /** @type {StructureContainer | null} */
                         const container = global.MapMonitorManager.FetchStructure(containerPos.roomName, containerPos.y, containerPos.x)[0] || null;
                         /** @type {StructureLink | null} */
@@ -171,26 +171,26 @@ class CentralSpawnUnit {
                                     isActionDone = true;
                                 }
                             }
-                            centralSpawn.SetSignal(index, false);
+                            centralSpawn.SetSignal(index, "extensions", false);
                         } else if (container) {
                             if (container.store.getUsedCapacity() > 0) {
                                 if (worker.memory.flags.working && worker.store[RESOURCE_ENERGY] === 0) worker.memory.flags.working = false;
                                 if (!worker.memory.flags.working && worker.store[RESOURCE_ENERGY] > 0) worker.memory.flags.working = true; // NOTICE : Full is not required.
                                 if (!worker.memory.flags.working) {
                                     worker.withdraw(container, RESOURCE_ENERGY);
-                                    centralSpawn.SetSignal("fromLink", true);
+                                    centralSpawn.SetSignal(index, "fromLink", true);
                                 }
                                 if (worker.memory.flags.working) worker.transfer(extensions[0], RESOURCE_ENERGY);
                                 isActionDone = true;
-                            } else centralSpawn.SetSignal("fromLink", true);
+                            } else centralSpawn.SetSignal(index, "fromLink", true);
                         }
                     }
-                    if (!isActionDone && centralSpawn.GetSignal("fromLink") === true) { // Low Priority : Fill Container
+                    if (!isActionDone && centralSpawn.GetSignal(index, "fromLink") === true) { // Low Priority : Fill Container
                         /** @type {StructureLink | null} */
                         const link = global.MapMonitorManager.FetchStructure(linkPos.roomName, linkPos.y, linkPos.x)[0] || null;
                         /** @type {StructureContainer | null} */
                         const container = global.MapMonitorManager.FetchStructure(containerPos.roomName, containerPos.y, containerPos.x)[0] || null;
-                        if (!link || link.store[RESOURCE_ENERGY] === 0 || (_.sum(centralSpawn.Containers.map(c => c.store.getFreeCapacity())) === 0 && centralSpawn.GetSignal(0) === false && centralSpawn.GetSignal(1) === false && centralSpawn.GetSignal(2) === false && centralSpawn.GetSignal(3) === false)) {
+                        if (!link || (link.store[RESOURCE_ENERGY] === 0 && worker.store[RESOURCE_ENERGY] === 0) || (container.store.getFreeCapacity(RESOURCE_ENERGY) === 0 && centralSpawn.GetSignal(index, "extensions") === false)) {
                             if (worker.store[RESOURCE_ENERGY] > 0) {
                                 if (container && container.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
                                     worker.transfer(container, RESOURCE_ENERGY);
@@ -200,7 +200,7 @@ class CentralSpawnUnit {
                                     isActionDone = true;
                                 }
                             }
-                            centralSpawn.SetSignal("fromLink", false);
+                            centralSpawn.SetSignal(index, "fromLink", false);
                         } else {
                             if (container.store.getFreeCapacity() > 0) {
                                 if (worker.memory.flags.working && worker.store[RESOURCE_ENERGY] === 0) worker.memory.flags.working = false;
@@ -276,8 +276,8 @@ class CentralSpawnUnit {
         /** @private */
         this.signals = {
             extensions : [false, false, false, false],
-            fromLink : false,
-            toLink : false
+            fromLink : [false, false, false, false],
+            toLink : [false, false, false, false]
         };
         this.issueTasks();
     }

@@ -32,7 +32,8 @@ class LinkManager {
          * Transfer Link is used while Source Links are empty, and, in this case, if Transfer Link is empty, Filling Order is issued.
          */
         for (const targetLink of [].concat(this.Fetch(roomName, FetchTag("spawn")), this.Fetch(roomName, FetchTag("controller")))) {
-            if (targetLink.store.getFreeCapacity(RESOURCE_ENERGY) < CARRY_CAPACITY) continue;
+            /** Has not been Used Up */
+            if (targetLink.store.getUsedCapacity(RESOURCE_ENERGY) > 0) continue;
             for (const sourceLink of this.Fetch(roomName, FetchTag("source"))) {
                 if (sourceLink.store.getFreeCapacity(RESOURCE_ENERGY) > CARRY_CAPACITY || sourceLink.cooldown > 0 || sourceLink._hasTransferred) continue;
                 sourceLink.transferEnergy(targetLink);
@@ -61,8 +62,10 @@ class LinkManager {
         for (const sourceLink of this.Fetch(roomName, FetchTag("source"))) {
             if (sourceLink.store.getFreeCapacity(RESOURCE_ENERGY) > CARRY_CAPACITY || sourceLink.cooldown > 0 || sourceLink._hasTransferred) continue;
             for (const transferLink of this.Fetch(roomName, FetchTag("transfer"))) {
-                if (transferLink.store.getFreeCapacity(RESOURCE_ENERGY) < CARRY_CAPACITY || transferLink._hasBeenTransferred) continue;
+                if (transferLink.store.getUsedCapacity(RESOURCE_ENERGY) > 0 || transferLink._hasBeenTransferred) continue;
                 sourceLink.transferEnergy(transferLink);
+                const centralTransfer = Game.rooms[roomName].centralTransfer;
+                centralTransfer.PushOrder({from : "link", to : "any", resourceType : RESOURCE_ENERGY, amount : LINK_CAPACITY});
                 break;
             }
         }

@@ -187,7 +187,7 @@ function giveSpawnBehaviors() {
                 }, {targetId : resource.id, structureIds : nearSpawnExtensions.concat(this.room.spawns).map(s => s.id), transaction : transaction});
             } else {
                 // Unit Center Tasks Control
-                this.room.centralSpawn.SetSignal("extensions", true);
+                this.room.centralSpawn.SetSignal("all", "extensions", true);
             }
         }.bind(this);
         /**
@@ -521,7 +521,7 @@ function giveRoadBehaviors() {
                         return getPrice("energy") * object.store.getCapacity();
                     },
                 estimateWorkingTicks :
-                    (object) => object.store.getCapacity() / (evaluateAbility(object, "build")),
+                    (object) => object.store.getCapacity() / (evaluateAbility(object, "repair")),
                 bodyMinimumRequirements : bodyPartDetermination({type : "exhuastEnergy", availableEnergy, energyConsumptionPerUnitPerTick}),
                 groupTag : "repairPatch",
                 tag : `${energyConsumptionPerUnitPerTick}-worker`,
@@ -587,7 +587,7 @@ function giveContainerBehaviors() {
                         return getPrice("energy") * object.store.getCapacity();
                     },
                 estimateWorkingTicks :
-                    (object) => object.store.getCapacity() / (evaluateAbility(object, "build")),
+                    (object) => object.store.getCapacity() / (evaluateAbility(object, "repair")),
                 bodyMinimumRequirements : bodyPartDetermination({type : "exhuastEnergy", availableEnergy, energyConsumptionPerUnitPerTick}),
                 groupTag : "repairPatch",
                 tag : `${energyConsumptionPerUnitPerTick}-worker`,
@@ -957,7 +957,7 @@ function giveLinkBehaviors() {
     StructureLink.prototype.trigger = function() {
         if (this.store.getFreeCapacity(RESOURCE_ENERGY) < CARRY_CAPACITY) {
             if (this.memory.tag === global.Lucy.Rules.arrangements.SPAWN_ONLY) {
-                this.room.centralSpawn.SetSignal("fromLink", true);
+                this.room.centralSpawn.SetSignal("all", "fromLink", true);
             } else if (this.memory.tag === global.Lucy.Rules.arrangements.TRANSFER_ONLY) {
                 /** @type {import('./rooms.behaviors').CentralTransferUnit} */
                 const centralTransfer = this.room.centralTransfer;
@@ -967,6 +967,83 @@ function giveLinkBehaviors() {
                 if (to) centralTransfer.PushOrder({from : "link", to : to, resourceType : RESOURCE_ENERGY, amount : amount});
             }
         }
+    };
+}
+function giveRampartBehaviors() {
+    const RAMPART_HITS_RATIO = 0.8;
+    const TARGET_HITS_MAXIMUM = 5e6 + 3000;
+    const NEXT_RAMPART_REPAIR_TIMEOUT = 200;
+    const NEXT_RAMPART_REPAIR_OFFSET = 50;
+    StructureRampart.prototype.trigger = function() {
+        this.triggerRepairing();
+        this.triggerDecayDetection();
+    };
+    StructureRampart.prototype.triggerDecayDetection = function() {
+        /**
+         * @param {Id<StructureRampart>} rampartId
+         * @param {RoomPosition} pos
+         */
+        const DecayDetection = function(rampartId, pos) {
+            const rampart = Game.getObjectById(rampartId);
+            // console.log(rampartId, rampart, pos);
+            if (!rampart) {
+                const { EventObjectDestroy } = require('./lucy.log');
+                global.Lucy.Logs.Push(new EventObjectDestroy(pos, STRUCTURE_RAMPART, "Structure"));
+            } else Lucy.Timer.add(Game.time + rampart.ticksToDecay + 1, DecayDetection, undefined, [rampartId, pos], `Rampart Decay Detection for ${rampart}`);
+        };
+        Lucy.Timer.add(Game.time + this.ticksToDecay + 1, DecayDetection, undefined, [this.id, this.pos], `Rampart Decay Detection for ${this}`);
+    };
+    StructureRampart.prototype.triggerRepairing = function() {
+        if (this.hits / this.hitsMax >= RAMPART_HITS_RATIO || this.hits >= TARGET_HITS_MAXIMUM) {
+            const NEXT_START_TICK = Game.time + getCacheExpiration(NEXT_RAMPART_REPAIR_TIMEOUT, NEXT_RAMPART_REPAIR_OFFSET);
+            Lucy.Timer.add(NEXT_START_TICK, this.triggerRepairing, this.id, [], `Repairing for ${this}`);
+            console.log(`<p style="display:inline;color:gray;">[Log]</p> ${this} has been fully repaired.`);
+            return;
+        }
+        /**
+         * @type {(amount : number) => Source | StructureContainer | StructureStorage | StructureLink}
+         */
+        const requestResource = function(amount) {
+            let resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", confinedInRoom : true, allowToHarvest : false});
+            if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", confinedInRoom : true});
+            if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve"});
+            return resource;
+        }.bind(this);
+        /* Use Data to Determine Body */
+        const availableEnergy = global.ResourceManager.Sum(this.pos.roomName, RESOURCE_ENERGY, {type : "retrieve", allowToHarvest : false, key : "default"});
+        const energyConsumptionPerUnitPerTick = 1;
+        new Task(`[${this.room.name}:RampartRepair]`, this.pos.roomName, this, new TaskDescriptor("Defense", {
+            worker : {
+                minimumNumber : 1,
+                maximumNumber : 1,
+                estimateProfitPerTurn :
+                    function (object) {
+                        if (this.mountObj.hits === 1) return Infinity;
+                        else return getPrice("energy") * object.store.getCapacity(RESOURCE_ENERGY) * (1 + 1 - this.mountObj.hits / this.mountObj.hitsMax);
+                    },
+                estimateWorkingTicks :
+                    (object) => object.store.getCapacity() / evaluateAbility(object, "repair"),
+                bodyMinimumRequirements : bodyPartDetermination({type : "exhuastEnergy", availableEnergy, energyConsumptionPerUnitPerTick}),
+                groupTag : "defensePatch",
+                tag : `${energyConsumptionPerUnitPerTick}-worker`,
+                allowEmptyTag : true,
+                mode : "shrinkToEnergyAvailable",
+                allowOtherTags : [`5-worker`]
+            }
+        }), {
+            selfCheck : function() {
+                if (!this.mountObj) return "dead";
+                if (this.mountObj.hits / this.mountObj.hitsMax >= RAMPART_HITS_RATIO || this.mountObj.hits >= TARGET_HITS_MAXIMUM) {
+                    const NEXT_START_TICK = Game.time + getCacheExpiration(NEXT_RAMPART_REPAIR_TIMEOUT, NEXT_RAMPART_REPAIR_OFFSET);
+                    Lucy.Timer.add(NEXT_START_TICK, this.mountObj.triggerRepairing, this.mountObj.id, [], `Repairing for ${this.mountObj}`);
+                    console.log(`<p style="display:inline;color:gray;">[Log]</p> ${this.mountObj} has been fully repaired.`);
+                    return "dead";
+                }
+                /** Lacking Resources */
+                return "working";
+            },
+            run : Builders.BuildFetchResourceAndDoSomethingProject(RESOURCE_ENERGY, requestResource, (creep) => creep.store.getFreeCapacity(RESOURCE_ENERGY), this, 3, Creep.prototype.repair)
+        }, {requestResource : requestResource});
     };
 }
 function mount() {
@@ -979,6 +1056,7 @@ function mount() {
     giveTowerBehaviors();
     giveStorageBehaviors();
     giveLinkBehaviors();
+    giveRampartBehaviors();
     /**
      * Instant Check while Reloading, considering the loss of all undergoing tasks
      */
@@ -993,6 +1071,7 @@ function mount() {
             room["towers"].forEach(t => t.trigger());
             if (room.storage) room.storage.trigger();
             room["links"].forEach(l => l.trigger());
+            room["ramparts"].forEach(r => r.trigger());
         }
     }
 }
