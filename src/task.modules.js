@@ -277,9 +277,9 @@ function ConstructMoveToComponent(dist = 1) {
     const component = new Component(function(object, task) {
         const attachedData = this.attachedData[object.id] || {};
         const target = Game.getObjectById(attachedData.targetId);
-        if (!target || !target.pos) return ConstructSignal(ERR_INVALID_ARGS, attachedData);
+        if ((!target || !target.pos) && !attachedData.targetPos) return ConstructSignal(ERR_INVALID_ARGS, attachedData);
         /** @type {RoomPosition} */
-        const targetPos = target.pos;
+        const targetPos = target ? target.pos ? target.pos : attachedData.targetPos : attachedData.targetPos;
         const currentPos = object.pos;
         // console.log(`<p style="display:inline;color:green;">Notice: </p>${target} : ${targetPos}, ${object} : ${currentPos}`);
         if (targetPos.roomName === currentPos.roomName && targetPos.getRangeTo(currentPos) <= dist) return ConstructSignal(OK, attachedData);
@@ -306,6 +306,7 @@ function ConstructFetchResourceComponent(fetchFunc, amountFunc, resourceType) {
             attachedData.targetId = target.id;
             attachedData.amount = amount;
             attachedData.resourceType = resourceType || attachedData.resourceType;
+            attachedData.targetPos = target.pos;
             return ConstructSignal(OK, attachedData);
         }
     });
@@ -463,6 +464,7 @@ function BuildFetchResourceAndDoSomethingProject(resourceType, fetchFunc, amount
                         .InsertLayer({
                             [OK] : new Project()
                                         .InsertLayer({[OK] : ConstructStaticTargetComponent(target.id)})
+                                        .InsertLayer({[OK] : ConstructStaticDataComponent(target.pos, "targetPos")})
                                         .InsertLayer({[OK] : ConstructStaticDataComponent(params, "params")}),
                             [ERR_NOT_FOUND] : new Project()
                                                 .InsertLayer({[OK] : ConstructStoreEmptyCheckComponent(resourceType)})

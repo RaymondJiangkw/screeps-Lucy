@@ -114,7 +114,7 @@ class CreepSpawnManager {
             if (creepDescriptor.Mode === "static") return supplyMoveBodyParts(creepDescriptor.BodyRequirements);
             else if (creepDescriptor.Mode === "shrinkToEnergyAvailable") return shrinkBodyParts(supplyMoveBodyParts(creepDescriptor.BodyRequirements), room.energyAvailable);
             else if (creepDescriptor.Mode === "shrinkToEnergyCapacity") return shrinkBodyParts(supplyMoveBodyParts(creepDescriptor.BodyRequirements), room.energyCapacityAvailable);
-            else if (creepDescriptor.Mode === "expand") return creepDescriptor.ExpandFunction(room);
+            else if (creepDescriptor.Mode === "expand") return shrinkBodyParts( creepDescriptor.ExpandFunction(room), room.energyAvailable);
         };
         let chosen = {};
         for (const room of adjacentRooms) {

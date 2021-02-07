@@ -4,11 +4,391 @@
  * @typedef {TaskManager} TaskManager
  */
 const DEFAULT = "default";
+const getPrice              = require('./util').getPrice;
+const PrintErr              = require('./util').PrintErr;
+const bodyPartDetermination = require('./util').bodyPartDetermination;
+const evaluateAbility       = require('./util').evaluateAbility;
+const isHarvestable         = require('./util').isHarvestable;
+const getCacheExpiration    = require('./util').getCacheExpiration;
+const calcRoomDistance      = require('./util').calcRoomDistance;
+const Task                  = require('./task.prototype').Task;
+const TaskDescriptor        = require('./task.prototype').TaskDescriptor;
+const Constructors          = require('./task.modules').Constructors;
+const Builders              = require('./task.modules').Builders;
+const profiler              = require("./screeps-profiler");
 /**
- * @type { (resource : ResourceConstant | "cpu") => number }
+ * A Constructor, which aims at helping to construct role.
  */
-const getPrice              =   require('util').getPrice;
-const profiler = require("./screeps-profiler");
+class RoleConstructor {
+    /**
+     * 
+     * @param {string} role
+     * @param {import('./task.prototype').RoleType} type
+     * @param { {type : "worker", availableEnergy : (room : Room) => number, energyConsumptionPerUnitPerTick : number, function : "build" | "repair" | "harvest"} | {type : "transferer", transferAmount : number} } [roleType]
+     */
+    Register(role, type, roleType = {}) {
+        this.roleDescriptions[role] = {};
+        this.roleType[role] = type;
+        if (roleType.type === "worker") {
+            this
+                .set(role, {
+                    key : "expand",
+                    value : {
+                        expandFunction : function (room) {
+                            return bodyPartDetermination({type : "exhuastEnergy", availableEnergy : roleType.availableEnergy(room), energyConsumptionPerUnitPerTick : roleType.energyConsumptionPerUnitPerTick});
+                        }
+                    }
+                })
+                .set(role, {
+                    key : "shrinkToEnergyAvailable",
+                    value : {
+                        bodyMaximumRequirements : bodyPartDetermination({
+                            type : "exhuastEnergy",
+                            availableEnergy : roleType.availableEnergy,
+                            energyConsumptionPerUnitPerTick : roleType.energyConsumptionPerUnitPerTick
+                        })
+                    }})
+                .set(role, {
+                    key : "memoryTag",
+                    value : {
+                        tagName : `${roleType.energyConsumptionPerUnitPerTick}-worker`,
+                        whetherAllowEmptyTag : true
+                    }
+                })
+                .set(role, {
+                    key : "spawnConstraint",
+                    value : {
+                        tag : `${roleType.function}Patch`
+                    }
+                })
+                .set(role, {
+                    key : "workingTicks",
+                    value : roleType.function === "harvest"? (object) => object.store.getCapacity() /  (2 * evaluateAbility(object, roleType.function)) : (object) => object.store.getCapacity() / evaluateAbility(object, roleType.function)
+                });
+        } else if (roleType.type === "transferer") {
+            this
+                .set(role, {
+                    key : "shrinkToEnergyAvailable",
+                    value : {
+                        bodyMaximumRequirements : bodyPartDetermination({
+                            type : "transfer",
+                            transferAmount : roleType.transferAmount
+                        })
+                    }
+                })
+                .set(role, {
+                    key : "memoryTag",
+                    value : {
+                        tagName : "transferer",
+                        whetherAllowEmptyTag : true
+                    }
+                })
+                .set(role, {
+                    key : "spawnConstraint",
+                    value : {
+                        tag : "transferPatch"
+                    }
+                })
+                .set(role, {
+                    key : "workingTicks",
+                    value : () => 1
+                });
+        }
+    }
+    /**
+     * @param {string} role
+     * @param { {key : "number", value : [number, number]} | {key : "profit", value : (object : import("./task.prototype").GameObject) => number} | {key : "workingTicks", value : (object : import("./task.prototype").GameObject) => number} | {key:"memoryTag", value : {tagName? : string, whetherAllowEmptyTag? : boolean, otherAllowedTags? : string[]}} | {key:"spawnConstraint", value : {tag?:string, mountRoomSpawnOnly?:boolean}} | {key : "static", value : {bodyRequirements : {[body in BodyPartConstant]? : number}, bodyBoostRequirements? : {[body in BodyPartConstant]? : { [compound in ResourceConstant]? : number }}}} | {key : "shrinkToEnergyAvailable" | "shrinkToEnergyCapacity", value : {bodyMaximumRequirements : {[body in BodyPartConstant]? : number}, bodyBoostRequirements? : {[body in BodyPartConstant]? : { [compound in ResourceConstant]? : number }}}} | {key : "expand", value : {expandFunction : (room : Room) => {[body in BodyPartConstant]? : number}, bodyBoostRequirements? : {[body in BodyPartConstant]? : { [compound in ResourceConstant]? : number }}}} | {key : "workingPos", value : RoomPosition} | {key : "objectRequirement", value : (object : import("./task.prototype").GameObject) => boolean}} pair
+     */
+    set(role, pair) {
+        const NotifyRoleKeyUnmatch = () => PrintErr(`${role} could not be set with ${pair.key}`);
+        if (!this.roleType[role] || !this.roleDescriptions[role]) PrintErr(`${role} set before defined.`);
+        if (pair.key === "number") {
+            this.roleDescriptions[role].minimumNumber = pair.value[0];
+            this.roleDescriptions[role].maximumNumber = pair.value[1];
+        } else if (pair.key === "profit") {
+            this.roleDescriptions[role].estimateProfitPerTurn = pair.value;
+        } else if (pair.key === "workingTicks") {
+            this.roleDescriptions[role].estimateWorkingTicks = pair.value;
+        } else if (pair.key === "workingPos") {
+            this.roleDescriptions[role].workingPos = pair.value;
+        } else if (pair.key === "memoryTag") {
+            if (pair.value.tagName) this.roleDescriptions[role].tag = pair.value.tagName;
+            if (pair.value.whetherAllowEmptyTag) this.roleDescriptions[role].allowEmptyTag = pair.value.whetherAllowEmptyTag;
+            if (pair.value.otherAllowedTags) this.roleDescriptions[role].allowOtherTags = pair.value.otherAllowedTags;
+        } else if (pair.key === "objectRequirement") {
+            if (this.roleType[role] !== "common") NotifyRoleKeyUnmatch();
+            else this.roleDescriptions[role].isSatisfied = pair.value;
+        } else if (pair.key === "spawnConstraint") {
+            if (this.roleType[role] !== "creep") NotifyRoleKeyUnmatch();
+            else {
+                if (pair.value.tag) this.roleDescriptions[role].groupTag = pair.value.tag;
+                if (pair.value.mountRoomSpawnOnly) this.roleDescriptions[role].confinedInRoom = pair.value.mountRoomSpawnOnly;
+            }
+        } else if (pair.key === "expand") {
+            if (this.roleType[role] !== "creep") NotifyRoleKeyUnmatch();
+            else {
+                this.roleDescriptions[role].mode = pair.key;
+                this.roleDescriptions[role].expandFunction = pair.value;
+            }
+        } else if (pair.key === "static") {
+            if (this.roleType[role] !== "creep") NotifyRoleKeyUnmatch();
+            else {
+                this.roleDescriptions[role].mode = pair.key;
+                if (pair.value.bodyRequirements) this.roleDescriptions[role].bodyMinimumRequirements = pair.value.bodyRequirements;
+                if (pair.value.bodyBoostRequirements) this.roleDescriptions[role].bodyBoostRequirements = pair.value.bodyBoostRequirements;
+            }
+        } else if (pair.key === "shrinkToEnergyAvailable" || pair.key === "shrinkToEnergyCapacity") {
+            if (this.roleType[role] !== "creep") NotifyRoleKeyUnmatch();
+            else {
+                this.roleDescriptions[role].mode = pair.key;
+                if (pair.value.bodyMaximumRequirements) this.roleDescriptions[role].bodyMinimumRequirements = pair.value.bodyMaximumRequirements;
+                if (pair.value.bodyBoostRequirements) this.roleDescriptions[role].bodyBoostRequirements = pair.value.bodyBoostRequirements;
+            }
+        }
+        return this;
+    }
+    Output() {
+        return this.roleDescriptions;
+    }
+    constructor() {
+        /** @type { {[role : string] : import('./task.prototype').CreepRoleDescription | import("./task.prototype").ObjectRoleDescription} } */
+        this.roleDescriptions = {};
+        /** @type { {[role : string] : import("./task.prototype").RoleType} } */
+        this.roleType = {};
+    }
+}
+/**
+ * A Constructor, which aims at helping to issue tasks.
+ */
+class TaskConstructor {
+    /**
+     * @private
+     * @param {string} name Name of Task
+     * @param {string} mountRoomName Name of Room in which task is issued
+     * @param {import("./task.prototype").GameObject} mountObj
+     * @param {import("./task.prototype").TaskDescriptor} taskDescriptor
+     * @param {{selfCheck: () => "working" | "dead", run: import("./task.modules").Project | () => Array<GameObject>, calcCommutingTicks? : (obj : GameObject) => number }} funcs
+     * @param {{}} taskData
+     */
+    taskConstructor(name, mountRoomName, mountObj, taskDescriptor, funcs, taskData) {
+        new Task(name, mountRoomName, mountObj, taskDescriptor, funcs, taskData);
+    }
+    /**
+     * @private
+     * @param {string} taskType Type of Task, used to control executing number.
+     * @param {RoleConstructor} roleDescriptor
+     * @param {string} taskKey Used to identify task.
+     */
+    taskDescriptorConstructor(taskType, roleDescriptor, taskKey = undefined) {
+        return new TaskDescriptor(taskType, roleDescriptor.Output(), {taskKey : taskKey});
+    }
+    /**
+     * @private
+     * @param { {taskName : string, taskType : string} } param0
+     * @param { {mountRoomName : string, mountObj : import("./task.prototype").GameObject} } param1
+     * @param {RoleConstructor} roleDescriptor
+     * @param { {funcs : {selfCheck: () => "working" | "dead", run: import("./task.modules").Project | () => Array<GameObject>, calcCommutingTicks? : (obj : GameObject) => number }, taskData? : {}, taskKey? : string} } param3
+     */
+    Construct({taskName, taskType}, {mountRoomName, mountObj}, roleDescriptor, {funcs, taskData, taskKey}) {
+        this.taskConstructor(taskName, mountRoomName, mountObj, this.taskDescriptorConstructor(taskType, roleDescriptor, taskKey), funcs, taskData);
+    }
+    /** @param {ConstructionSite} constructionSite */
+    BuildTask(constructionSite) {
+        const NEXT_CONSTRUCTION_TIMEOUT = 50;
+        const NEXT_CONSTRUCTION_OFFSET = 5;
+        const roleDescriptor = new RoleConstructor();
+        roleDescriptor.Register("worker", "creep", {type : "worker", energyConsumptionPerUnitPerTick : 5, function : "build", availableEnergy : (room) => global.ResourceManager.Sum(room.name, RESOURCE_ENERGY, {type : "retrieve", allowToHarvest : false, key : Lucy.Rules.arrangements.BUILD_ONLY})});
+        roleDescriptor
+            .set("worker", {key : "number", value : [1, Infinity]})
+            .set("worker", {key : "profit", value : function (object) {
+                if (this.EmployeeAmount === 0) return 5 * getPrice("energy") * object.store.getCapacity() + object.store.getCapacity() * (this.mountObj.progress / this.mountObj.progressTotal) * getPrice("energy");
+                /* Serve as a collect-up task, but with least privilege */
+                else return -Infinity;
+            }});
+        /**
+         * @type {(amount : number) => Source | StructureContainer | StructureStorage | StructureLink}
+         */
+        const requestResource = function(amount) {
+            let resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", allowToHarvest : false, confinedInRoom : true});
+            if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", allowToHarvest : true, confinedInRoom : true});
+            if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", allowToHarvest : false, confinedInRoom : false});
+            if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", allowToHarvest : true, confinedInRoom : false});
+            return resource;
+        }.bind(constructionSite);
+        if (!requestResource(1)) {
+            Lucy.Timer.add(Game.time + getCacheExpiration(NEXT_CONSTRUCTION_TIMEOUT, NEXT_CONSTRUCTION_OFFSET), constructionSite.triggerBuilding, constructionSite.id, [], `Build ${constructionSite} of Room ${constructionSite.room.name} because of shortage of energy`);
+            return;
+        }
+        this.Construct({taskName : `[${constructionSite.room.name}:ConstructionSitesBuild]`, taskType : "Construct"}, {mountRoomName : constructionSite.room.name, mountObj : constructionSite}, roleDescriptor, {
+            funcs : {
+                selfCheck : function() {
+                    if (!this.mountObj || this.mountObj.progress === this.mountObj.progressTotal) return "dead";
+                    /** Lacking Resources @TODO */
+                    return "working";
+                },
+                run : Builders.BuildFetchResourceAndDoSomethingProject(RESOURCE_ENERGY, requestResource, (creep) => creep.store.getFreeCapacity(RESOURCE_ENERGY), constructionSite, 3, Creep.prototype.build)
+            }
+        });
+    }
+    /**
+     * @param {Structure} structure
+     * @param {(hits : number, hitsMax : number) => boolean} hitsUpperBound
+     */
+    RepairTask(structure, hitsUpperBound = (hits, hitsMax) => hitsMax - hits <= 1) {
+        const NEXT_REPAIR_TIMEOUT = 500;
+        const NEXT_REPAIR_OFFSET  = 50;
+        const roleDescriptor = new RoleConstructor();
+        roleDescriptor.Register("worker", "creep", {type : "worker", energyConsumptionPerUnitPerTick : 1, function : "repair", availableEnergy : (room) => global.ResourceManager.Sum(room.name, RESOURCE_ENERGY, {type : "retrieve", allowToHarvest : false})});
+        roleDescriptor
+            .set("worker", {key : "number", value : [1, 1]})
+            .set("worker", {key : "profit", value : function (object) {
+                return getPrice("energy") * object.store.getCapacity() * (1 + 1 - this.mountObj.hits / this.mountObj.hitsMax);
+            }});
+        /**
+         * @type {(amount : number) => Source | StructureContainer | StructureStorage | StructureLink}
+         */
+        const requestResource = function(amount) {
+            let resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", confinedInRoom : true, allowToHarvest : false});
+            if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", allowToHarvest : true, confinedInRoom : true});
+            if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", allowToHarvest : false, confinedInRoom : false});
+            if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", allowToHarvest : true, confinedInRoom : false});
+            return resource;
+        }.bind(structure);
+        if (!requestResource(1)) {
+            Lucy.Timer.add(Game.time + getCacheExpiration(Math.max(NEXT_REPAIR_TIMEOUT, structure.ticksToDecay * 2), Math.min(structure.ticksToDecay, NEXT_REPAIR_OFFSET)), structure.triggerRepairing, structure.id, [], `Repair ${structure} of Room ${structure.pos.roomName} because of shortage of energy`);
+            return;
+        }
+        this.Construct({taskName : `[${structure.pos.roomName}:Repair]`, taskType : "Repair"}, {mountRoomName : structure.room.name, mountObj : structure}, roleDescriptor, {
+            funcs:{
+                selfCheck : function() {
+                    if (!this.mountObj) return "dead";
+                    /* Repairing Target is stricter */
+                    if (this.taskData.hitsUpperBound(this.mountObj.hits, this.mountObj.hitsMax)) {
+                        /* Since decaying is constant and dynamic, the checking should be too. */
+                        const nextTaskStartedTick = Game.time + getCacheExpiration(Math.max(NEXT_REPAIR_TIMEOUT, this.mountObj.ticksToDecay * 2), Math.min(this.mountObj.ticksToDecay, NEXT_REPAIR_OFFSET));
+                        Lucy.Timer.add(nextTaskStartedTick, this.mountObj.triggerRepairing, this.mountObj.id, [], `Repair ${this.mountObj} of Room ${this.mountObj.room.name} because of completion`);
+                        return "dead";
+                    }
+                    /** Lacking Resources @TODO */
+                    return "working";
+                },
+                run : Builders.BuildFetchResourceAndDoSomethingProject(RESOURCE_ENERGY, requestResource, (creep) => creep.store.getFreeCapacity(RESOURCE_ENERGY), structure, 3, Creep.prototype.repair)
+            },
+            taskData : {hitsUpperBound : hitsUpperBound}
+        });
+    }
+    /**
+     * @param {Structure} structure
+     * @param {ResourceConstant} resourceType
+     * @param {string} triggerFillingFunctionName
+     * @param {number} fillAmount
+     * @param {string} taskType
+     * @param {number} maximumWorkerAmount
+     * @param {(amount : number) => Source | StructureContainer | StructureStorage | StructureLink} requestResource
+     * @param {(amount : number) => StructureContainer | StructureStorage | StructureLink} strictRequestResource
+     * @param {(room : Room) => number} availableEnergy
+     * @param {(object : import("./task.prototype").GameObject) => number} profitFunc
+     * @param {(structure : Structure, resourceType : ResourceConstant) => boolean} storeCheckFunc
+     */
+    RequestTask(structure, resourceType, triggerFillingFunctionName, fillAmount, taskType, maximumWorkerAmount, requestResource, strictRequestResource, availableEnergy, profitFunc, storeCheckFunc) {
+        const NEXT_FILLING_TIMEOUT = 50;
+        const NEXT_FILLING_OFFSET  = 5;
+        const roleDescriptor = new RoleConstructor();
+        const resourceIndicator = requestResource(1);
+        if (!resourceIndicator) {
+            Lucy.Timer.add(Game.time + getCacheExpiration(NEXT_FILLING_TIMEOUT, NEXT_FILLING_OFFSET), structure[triggerFillingFunctionName], structure.id, [], `Filling ${resourceType} for ${structure} because of shortage of resources`);
+            return;
+        }
+        if (isHarvestable(resourceIndicator)) {
+            roleDescriptor.Register("worker", "creep", {type : "worker", availableEnergy : availableEnergy, energyConsumptionPerUnitPerTick : 5, function : "harvest"});
+            roleDescriptor
+                .set("worker", {key : "number", value : [1, maximumWorkerAmount]})
+                .set("worker", {key : "profit", value : profitFunc});
+        } else {
+            requestResource = strictRequestResource;
+            roleDescriptor.Register("worker", "creep", {type : "transferer", transferAmount : fillAmount});
+            roleDescriptor
+                .set("worker", {key : "number", value : [1, maximumWorkerAmount]})
+                .set("worker", {key : "profit", value : profitFunc});
+        }
+        this.Construct({taskName : `[${structure.room.name}:Filling${resourceType}]`, taskType : taskType}, {mountRoomName : structure.room.name, mountObj : structure}, roleDescriptor, {
+            funcs: {
+                selfCheck : function() {
+                    if (!this.mountObj) return "dead";
+                    if (this.EmployeeAmount === 0 && !this.taskData.requestResource(1)) {
+                        Lucy.Timer.add(Game.time + getCacheExpiration(NEXT_FILLING_TIMEOUT, NEXT_FILLING_OFFSET), this.mountObj[this.taskData.triggerFillingFunctionName], this.mountObj.id, [], `Filling ${this.taskData.resourceType} for ${this.mountObj} because of shortage of ${this.taskData.resourceType}`);
+                        return "dead";
+                    }
+                    /** Schedule For Next One */
+                    if (this.taskData.storeCheckFunc(this.mountObj, this.taskData.resourceType)) {
+                        Lucy.Timer.add(Game.time + getCacheExpiration(NEXT_FILLING_TIMEOUT, NEXT_FILLING_OFFSET), this.mountObj[this.taskData.triggerFillingFunctionName], this.mountObj.id, [], `Filling ${this.taskData.resourceType} for ${this.mountObj} because of completion`);
+                        return "dead";
+                    }
+                    return "working";
+                },
+                run : Builders.BuildFetchResourceAndDoSomethingProject(resourceType, requestResource, (creep) => creep.store.getFreeCapacity(resourceType), structure, 1, Creep.prototype.transfer, [resourceType])
+            },
+            taskData : {storeCheckFunc : storeCheckFunc, triggerFillingFunctionName : triggerFillingFunctionName, resourceType : resourceType, requestResource : requestResource},
+            taskKey : `FILLING_${resourceType}`
+        });
+    }
+    TransferTask() {}
+    /**
+     * @param {string} targetRoom
+     */
+    ScoutTask(targetRoom) {
+        const status = Game.map.getRoomStatus(targetRoom).status;
+        if (status === "closed") return;
+        /** Could be detected by Observer */
+        if (Object.keys(Game.rooms).filter((roomName) => Game.map.getRoomLinearDistance(roomName, targetRoom) <= OBSERVER_RANGE && Game.rooms[roomName][STRUCTURE_OBSERVER]).length > 0) return;
+        if (global.TaskManager.Fetch("default", `SCOUT_${targetRoom}`).length > 0) return;
+        const NEXT_SCOUT_TIMEOUT = CONTROLLER_RESERVE_MAX;
+        const NEXT_SCOUT_OFFSET  = Math.floor(CONTROLLER_RESERVE_MAX / 10);
+        const roomName = Object.keys(Game.rooms).filter((roomName) => Game.map.getRoomStatus(roomName).status === status).filter((roomName) => Game.rooms[roomName].controller && Game.rooms[roomName].controller.my).sort((u, v) => calcRoomDistance(u, targetRoom) - calcRoomDistance(v, targetRoom))[0];
+        if (!roomName) {
+            global.Lucy.Timer.add(Game.time + getCacheExpiration(NEXT_SCOUT_TIMEOUT, NEXT_SCOUT_OFFSET), this.ScoutTask, this, [targetRoom], `Scout ${targetRoom}`);
+            return;
+        }
+        const roleDescriptor = new RoleConstructor();
+        roleDescriptor.Register("worker", "creep");
+        roleDescriptor
+            .set("worker", {key : "static", value : {bodyRequirements : {[MOVE] : 1}}})
+            .set("worker", {key : "memoryTag", value : {tagName : "scouter", whetherAllowEmptyTag : false}})
+            .set("worker", {key : "profit", value : () => 1})
+            .set("worker", {key : "workingTicks", value : () => 0})
+            .set("worker", {key : "spawnConstraint", value : {tag : "scoutPatch", mountRoomSpawnOnly : true}})
+            .set("worker", {key : "number", value : [1,1]});
+        this.Construct({taskName : `[Scout:${roomName}->${targetRoom}]`, taskType : "Scout"}, {mountRoomName : roomName, mountObj : {id : null}}, roleDescriptor, {
+            funcs : {
+                selfCheck : function() {
+                    if (Memory.rooms[this.taskData.targetRoom] && Math.abs(Memory.rooms[this.taskData.targetRoom]._lastCheckingTick - Game.time) <= 1) {
+                        global.Lucy.Timer.add(Game.time + getCacheExpiration(NEXT_SCOUT_TIMEOUT, NEXT_SCOUT_OFFSET), this.taskData.taskConstructor.ScoutTask, undefined, [this.taskData.targetRoom], `Scout ${this.taskData.targetRoom}`);
+                        return "dead";
+                    }
+                    return "working";
+                },
+                run : function() {
+                    /** @type {Creep} */
+                    const worker = Object.keys(this.employee2role).map(Game.getObjectById)[0];
+                    if (!worker) return [];
+                    if (!worker.memory.flags) worker.memory.flags = {};
+                    if (worker.memory.flags.route === undefined) worker.memory.flags.route = global.Map.DescribeRoute(worker.room.name, this.taskData.targetRoom);
+                    if (worker.room.name === this.taskData.targetRoom) return [worker];
+                    else {
+                        if (worker.memory.flags.route) {
+                            if (worker.room.name === worker.memory.flags.route[0]) worker.memory.flags.route.shift();
+                            worker.travelTo(global.MapMonitorManager.FetchVacantSpace(worker.memory.flags.route[0]));
+                        } else worker.travelTo(global.MapMonitorManager.FetchVacantSpace(this.taskData.targetRoom)[0]);
+                        return [];
+                    }
+                }
+            },
+            taskData : {targetRoom : targetRoom, taskConstructor : _taskConstructor},
+            taskKey : `SCOUT_${targetRoom}`
+        });
+    }
+    constructor() {}
+}
 /**
  * Class Representation for TaskManager
  */
@@ -44,10 +424,16 @@ class TaskManager {
         if (!this.room2tag2tasks[roomName][task.Type]) this.room2tag2tasks[roomName][task.Type] = [];
         this.room2tag2tasks[roomName][task.Type].push(task);
         /** Register into Id Controller */
-        if (task.Descriptor.Key && task.mountObj) {
-            if (!this.id2key2tasks[task.mountObj.id]) this.id2key2tasks[task.mountObj.id] = {};
-            if (!this.id2key2tasks[task.mountObj.id][task.Descriptor.Key]) this.id2key2tasks[task.mountObj.id][task.Descriptor.Key] = [];
-            this.id2key2tasks[task.mountObj.id][task.Descriptor.Key].push(task);
+        if (task.Descriptor.Key) {
+            if (task.mountObj) {
+                if (!this.id2key2tasks[task.mountObj.id]) this.id2key2tasks[task.mountObj.id] = {};
+                if (!this.id2key2tasks[task.mountObj.id][task.Descriptor.Key]) this.id2key2tasks[task.mountObj.id][task.Descriptor.Key] = [];
+                this.id2key2tasks[task.mountObj.id][task.Descriptor.Key].push(task);
+            } else {
+                if (!this.id2key2tasks["default"]) this.id2key2tasks["default"] = {};
+                if (!this.id2key2tasks["default"][task.Descriptor.Key]) this.id2key2tasks["default"][task.Descriptor.Key] = [];
+                this.id2key2tasks["default"][task.Descriptor.Key].push(task);
+            }
         }
     }
     /**
@@ -178,6 +564,8 @@ class TaskManager {
     }
 };
 profiler.registerClass(TaskManager, "TaskManager");
+const _taskConstructor = new TaskConstructor();
 module.exports = {
-    TaskManager : TaskManager
+    TaskManager : TaskManager,
+    TaskConstructor : _taskConstructor
 };

@@ -3,6 +3,7 @@
  * Define some Special Behaviors within a Room
  * @typedef {CentralSpawnUnit} CentralSpawnUnit
  * @typedef {CentralTransferUnit} CentralTransferUnit
+ * NOTICE : Whenever functions in `mount` use rooms' units, they should be delayed because of dependence on planning!
  */
 const Task = require('./task.prototype').Task;
 const TaskDescriptor = require('./task.prototype').TaskDescriptor;
@@ -527,14 +528,17 @@ class CentralTransferUnit {
         if (this.Extension && structure.id === this.Extension.id) return true;
         return false;
     }
-    /** @param {Room} room */
-    constructor(room) {
-        /** @private */
-        this.room = room;
+    initParam() {
         /** @type { [number, number, number, number] } @private */
         this._y1_x1_y2_x2 = Memory.autoPlan[this.room.name]["centralTransfer"][0];
         this.LeftTopPos = new RoomPosition(this._y1_x1_y2_x2[1], this._y1_x1_y2_x2[0], this.room.name);
         this.RightBottomPos = new RoomPosition(this._y1_x1_y2_x2[3], this._y1_x1_y2_x2[2], this.room.name);
+    }
+    /** @param {Room} room */
+    constructor(room) {
+        /** @private */
+        this.room = room;
+        this.initParam();
         /** @type {Array<TransferOrder>} @private */
         this.orderQueue = [];
         this.issueTasks();
@@ -549,6 +553,16 @@ function mount() {
         /** Calling for Construction */
         this.centralSpawn;
         this.centralTransfer;
+    }
+    Room.prototype.Detect = function() {
+        this.memory._lastCheckingTick = Game.time;
+        this.memory.owner = this.controller ? this.controller.owner.username : null;
+        /** Detect InvaderCore */
+        const OriginalHostileStructures = this.memory.hostileStructures || [];
+        this.memory.hostileStructures = this.find(FIND_HOSTILE_STRUCTURES).map(s => s.id);
+        const differenceHostileStructures = _.difference(this.memory.hostileStructures, OriginalHostileStructures);
+        if (!this.memory.sourceAmount) this.memory.sourceAmount = this.find(FIND_SOURCES).length;
+        this.memory.sourceCapacities = this.find(FIND_SOURCES).map(s => s.energyCapacity > SOURCE_ENERGY_CAPACITY ? s.energyCapacity : SOURCE_ENERGY_CAPACITY);
     }
     Object.defineProperty(Room.prototype, "centralSpawn", {
         configurable : false,

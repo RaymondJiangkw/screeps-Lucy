@@ -1,4 +1,5 @@
-const isMyRoom                      =   require('./util').isMyRoom;
+const isMyRoom                      = require('./util').isMyRoom;
+const calcInRoomDistance            = require('./util').calcInRoomDistance;
 const parseBodyPartsConfiguration   = require('./util').parseBodyPartsConfiguration;
 const { EVENT_TYPES }               = require("./lucy.log");
 /**
@@ -31,7 +32,9 @@ function $() {
             /** @type {{} | { body : {[body in BodyPartConstant]? : number}, memory : {}, workingPos? : RoomPosition} } */
             const spawnedCreep = global.CreepSpawnManager.Query(roomName);
             if (!spawnedCreep.body) continue;
-            if (spawnedCreep.workingPos) candidateSpawns.sort((a, b) => a.pos.getRangeTo(spawnedCreep.workingPos) - b.pos.getRangeTo(spawnedCreep.workingPos));
+            /** Record Spawn Room Name */
+            spawnedCreep.memory.spawnRoomName = roomName;
+            if (spawnedCreep.workingPos) candidateSpawns.sort((a, b) => calcInRoomDistance(a.pos, spawnedCreep.workingPos) - calcInRoomDistance(b.pos, spawnedCreep.workingPos));
             candidateSpawns[0].spawnCreep(
                 parseBodyPartsConfiguration(spawnedCreep.body),
                 `@${Game.shard.name}-${roomName}-${Game.time}`,
@@ -80,6 +83,8 @@ function $() {
             if (isMyRoom(Game.rooms[roomName])) {
                 global.Map.AutoPlan(roomName);
                 Game.rooms[roomName].init();
+            } else {
+                Game.rooms[roomName].Detect();
             }
         }
     }.bind(global.Lucy);

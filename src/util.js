@@ -2,7 +2,95 @@
  * @module util
  * @typedef {CreepFunctions} CreepFunctions
  */
-
+const top = 0;
+const parent = i => ((i + 1) >>> 1) - 1;
+const left = i => (i << 1) + 1;
+const right = i => (i + 1) << 1;
+const username = _.sample(Game.spawns).owner.username;
+class PriorityQueue {
+    constructor(comparator=(a,b)=>a>b){
+        this._heap=[];
+        this._comparator=comparator;
+    }
+    size(){
+        return this._heap.length;
+    }
+    isEmpty(){
+        return this.size()===0;
+    }
+    peek(){
+        return this._heap[top];
+    }
+    push(...values){
+        values.forEach(value=>{
+            this._heap.push(value);
+            this._siftUp();
+        });
+        return this.size();
+    }
+    pop(){
+        const poppedValue=this.peek();
+        const bottom=this.size()-1;
+        if(bottom>top){
+            this._swap(top,bottom);
+        }
+        this._heap.pop();
+        this._siftDown();
+        return poppedValue;
+    }
+    replace(value){
+        const replacedValue=this.peek();
+        this._heap[top]=value;
+        this._siftDown();
+        return replacedValue;
+    }
+    _greater(i,j){
+        return this._comparator(this._heap[i],this._heap[j]);
+    }
+    _swap(i,j){
+        [this._heap[i],this._heap[j]]=[this._heap[j],this._heap[i]];
+    }
+    _siftUp(){
+        let node=this.size()-1;
+        while(node>top && this._greater(node,parent(node))){
+            this._swap(node,parent(node));
+            node=parent(node);
+        }
+    }
+    _siftDown(){
+        let node=top;
+        while(
+            (left(node)<this.size() && this._greater(left(node),node))||
+            (right(node)<this.size() && this._greater(right(node),node))
+            ) {
+                let maxChild=(right(node)<this.size() && this._greater(right(node),left(node)))? right(node) : left(node);
+                this._swap(node,maxChild);
+                node=maxChild;
+        }
+    }
+}
+/**
+ * @param {string} name
+ */
+function roomNameToXY(name) {
+    let xx = parseInt(name.substr(1), 10);
+    let verticalPos = 2;
+    if (xx >= 100) {
+        verticalPos = 4;
+    } else if (xx >= 10) {
+        verticalPos = 3;
+    }
+    let yy = parseInt(name.substr(verticalPos + 1), 10);
+    let horizontalDir = name.charAt(0);
+    let verticalDir = name.charAt(verticalPos);
+    if (horizontalDir === 'W' || horizontalDir === 'w') {
+        xx = -xx - 1;
+    }
+    if (verticalDir === 'N' || verticalDir === 'n') {
+        yy = -yy - 1;
+    }
+    return [xx, yy];
+}
 module.exports = {
     mount: function () {
         /**
@@ -128,35 +216,27 @@ module.exports = {
     },
     /**
      * calcDistance returns the distance between `roomU` and `roomV`.
-     * @param {string} roomNameU
-     * @param {string} roomNameV
-     * 
-     * @TODO
-     * Need enhancement for a better real-life distance instead of pure linear distance.
+     * @param {string | RoomPosition} roomNameU_or_posU
+     * @param {string | RoomPosition} roomNameV_or_posV
+     * @returns {number}
      */
-    calcDistance : function(roomNameU, roomNameV) {
-        return Game.map.getRoomLinearDistance(roomNameU, roomNameV);
+    calcRoomDistance : function(roomNameU_or_posU, roomNameV_or_posV) {
+        const roomNameU = typeof roomNameU_or_posU === "string" ? roomNameU_or_posU : roomNameU_or_posU.roomName;
+        const roomNameV = typeof roomNameV_or_posV === "string" ? roomNameV_or_posV : roomNameV_or_posV.roomName;
+        const ret = global.Map.CalcRoomDistance(roomNameU, roomNameV);
+        if (ret === Infinity) return Game.map.getRoomLinearDistance(roomNameU, roomNameV);
+        else return ret;
     },
     /**
      * calcInRoomDistance returns the distance between two positions inside a room.
      * @param {RoomPosition} posU
      * @param {RoomPosition} posV
-     * @param {Room | null} room provide information of landscape
-     * 
-     * @TODO
-     * Need enhancement for a better real-life distance instead of pure arithmetic distance.
      */
-    calcInRoomDistance : function(posU, posV, room = null) {
-        return Math.abs(posU.x - posV.x) + Math.abs(posU.y - posV.y);
-    },
-    /**
-     * @param {RoomPosition} posU
-     * @param {RoomPosition} posV
-     * @TODO
-     * Need enhancement for a better real-life distance instead of pure arithmetic distance.
-     */
-    calcCrossRoomDistance : function(posU, posV) {
-        return Game.map.getRoomLinearDistance(posU.roomName, posV.roomName) * 50; // 50 : diameter of room
+    calcInRoomDistance : function(posU, posV) {
+        const roomName = posU.roomName;
+        const ret = global.Map.CalcInRoomDistance(roomName, posU, posV);
+        if (ret) return ret;
+        return Math.max(Math.abs(posU.x - posV.x), Math.abs(posU.y - posV.y));
     },
     /**
      * getPrice play a crucial role in operating money system.
@@ -236,9 +316,8 @@ module.exports = {
         return ret;
     },
     /**
-     * @typedef {"capacity" | "harvest" | "build" | "repair" | "dismantle" | "upgradeController" | "attack" | "rangedAttack" | "rangedMassAttack" | "heal" | "rangedHeal" | "fatigue" | "damage"} CreepFunctions
      * @param {Creep} creep
-     * @param {CreepFunctions} aspect
+     * @param {"capacity" | "harvest" | "build" | "repair" | "dismantle" | "upgradeController" | "attack" | "rangedAttack" | "rangedMassAttack" | "heal" | "rangedHeal" | "fatigue" | "damage"} aspect
      * @returns {number} equivalent number of body parts
      */
     evaluateAbility(creep, aspect) {
@@ -323,7 +402,7 @@ module.exports = {
     },
     /**
      * @TODO Consider Boosts
-     * @param { {type : "exhuastEnergy", availableEnergy : number, energyConsumptionPerUnitPerTick : number, sustainTick? : number} } mode
+     * @param { {type : "exhuastEnergy", availableEnergy : number, energyConsumptionPerUnitPerTick : number, sustainTick? : number} | {type : "transfer", transferAmount : number} } mode
      * @returns { {[bodypart in BodyPartConstant]? : number} }
      */
     bodyPartDetermination(mode) {
@@ -371,6 +450,36 @@ module.exports = {
                 [CARRY] : Math.floor(carryNum * Math.min(50 / sumOfBodyParts, 1)),
                 [MOVE] : Math.floor(moveNum * Math.min(50 / sumOfBodyParts, 1))
             };
+        } else if (mode.type === "transfer") {
+            /* Capacity of a single CARRY */
+            const CARRY_CAPACITY = 50;
+            /* Number of bodyparts a MOVE can boost */
+            const MOVE_COEFFICIENT = 2;
+            const carry = Math.ceil(mode.transferAmount / CARRY_CAPACITY);
+            const carryNum = carry >= 1 ? carry : 1;
+            const moveNum = Math.max(1, Math.ceil(carryNum / MOVE_COEFFICIENT));
+            const sumOfBodyParts = carryNum + moveNum;
+            return {
+                [CARRY] : Math.floor(carryNum * Math.min(50 / sumOfBodyParts, 1)),
+                [MOVE] : Math.floor(moveNum * Math.min(50 / sumOfBodyParts, 1))
+            }
         }
-    }
+    },
+    /**
+     * @param {string} roomName
+     * @returns {"sideway" | "central" | "normal"}
+     */
+    decideRoomStatus(roomName) {
+        const x_y = roomNameToXY(roomName);
+        if ((x_y[0] >= 0 ? x_y[0] % 10 === 0 : -(x_y[0] + 1) % 10 === 0) || (x_y[1] >= 0 ? x_y[1] % 10 === 0 : -(x_y[1] + 1) % 10 === 0)) return "sideway";
+    },
+    /**
+     * @param {string} message
+     */
+    PrintErr(message) {
+        console.log(`<p style="display:inline;color:red;">Error: </p> ${message}`);
+        Game.notify(message);
+    },
+    PriorityQueue : PriorityQueue,
+    username : username
 };

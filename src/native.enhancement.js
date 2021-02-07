@@ -2,10 +2,13 @@
  * @module native.enhancement
  */
 const getCacheExpiration    =   require('./util').getCacheExpiration;
-const calcDistance          =   require('./util').calcDistance;
 const constructArray        =   require('./util').constructArray;
 const isConstructionSite    =   require('./util').isConstructionSite;
 const calcInRoomDistance    =   require('./util').calcInRoomDistance;
+const decideRoomStatus      =   require('./util').decideRoomStatus;
+const PriorityQueue         =   require('./util').PriorityQueue;
+const username              =   require('./util').username;
+const TaskConstructor       =   require('./manager.tasks').TaskConstructor;
 const profiler = require('./screeps-profiler');
 function mount() {
     /**
@@ -295,9 +298,13 @@ class MapMonitor {
      */
     updateTerrainCache(roomName) {
         this.terrains[roomName] = constructArray([50,50],0);
+        this.roomVacantTerrain[roomName] = [];
         const terrain = new Room.Terrain(roomName);
         for (let y = 0; y < 50; ++y) {
-            for (let x = 0; x < 50; ++x) this.terrains[roomName][y][x] = terrain.get(x, y);
+            for (let x = 0; x < 50; ++x) {
+                this.terrains[roomName][y][x] = terrain.get(x, y);
+                if (this.terrains[roomName][y][x] !== TERRAIN_MASK_WALL) this.roomVacantTerrain[roomName].push(new RoomPosition(x, y, roomName));
+            }
         }
     }
     /**
@@ -411,6 +418,13 @@ class MapMonitor {
         const y1 = Math.min(_y1, _y2), y2 = Math.max(_y1, _y2);
         const x1 = Math.min(_x1, _x2), x2 = Math.max(_x1, _x2);
         return this.spaces[roomName].get(y2,x2)-this.spaces[roomName].get(y2,x1-1)-this.spaces[roomName].get(y1-1,x2)+this.spaces[roomName].get(y1-1,x1-1);
+    }
+    /**
+     * @param {string} roomName
+     */
+    FetchVacantSpace(roomName) {
+        if (!this.roomVacantTerrain[roomName]) this.updateTerrainCache(roomName);
+        return this.roomVacantTerrain[roomName];
     }
     /**
      * @param {string} roomName
@@ -558,6 +572,11 @@ class MapMonitor {
         this.terrains       = {};
         /**
          * @private
+         * @type { {[roomName : string] : Array<RoomPosition>} }
+         */
+        this.roomVacantTerrain = {};
+        /**
+         * @private
          * @type { {[roomName : string] : Array<Array<number> >} }
          */
         this.spaces         = {};
@@ -701,8 +720,11 @@ class Planer {
          */
         /** @type { {[fitNumber : number] : Array<[number, number, number, number]>} } */
         let record = {};
-        for (let y = 0; y + unit.dy <= 50; ++y) {
-            for (let x = 0; x + unit.dx <= 50; ++x) {
+        /**
+         * Module could not be placed near the edge so that ramparts are hard to protect them.
+         */
+        for (let y = 0 + 5; y + unit.dy <= 50 - 5; ++y) {
+            for (let x = 0 + 5; x + unit.dx <= 50 - 5; ++x) {
                 /** Apply Options of Unit */
                 if (unit.Options.alongRoad) {
                     /** Left-Top Node should be strictly adjacent to Road and not on the Road */
@@ -835,6 +857,14 @@ class Planer {
             }
         }
         return false;
+    }
+    /**
+     * @param {string} roomName
+     * @param {string} unitType
+     */
+    FetchUnitPos(roomName, unitType) {
+        if (!this.units2pos[roomName]) return [];
+        return this.units2pos[roomName][unitType] || [];
     }
     /**
      * @param {string} roomName
@@ -1176,6 +1206,8 @@ const ROOM_DISTANCE_CACHE_OFFSET        = 5;
 /**
  * Class Representation for Map.
  * Single.
+ * @TODO
+ * Cross-Shard Cases
  */
 class Map {
     /**
@@ -1192,9 +1224,184 @@ class Map {
     updateDistanceCache(roomName) {
         if (!this.sortedDistancesExpiration[roomName] || this.sortedDistancesExpiration[roomName] <= Game.time) {
             this.sortedDistancesExpiration[roomName] = Game.time + getCacheExpiration(ROOM_DISTANCE_CACHE_TIMEOUT, ROOM_DISTANCE_CACHE_OFFSET);
-            let roomNames = Object.keys(Game.rooms);
-            this.sortedDistances[roomName] = roomNames.sort((u, v) => calcDistance(roomName,u) - calcDistance(roomName, v));
+            this.updateAdjacentRooms(roomName, {fullDistrict : true});
+            this.updateDistanceBetweenRooms(roomName);
+            let roomNames = Object.keys(Game.rooms).filter((r) => this.disFromRoom[roomName][r].distance !== Infinity && Game.rooms[r].controller && (Game.rooms[r].controller.my || (Game.rooms[r].controller.reservation && Game.rooms[r].controller.reservation.username === username)));
+            this.sortedDistances[roomName] = roomNames.sort((u, v) => this.disFromRoom[roomName][u].distance - this.disFromRoom[roomName][v].distance);
         }
+    }
+    /**
+     * Ticks taken :
+     *  - E7S27 7.477542799999981
+     * @param {string} roomName
+     */
+    updateInRoomDistance(roomName) {
+        if (!this.room2center[roomName]) return;
+        const center = this.room2center[roomName];
+        const terrain = mapMonitor.FetchTerrain(roomName);
+        this.room2distanceFromCenter[roomName] = constructArray([50,50], -1);
+        const dx = [-1,-1,-1,0,0,1,1,1], dy = [-1,0,1,-1,1,-1,0,1], dlen = dx.length;
+        /** @type {Array<{x : number, y : number, dis : number}>} */
+        const Queue = [];
+        Queue.push({y : center.y, x : center.x, dis : 0});
+        this.room2distanceFromCenter[roomName][center.y][center.x] = 0;
+        while (Queue.length > 0) {
+            const front = Queue.shift();
+            for (let i = 0; i < dlen; ++i) {
+                if (front.y + dy[i] < 0 || front.y + dy[i] > 49 || front.x + dx[i] < 0 || front.x + dx[i] > 49) continue;
+                if (this.room2distanceFromCenter[roomName][front.y + dy[i]][front.x + dx[i]] !== -1) continue;
+                if (terrain[front.y + dy[i]][front.x + dx[i]] === TERRAIN_MASK_WALL) {
+                    this.room2distanceFromCenter[roomName][front.y + dy[i]][front.x + dx[i]] = Infinity;
+                    continue;
+                }
+                this.room2distanceFromCenter[roomName][front.y + dy[i]][front.x + dx[i]] = front.dis + 1;
+                Queue.push({y : front.y + dy[i], x : front.x + dx[i], dis : front.dis + 1});
+            }
+        }
+    }
+    /**
+     * @param {string} roomName
+     * @param { {fullDistrict : boolean} } options
+     */
+    updateAdjacentRooms(roomName, options = {maximumDepth : 1}) {
+        if (options.fullDistrict) {
+            /**
+             * @param {string} roomName
+             */
+            const dfs = (roomName) => {
+                if (this.roomVisited[roomName]) return;
+                if (!this.roomEdges[roomName]) this.roomEdges[roomName] = [];
+                this.roomVisited[roomName] = true;
+                this.roomRecorded.add(roomName);
+                const exits = Game.map.describeExits(roomName);
+                for (const direction in exits) {
+                    this.roomEdges[roomName].push(exits[direction]);
+                    if (decideRoomStatus(roomName) === "sideway") {
+                        /** Only Record Path, no Extension */
+                        this.roomRecorded.add(exits[direction]);
+                        continue;
+                    }
+                    dfs(exits[direction]);
+                }
+            };
+            dfs(roomName);
+        }
+    }
+    /**
+     * @param {string} origin
+     */
+    updateDistanceBetweenRooms(origin) {
+        if (!this.disFromRoom[origin]) this.disFromRoom[origin] = {};
+        if (!this.disFromRoomTotalRooms[origin] || this.disFromRoomTotalRooms[origin] < Object.keys(this.roomRecorded).length) {
+            this.disFromRoomTotalRooms[origin] = Object.keys(this.roomRecorded).length;
+            for (const roomName of this.roomRecorded) {
+                if (!this.disFromRoom[origin][roomName]) this.disFromRoom[origin][roomName] = {distance : Infinity, fromRoomName : roomName};
+            }
+            this.disFromRoom[origin][origin] = {distance : 0, fromRoomName : origin};
+            const Q = new PriorityQueue((a, b) => a.distance < b.distance);
+            Q.push({distance : 0, node : origin});
+            while (!Q.isEmpty()) {
+                /** @type { {distance : number, node : number} } */
+                const top = Q.pop();
+                if (top.distance !== this.disFromRoom[origin][top.node].distance) continue;
+                for (const roomName of (this.roomEdges[top.node] || [])) {
+                    if (!this.disFromRoom[origin][roomName]) console.log(roomName);
+                    if (this.disFromRoom[origin][roomName].distance > top.distance + 1) {
+                        this.disFromRoom[origin][roomName].distance = top.distance + 1;
+                        this.disFromRoom[origin][roomName].fromRoomName = top.node;
+                        Q.push({distance : top.distance + 1, node : roomName});
+                    }
+                }
+            }
+        }
+    }
+    /**
+     * @param {string} roomName
+     * @param {RoomPosition} posU
+     * @param {RoomPosition} posV
+     * @returns {number | null}
+     */
+    CalcInRoomDistance(roomName, posU, posV) {
+        if (!this.room2distanceFromCenter[roomName]) this.updateInRoomDistance(roomName);
+        if (!this.room2distanceFromCenter[roomName]) return null;
+        // console.log(this.room2distanceFromCenter[roomName][posU.y][posU.x], this.room2distanceFromCenter[roomName][posV.y][posV.x]);
+        return this.room2distanceFromCenter[roomName][posU.y][posU.x] + this.room2distanceFromCenter[roomName][posV.y][posV.x];
+    }
+    /**
+     * @param {string} roomNameU
+     * @param {string} roomNameV
+     */
+    CalcRoomDistance(roomNameU, roomNameV) {
+        this.updateAdjacentRooms(roomNameU, {fullDistrict : true});
+        this.updateAdjacentRooms(roomNameV, {fullDistrict : true});
+        if (this.disFromRoom[roomNameU]) this.updateDistanceBetweenRooms(roomNameU);
+        else this.updateDistanceBetweenRooms(roomNameV);
+        if (this.disFromRoom[roomNameU]) {
+            return this.disFromRoom[roomNameU][roomNameV].distance;
+        } else {
+            return this.disFromRoom[roomNameV][roomNameU].distance;
+        }
+    }
+    /**
+     * @param {string} fromRoomName
+     * @param {string} toRoomName
+     * @returns {Array<string> | null}
+     */
+    DescribeRoute(fromRoomName, toRoomName) {
+        this.updateAdjacentRooms(fromRoomName, {fullDistrict : true});
+        this.updateAdjacentRooms(toRoomName, {fullDistrict : true});
+        if (this.disFromRoom[fromRoomName]) this.updateDistanceBetweenRooms(fromRoomName);
+        else this.updateDistanceBetweenRooms(toRoomName);
+        if (this.disFromRoom[fromRoomName]) {
+            if (this.disFromRoom[fromRoomName][toRoomName].distance === Infinity) return null;
+            let roomName = toRoomName;
+            const ret = [];
+            while (roomName !== fromRoomName) {
+                ret.push(roomName);
+                roomName = this.disFromRoom[fromRoomName][roomName].fromRoomName;
+            }
+            ret.push(roomName);
+            return ret.reverse();
+        } else {
+            if (this.disFromRoom[toRoomName][fromRoomName].distance === Infinity) return null;
+            let roomName = fromRoomName;
+            const ret = [];
+            while (roomName !== toRoomName) {
+                ret.push(roomName);
+                roomName = this.disFromRoom[toRoomName][roomName].fromRoomName;
+            }
+            ret.push(roomName);
+            return ret;
+        }
+    }
+    /**
+     * @param {string} roomName
+     * @param {string} targetRoomName
+     * @returns {number | null} Profit Per Tick
+     */
+    IsExploitRoomProfitable(roomName, targetRoomName) {
+        if (this.roomRelativeProfit[roomName] && this.roomRelativeProfit[roomName][targetRoomName]) return this.roomRelativeProfit[roomName][targetRoomName];
+        if (!this.roomRelativeProfit[roomName]) this.roomRelativeProfit[roomName] = {};
+        /** Not in the Detection Mode */
+        if (Memory.rooms[targetRoomName] && !Memory.rooms[targetRoomName]._lastCheckingTick) return this.roomRelativeProfit[roomName][targetRoomName] = 0;
+        if (Game.rooms[targetRoomName] && Game.rooms[targetRoomName].controller && Game.rooms[targetRoomName].controller.my) return this.roomRelativeProfit[roomName][targetRoomName] = 0;
+        this.updateAdjacentRooms(roomName, {fullDistrict : true});
+        this.updateDistanceBetweenRooms(roomName);
+        if (this.disFromRoom[roomName][targetRoomName].distance === Infinity) return this.roomRelativeProfit[roomName][targetRoomName] = 0;
+        const distance = this.disFromRoom[roomName][targetRoomName].distance * 50;
+        if (!Memory.rooms[targetRoomName] || !Memory.rooms[roomName]._lastCheckingTick) {
+            TaskConstructor.ScoutTask(targetRoomName);
+            return null;
+        }
+        /** @type {number} */
+        const sourceAmount = Memory.rooms[roomName].sourceAmount;
+        /**
+         * We assume half of the total roads are on the plain, and the other half are on the swamp.
+         * And the default setting for Harvester : {[WORK]:10, [CARRY]:2, [MOVE]:12} : 1700, Transferer : {[CARRY]:20, [MOVE]:20} : 2000
+         */
+        const costPerTick = Math.floor(distance / 2) * ROAD_DECAY_AMOUNT / ROAD_DECAY_TIME * (1 + 5) / REPAIR_POWER + sourceAmount * CONTAINER_DECAY / CONTAINER_DECAY_TIME / REPAIR_POWER + (1700 + 2000) / CREEP_LIFE_TIME;
+        const profitPerTick = _.sum(Memory.rooms[targetRoomName].sourceCapacities) / ENERGY_REGEN_TIME;
+        return this.roomRelativeProfit[roomName][targetRoomName] = profitPerTick - costPerTick;
     }
     /**
      * @param {Id<Creep | PowerCreep>} creep
@@ -1279,7 +1486,7 @@ class Map {
             this.planCache[roomName].controllerLevel = Game.rooms[roomName].controller.level;
         }
         // NOTICE: remove Of ConstructionSite is not counted by EVENT_OBJECT_DESTROYED.
-        if (Game.rooms[roomName].getEventLog().filter(e => e.event === EVENT_OBJECT_DESTROYED && e.data.type !== "creep").length > 0 || global.signals.IsConstructionSiteCancel[roomName]) options.objectDestroy = true;
+        if (Game.rooms[roomName].getEventLog().filter(e => e.event === EVENT_OBJECT_DESTROYED && e.data.type !== "creep").length > 0 || global.signals.IsConstructionSiteCancel[roomName] || global.signals.IsStructureDestroy[roomName]) options.objectDestroy = true;
         if (global.signals.IsNewStructure[roomName]) options.structureConstruct = true;
         /**
          * 3. Calling Planner
@@ -1382,8 +1589,13 @@ class Map {
                     writeToMemory : true,
                     readFromMemory : true
                 }));
-                // console.log(JSON.stringify(this.planCache[roomName].feedbacks["centralSpawn"]));
                 doneRet(this.planCache[roomName].feedbacks["centralSpawn"]);
+                // Use as Central Point in the room
+                if (!this.room2center[roomName]) {
+                    const yxyx = planer.FetchUnitPos(roomName, "centralSpawn")[0];
+                    const pos = new RoomPosition((yxyx[1] + yxyx[3]) / 2, (yxyx[0] + yxyx[2]) / 2, roomName);
+                    this.room2center[roomName] = pos;
+                }
             }
             if (level >= 2) {
                 /* Plan For Harvest Unit */
@@ -1526,7 +1738,23 @@ class Map {
         /**
          * @type { {[roomName : string] : Array<Array<number>>} }
          */
-        this.room2distance              = {};
+        this.room2distanceFromCenter    = {};
+        /**
+         * @type { {[roomName : string] : RoomPosition} }
+         */
+        this.room2center                = {};
+        /** @type { {[roomName : string] : Array<string>} } */
+        this.roomEdges                  = {};
+        /** @type { {[roomName : string] : boolean} } */
+        this.roomVisited                = {};
+        /** @type { Set<string> } */
+        this.roomRecorded               = new Set();
+        /** @type { {[origin : string] : {[roomName : string] : {distance : number, fromRoomName : string}}} } */
+        this.disFromRoom                = {};
+        /** @type { {[origin : string] : number} } */
+        this.disFromRoomTotalRooms      = {};
+        /** @type { {[roomName : string] : {[targetRoomName : string] : number}} } */
+        this.roomRelativeProfit         = {};
     }
 };
 /** @global */

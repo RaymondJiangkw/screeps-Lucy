@@ -10,7 +10,7 @@
 const EventTaskOfObjectStatusChange = require("./lucy.log").EventTaskOfObjectStatusChange;
 const EventTaskStatusChange         = require("./lucy.log").EventTaskStatusChange;
 const getPrice                      = require('./util').getPrice;
-const calcCrossRoomDistance         = require('./util').calcCrossRoomDistance;
+const calcRoomDistance              = require('./util').calcRoomDistance;
 const calcInRoomDistance            = require('./util').calcInRoomDistance;
 const isCreep                       = require('./util').isCreep;
 const isStructure                   = require('./util').isStructure;
@@ -87,7 +87,7 @@ function mountEveryTick() {
 }
 /**
  * Class representing a Descriptor for Task.
- * @TODO
+ * @typedef {"creep" | "common"} RoleType
  * Support abstract task-taken objects.
  * @typedef {"static" | "expand" | "shrinkToEnergyAvailable" | "shrinkToEnergyCapacity"} CreepSpawnMode Notice that in "expand" mode, only `tag` will be considered.
  * @typedef { { minimumNumber : number, maximumNumber : number, estimateProfitPerTurn : (object : GameObject) => number, estimateWorkingTicks : (object : GameObject) => number, tag ? : string, groupTag ? : string, allowEmptyTag ? : boolean, allowOtherTags ? : Array<string>} } CommonRoleDescription `tag` is used for hiring specific `creep`. Those creeps with defined tag will not be hired into `role` without tag. `groupTag` is used to control the spawning of creeps.
@@ -260,7 +260,8 @@ class TaskCreepDescriptor {
         return this.roleDescription.mode || "static";
     }
     get IsConfinedInRoom() {
-        return this.roleDescription.confinedInRoom || false;
+        if (typeof this.roleDescription.confinedInRoom === "boolean") return this.roleDescription.confinedInRoom;
+        else return true;
     }
     get WorkingPos() {
         return this.roleDescription.workingPos;
@@ -523,7 +524,7 @@ class Task {
              */
             const objPos = obj.pos;
             if (mountPos.roomName === objPos.roomName) return calcInRoomDistance(mountPos, objPos, mountPos.roomName);
-            else return calcCrossRoomDistance(mountPos, objPos);
+            else return calcRoomDistance(mountPos, objPos);
         }.bind(this);
         /**
          * @type { (obj: GameObject) => EmployeeIdentity }
