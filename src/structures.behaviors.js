@@ -574,7 +574,7 @@ function giveContainerBehaviors() {
         /**
          * Temporary Fast-Energy-Filling will be disabled, if Link System works.
          */
-        if (global.MapMonitorManager.FetchStructureWithTag(this.room.name, "forSpawn", STRUCTURE_LINK).length > 0 && (global.MapMonitorManager.FetchStructureWithTag(this.room.name, "forSource", STRUCTURE_LINK).length > 0 || global.MapMonitorManager.FetchStructureWithTag(this.room.name, "forTransfer", STRUCTURE_LINK).length > 0)) return;
+        if (global.MapMonitorManager.FetchStructureWithTag(this.room.name, "forSpawn", STRUCTURE_LINK).length > 0 && global.MapMonitorManager.FetchStructureWithTag(this.room.name, "forSource", STRUCTURE_LINK).length > 0 && global.MapMonitorManager.FetchStructureWithTag(this.room.name, "forTransfer", STRUCTURE_LINK).length > 0) return;
         if (global.TaskManager.Fetch(this.id, `FILLING_${RESOURCE_ENERGY}`).length > 0) return;
         /**
          * @type {(amount : number) => StructureContainer | StructureStorage | StructureLink}
@@ -650,7 +650,7 @@ function giveStorageBehaviors() {
             let resource = global.ResourceManager.Query(this, mineralType, amount, {type : "retrieve", confinedInRoom : true, allowToHarvest : false, allowStructureTypes : [STRUCTURE_CONTAINER]});
             return resource;
         }.bind(this);
-        TaskConstructor.RequestTask(this, mineralType, "triggerFillingMineral", CONTAINER_CAPACITY, "default", 1, requestResource, requestResource, () => 0, function (object) { 
+        TaskConstructor.RequestTask(this, mineralType, "triggerFillingMineral", CONTAINER_CAPACITY / 2, "default", 1, requestResource, requestResource, () => 0, function (object) { 
         return getPrice(this.taskData.resourceType) * object.store.getCapacity();}, (storage, resourceType) => storage.store.getUsedCapacity(resourceType) / storage.store.getCapacity() >= global.Lucy.Rules.storage[resourceType] || storage.store.getFreeCapacity() <= global.Lucy.Rules.storage["collectSpareCapacity"]);
     };
     /** Collect Energy Harvested (Stop while linking system work) */

@@ -2,6 +2,8 @@ const isMyRoom                      = require('./util').isMyRoom;
 const calcInRoomDistance            = require('./util').calcInRoomDistance;
 const parseBodyPartsConfiguration   = require('./util').parseBodyPartsConfiguration;
 const { EVENT_TYPES }               = require("./lucy.log");
+/** @type { {[roomName : string] : number} } */
+const RemoteMineDelay = {};
 /**
  * $ converts Object in Screeps into Object in Lucy.
  */
@@ -83,6 +85,11 @@ function $() {
             if (isMyRoom(Game.rooms[roomName])) {
                 global.Map.AutoPlan(roomName);
                 Game.rooms[roomName].init();
+                if (!RemoteMineDelay[roomName] || RemoteMineDelay[roomName] <= Game.time) {
+                    delete RemoteMineDelay[roomName];
+                    const ret = global.Map.RemoteMine(roomName);
+                    if (typeof ret === "number") RemoteMineDelay[roomName] = ret;
+                }
             } else {
                 Game.rooms[roomName].Detect();
             }

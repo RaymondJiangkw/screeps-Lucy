@@ -101,6 +101,7 @@ class Traveler {
                 // uncommenting this is a great way to diagnose creep behavior issues
                 // console.log(`TRAVELER: incomplete path for ${creep.name}`);
                 color = "red";
+                if (options.forbidInComplete) return ERR_NO_PATH;
             }
             if (options.returnData) {
                 options.returnData.pathfinderReturn = ret;

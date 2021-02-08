@@ -335,34 +335,43 @@ class TaskConstructor {
     TransferTask() {}
     /**
      * @param {string} targetRoom
+     * @returns {boolean}
      */
     ScoutTask(targetRoom) {
         const status = Game.map.getRoomStatus(targetRoom).status;
-        if (status === "closed") return;
+        if (status === "closed") {
+            global.Map.SetAsUnreachable(targetRoom);
+            return false;
+        }
         /** Could be detected by Observer */
-        if (Object.keys(Game.rooms).filter((roomName) => Game.map.getRoomLinearDistance(roomName, targetRoom) <= OBSERVER_RANGE && Game.rooms[roomName][STRUCTURE_OBSERVER]).length > 0) return;
-        if (global.TaskManager.Fetch("default", `SCOUT_${targetRoom}`).length > 0) return;
+        if (Object.keys(Game.rooms).filter((roomName) => Game.map.getRoomLinearDistance(roomName, targetRoom) <= OBSERVER_RANGE && Game.rooms[roomName][STRUCTURE_OBSERVER]).length > 0) return true;
+        if (global.TaskManager.Fetch("default", `SCOUT_${targetRoom}`).length > 0) return true;
         const NEXT_SCOUT_TIMEOUT = CONTROLLER_RESERVE_MAX;
         const NEXT_SCOUT_OFFSET  = Math.floor(CONTROLLER_RESERVE_MAX / 10);
         const roomName = Object.keys(Game.rooms).filter((roomName) => Game.map.getRoomStatus(roomName).status === status).filter((roomName) => Game.rooms[roomName].controller && Game.rooms[roomName].controller.my).sort((u, v) => calcRoomDistance(u, targetRoom) - calcRoomDistance(v, targetRoom))[0];
         if (!roomName) {
-            global.Lucy.Timer.add(Game.time + getCacheExpiration(NEXT_SCOUT_TIMEOUT, NEXT_SCOUT_OFFSET), this.ScoutTask, this, [targetRoom], `Scout ${targetRoom}`);
-            return;
+            global.Map.SetAsUnreachable(targetRoom, Object.keys(Game.rooms)[0]);
+            return false;
         }
+        console.log(`<p style="color:gray;display:inline;">[Log]</p> Scouting ${targetRoom} from ${roomName}.`);
         const roleDescriptor = new RoleConstructor();
         roleDescriptor.Register("worker", "creep");
         roleDescriptor
             .set("worker", {key : "static", value : {bodyRequirements : {[MOVE] : 1}}})
             .set("worker", {key : "memoryTag", value : {tagName : "scouter", whetherAllowEmptyTag : false}})
-            .set("worker", {key : "profit", value : () => 1})
+            .set("worker", {key : "profit", value : function (object) { return -Game.map.getRoomLinearDistance(this.taskData.targetRoom, this.taskData.roomName) * 50 * getPrice("cpu"); }})
             .set("worker", {key : "workingTicks", value : () => 0})
             .set("worker", {key : "spawnConstraint", value : {tag : "scoutPatch", mountRoomSpawnOnly : true}})
             .set("worker", {key : "number", value : [1,1]});
         this.Construct({taskName : `[Scout:${roomName}->${targetRoom}]`, taskType : "Scout"}, {mountRoomName : roomName, mountObj : {id : null}}, roleDescriptor, {
             funcs : {
                 selfCheck : function() {
+                    if (this.taskData[ERR_NO_PATH]) {
+                        global.Map.SetAsUnreachable(this.taskData.targetRoom, this.taskData.fromRoom);
+                        return "dead";
+                    }
                     if (Memory.rooms[this.taskData.targetRoom] && Math.abs(Memory.rooms[this.taskData.targetRoom]._lastCheckingTick - Game.time) <= 1) {
-                        global.Lucy.Timer.add(Game.time + getCacheExpiration(NEXT_SCOUT_TIMEOUT, NEXT_SCOUT_OFFSET), this.taskData.taskConstructor.ScoutTask, undefined, [this.taskData.targetRoom], `Scout ${this.taskData.targetRoom}`);
+                        global.Lucy.Timer.add(Game.time + getCacheExpiration(NEXT_SCOUT_TIMEOUT, NEXT_SCOUT_OFFSET), this.taskData.taskConstructor.ScoutTask, undefined, [this.taskData.targetRoom], `Scout ${this.taskData.targetRoom} because of updating`);
                         return "dead";
                     }
                     return "working";
@@ -372,20 +381,21 @@ class TaskConstructor {
                     const worker = Object.keys(this.employee2role).map(Game.getObjectById)[0];
                     if (!worker) return [];
                     if (!worker.memory.flags) worker.memory.flags = {};
-                    if (worker.memory.flags.route === undefined) worker.memory.flags.route = global.Map.DescribeRoute(worker.room.name, this.taskData.targetRoom);
                     if (worker.room.name === this.taskData.targetRoom) return [worker];
                     else {
-                        if (worker.memory.flags.route) {
-                            if (worker.room.name === worker.memory.flags.route[0]) worker.memory.flags.route.shift();
-                            worker.travelTo(global.MapMonitorManager.FetchVacantSpace(worker.memory.flags.route[0]));
-                        } else worker.travelTo(global.MapMonitorManager.FetchVacantSpace(this.taskData.targetRoom)[0]);
+                        if (worker.travelTo(global.MapMonitorManager.FetchVacantSpace(this.taskData.targetRoom)[0], {forbidInComplete : true}) === ERR_NO_PATH) {
+                            this.taskData[ERR_NO_PATH] = true;
+                            this.taskData.fromRoom = worker.room.name;
+                            return [worker];
+                        }
                         return [];
                     }
                 }
             },
-            taskData : {targetRoom : targetRoom, taskConstructor : _taskConstructor},
+            taskData : {targetRoom : targetRoom, fromRoom : null, taskConstructor : _taskConstructor, [ERR_NO_PATH] : false, roomName : roomName},
             taskKey : `SCOUT_${targetRoom}`
         });
+        return true;
     }
     constructor() {}
 }

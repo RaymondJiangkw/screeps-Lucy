@@ -174,7 +174,7 @@ class CentralSpawnUnit {
                             }
                             centralSpawn.SetSignal(index, "extensions", false);
                         } else if (container) {
-                            if (container.store.getUsedCapacity() > 0) {
+                            if (container.store.getUsedCapacity() > 0 || worker.store[RESOURCE_ENERGY] > 0) {
                                 if (worker.memory.flags.working && worker.store[RESOURCE_ENERGY] === 0) worker.memory.flags.working = false;
                                 if (!worker.memory.flags.working && worker.store[RESOURCE_ENERGY] > 0) worker.memory.flags.working = true; // NOTICE : Full is not required.
                                 if (!worker.memory.flags.working) {
@@ -555,12 +555,16 @@ function mount() {
         this.centralTransfer;
     }
     Room.prototype.Detect = function() {
+        console.log(`<p style="display:inline;color:red;">[Detect]</p> ${this.name}`);
         this.memory._lastCheckingTick = Game.time;
-        this.memory.owner = this.controller ? this.controller.owner.username : null;
+        this.memory.owner = this.controller ? this.controller.owner ? this.controller.owner.username : this.controller.reservation? this.controller.reservation.username : null : null;
         /** Detect InvaderCore */
         const OriginalHostileStructures = this.memory.hostileStructures || [];
         this.memory.hostileStructures = this.find(FIND_HOSTILE_STRUCTURES).map(s => s.id);
         const differenceHostileStructures = _.difference(this.memory.hostileStructures, OriginalHostileStructures);
+        /** Avoid Room */
+        if (this.find(FIND_HOSTILE_STRUCTURES, {filter : {structureType : STRUCTURE_TOWER}}).length > 0) this.memory.avoid = true;
+        else delete this.memory.avoid;
         if (!this.memory.sourceAmount) this.memory.sourceAmount = this.find(FIND_SOURCES).length;
         this.memory.sourceCapacities = this.find(FIND_SOURCES).map(s => s.energyCapacity > SOURCE_ENERGY_CAPACITY ? s.energyCapacity : SOURCE_ENERGY_CAPACITY);
     }

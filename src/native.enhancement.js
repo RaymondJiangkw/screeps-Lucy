@@ -8,6 +8,7 @@ const calcInRoomDistance    =   require('./util').calcInRoomDistance;
 const decideRoomStatus      =   require('./util').decideRoomStatus;
 const PriorityQueue         =   require('./util').PriorityQueue;
 const username              =   require('./util').username;
+const isMyRoom              =   require('./util').isMyRoom;
 const TaskConstructor       =   require('./manager.tasks').TaskConstructor;
 const profiler = require('./screeps-profiler');
 function mount() {
@@ -1375,6 +1376,21 @@ class Map {
         }
     }
     /**
+     * @param {string} toRoomName
+     * @param {string} fromRoomName
+     */
+    SetAsUnreachable(toRoomName, fromRoomName) {
+        Memory._unreachableRooms[toRoomName] = Game.map.getRoomStatus(toRoomName).timestamp || Game.map.getRoomStatus(fromRoomName).timestamp;
+    }
+    /**
+     * @param {string} roomName
+     */
+    IsUnreachable(roomName) {
+        if (Memory._unreachableRooms[roomName] && Memory._unreachableRooms[roomName] < new Date().getTime()) delete Memory._unreachableRooms[roomName];
+        if (!Memory._unreachableRooms[roomName]) return false;
+        return true;
+    }
+    /**
      * @param {string} roomName
      * @param {string} targetRoomName
      * @returns {number | null} Profit Per Tick
@@ -1382,19 +1398,23 @@ class Map {
     IsExploitRoomProfitable(roomName, targetRoomName) {
         if (this.roomRelativeProfit[roomName] && this.roomRelativeProfit[roomName][targetRoomName]) return this.roomRelativeProfit[roomName][targetRoomName];
         if (!this.roomRelativeProfit[roomName]) this.roomRelativeProfit[roomName] = {};
+        /** Currently Unreachable */
+        if (this.IsUnreachable(targetRoomName)) return this.roomRelativeProfit[roomName][targetRoomName] = 0;
         /** Not in the Detection Mode */
         if (Memory.rooms[targetRoomName] && !Memory.rooms[targetRoomName]._lastCheckingTick) return this.roomRelativeProfit[roomName][targetRoomName] = 0;
         if (Game.rooms[targetRoomName] && Game.rooms[targetRoomName].controller && Game.rooms[targetRoomName].controller.my) return this.roomRelativeProfit[roomName][targetRoomName] = 0;
-        this.updateAdjacentRooms(roomName, {fullDistrict : true});
-        this.updateDistanceBetweenRooms(roomName);
+        // Should be called before calling this function
+        // this.updateAdjacentRooms(roomName, {fullDistrict : true});
+        // this.updateDistanceBetweenRooms(roomName);
         if (this.disFromRoom[roomName][targetRoomName].distance === Infinity) return this.roomRelativeProfit[roomName][targetRoomName] = 0;
         const distance = this.disFromRoom[roomName][targetRoomName].distance * 50;
-        if (!Memory.rooms[targetRoomName] || !Memory.rooms[roomName]._lastCheckingTick) {
-            TaskConstructor.ScoutTask(targetRoomName);
+        /** Issue Scouting */
+        if (!Memory.rooms[targetRoomName]) {
+            if (TaskConstructor.ScoutTask(targetRoomName) === false) return this.roomRelativeProfit[roomName][targetRoomName] = 0;
             return null;
         }
         /** @type {number} */
-        const sourceAmount = Memory.rooms[roomName].sourceAmount;
+        const sourceAmount = Memory.rooms[targetRoomName].sourceAmount;
         /**
          * We assume half of the total roads are on the plain, and the other half are on the swamp.
          * And the default setting for Harvester : {[WORK]:10, [CARRY]:2, [MOVE]:12} : 1700, Transferer : {[CARRY]:20, [MOVE]:20} : 2000
@@ -1402,6 +1422,52 @@ class Map {
         const costPerTick = Math.floor(distance / 2) * ROAD_DECAY_AMOUNT / ROAD_DECAY_TIME * (1 + 5) / REPAIR_POWER + sourceAmount * CONTAINER_DECAY / CONTAINER_DECAY_TIME / REPAIR_POWER + (1700 + 2000) / CREEP_LIFE_TIME;
         const profitPerTick = _.sum(Memory.rooms[targetRoomName].sourceCapacities) / ENERGY_REGEN_TIME;
         return this.roomRelativeProfit[roomName][targetRoomName] = profitPerTick - costPerTick;
+    }
+    /**
+     * @param {string} roomName
+     */
+    RemoteMine(roomName) {
+        /**
+         * Necessary Data Preparation
+         */
+        /** @type {Array<{roomName : string, profit : number}>} */
+        let profitOfRoomNames = [];
+        if (this.room2RemoteMiningCandidates[roomName]) profitOfRoomNames = this.room2RemoteMiningCandidates[roomName];
+        else {
+            this.updateAdjacentRooms(roomName, {fullDistrict : true});
+            this.updateDistanceBetweenRooms(roomName);
+            const adjacentRoomNames = Array.from(this.roomRecorded).filter((roomName) => !isMyRoom(roomName));
+            let isThereAnyInformationLacking = 0;
+            for (const targetRoomName of adjacentRoomNames) {
+                if (this.IsExploitRoomProfitable(roomName, targetRoomName) === null) isThereAnyInformationLacking++;
+                else profitOfRoomNames.push({roomName : targetRoomName,  profit : this.IsExploitRoomProfitable(roomName, targetRoomName)});
+            }
+            if (isThereAnyInformationLacking > 0) return Game.time + isThereAnyInformationLacking * 50;
+            profitOfRoomNames = profitOfRoomNames.filter((info) => info["profit"] > 0).sort((u, v) => v["profit"] - u["profit"]);
+            this.room2RemoteMiningCandidates[roomName] = profitOfRoomNames;
+        }
+        /**
+         * 0. Decision Options & Constants
+         */
+        let options = {
+            controllerUpgrade : false
+        };
+        /**
+         * 1. Prepare Configuration for Room : roomName
+         */
+        if (!this.remoteMineCache[roomName]) {
+            this.remoteMineCache[roomName] = {
+                controllerLevel : Game.rooms[roomName].controller.level
+            };
+            options.controllerUpgrade = true;
+        }
+        /**
+         * 2. Update Decision Options
+         */
+        if (Game.rooms[roomName].controller.level !== this.remoteMineCache[roomName].controllerLevel) {
+            options.controllerUpgrade = true;
+            this.remoteMineCache[roomName].controllerLevel = Game.rooms[roomName].controller.level;
+        }
     }
     /**
      * @param {Id<Creep | PowerCreep>} creep
@@ -1711,37 +1777,24 @@ class Map {
         }
     }
     constructor() {
-        /**
-         * @type { {[roomName : string] : Array<string>} }
-         * @private
-         */
+        /** @type { {[roomName : string] : Array<string>} } */
         this.sortedDistances            = {};
-        /**
-         * @type { {[roomName : string] : number} }
-         * @private
-         */
+        /** @type { {[roomName : string] : number} } */
         this.sortedDistancesExpiration  = {};
         /**
          * @typedef { {ret : boolean | "need_to_call_again", recallTick : number, null} } ComponentRet
          * @type { {[roomName : string] : { roomType : string, controllerLevel : number, feedbacks : { [unitName : string] : {tag : ComponentRet, build : ComponentRet, road : ComponentRet}} }} }
-         * @private
          */
         this.planCache                  = {};
-        /**
-         * @type { {[roomName : string] : {[pos : string] : Id<Creep | PowerCreep>}} }
-         */
+        /** @type { {[roomName : string] : {controllerLevel : number}} } */
+        this.remoteMineCache            = {};
+        /** @type { {[roomName : string] : {[pos : string] : Id<Creep | PowerCreep>}} */
         this.registeredPoses            = {};
-        /**
-         * @type { {[id : string] : Array<RoomPosition>} }
-         */
+        /** @type { {[id : string] : Array<RoomPosition>} } */
         this.creep2pos                  = {};
-        /**
-         * @type { {[roomName : string] : Array<Array<number>>} }
-         */
+        /** @type { {[roomName : string] : Array<Array<number>>} } */
         this.room2distanceFromCenter    = {};
-        /**
-         * @type { {[roomName : string] : RoomPosition} }
-         */
+        /** @type { {[roomName : string] : RoomPosition} } */
         this.room2center                = {};
         /** @type { {[roomName : string] : Array<string>} } */
         this.roomEdges                  = {};
@@ -1755,6 +1808,8 @@ class Map {
         this.disFromRoomTotalRooms      = {};
         /** @type { {[roomName : string] : {[targetRoomName : string] : number}} } */
         this.roomRelativeProfit         = {};
+        /** @type { {[roomName : string] : Array<{roomName : string, profit : number}>} } */
+        this.room2RemoteMiningCandidates = {};
     }
 };
 /** @global */
@@ -1768,6 +1823,9 @@ profiler.registerClass(Planer, "Planer");
 profiler.registerClass(Map, "Map");
 
 if (!Memory._plannerCache) Memory._plannerCache = {};
+if (!Memory.rooms) Memory.rooms = {};
+/** In case for detecting once updating Code */
+if (!Memory._unreachableRooms) Memory._unreachableRooms = {};
 
 module.exports = {
     mount : mount

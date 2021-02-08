@@ -178,10 +178,14 @@ module.exports = {
         return false;
     },
     /**
-     * @param { Room } room
+     * @param { Room | string } room
      * @returns {Boolean}
      */
     isMyRoom : function (room) {
+        if (typeof room === "string") {
+            room = Game.rooms[room];
+            if (!room) return false;
+        }
         if (room.controller && room.controller.my) return true;
         return false;
     },
