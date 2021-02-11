@@ -4,18 +4,11 @@
  * @typedef {CreepSpawnManager} CreepSpawnManager
  * @typedef {SpecialCreepScheme} SpecialCreepScheme
  */
-/**
- * @type { (timeout: number, offset : number) => number }
- */
-const getCacheExpiration    =   require('util').getCacheExpiration;
-/**
- * @type { (room : Room) => Boolean }
- */
-const isMyRoom              =   require('util').isMyRoom;
-/**
- * @type { ( bodyDescription : {[body in BodyPartConstant]? : number} ) => number }
- */
-const evaluateCost          =   require('util').evaluateCost;
+const getCacheExpiration            = require('./util').getCacheExpiration;
+const isMyRoom                      = require('./util').isMyRoom;
+const evaluateCost                  = require('./util').evaluateCost;
+const calcInRoomDistance            = require('./util').calcInRoomDistance;
+const parseBodyPartsConfiguration   = require('./util').parseBodyPartsConfiguration;
 const profiler = require("./screeps-profiler");
 const CREEP_SPAWN_CACHE_TIMEOUT =   50;
 const CREEP_SPAWN_CACHE_OFFSET  =   5;
@@ -118,14 +111,16 @@ class CreepSpawnManager {
         };
         let chosen = {};
         for (const room of adjacentRooms) {
+            if (room !== roomName && Memory.rooms[room] && Memory.rooms[room].rejectHelp) continue;
             this.updateRoomCache(room);
+            // console.log(`Querying ${roomName}->${room}`);
             /**
              * @type {Array<import("./task.prototype").TaskCreepDescriptor>}
              */
             let totalRequestingRoles = this.room2creepSpawns[room]
                 .filter(a => room === roomName || !a.IsConfinedInRoom)
                 .filter(a => a.CurrentAmount < a.MinimumAmount)
-                .filter(a => evaluateCost(parseBodyParts(a, Game.rooms[room])) <= (Game.rooms[room].energyAvailable - Game.rooms[room]._instantEnergyCost));
+                .filter(a => evaluateCost(parseBodyParts(a, Game.rooms[roomName])) <= (Game.rooms[roomName].energyAvailable - Game.rooms[roomName]._instantEnergyCost));
             for (const groupTag in this.room2creepSpawnsPatch[room]) {
                 /**
                  * I expect the following property :
@@ -135,19 +130,19 @@ class CreepSpawnManager {
                  */
                 const expectedNum = Math.floor(Math.log(this.room2creepSpawnsPatch[room][groupTag].MinimumAmount) * 0.5 + 1);
                 if (this.room2creepSpawnsPatch[room][groupTag].CurrentAmount >= expectedNum) continue;
-                console.log(`[${room}] ${groupTag} is not saturated ${this.room2creepSpawnsPatch[room][groupTag].CurrentAmount}:${expectedNum} ${this.room2creepSpawnsPatch[room][groupTag].map(d => d.boundTask.mountObj)}.`);
+                // console.log(`[${room}] ${groupTag} is not saturated ${this.room2creepSpawnsPatch[room][groupTag].CurrentAmount}:${expectedNum}.`);
                 totalRequestingRoles = totalRequestingRoles.concat(
                     this.room2creepSpawnsPatch[room][groupTag]
                         .filter(a => room === roomName || !a.IsConfinedInRoom)
                         .filter(a => a.CurrentAmount < a.MinimumAmount)
-                        .filter(a => evaluateCost(parseBodyParts(a, Game.rooms[room])) <= (Game.rooms[room].energyAvailable - Game.rooms[room]._instantEnergyCost))
+                        .filter(a => evaluateCost(parseBodyParts(a, Game.rooms[roomName])) <= (Game.rooms[roomName].energyAvailable - Game.rooms[roomName]._instantEnergyCost))
                 );
             }
             totalRequestingRoles = _.shuffle(totalRequestingRoles);
             // console.log(totalRequestingRoles.map(v => `${v.GroupTag}:${v.Tag}, ${v.MinimumAmount}:${v.CurrentAmount}\n`));
             for (const descriptor of totalRequestingRoles) {
                 if (descriptor._spawnTick && descriptor._spawnTick === Game.time) continue;
-                chosen.body = parseBodyParts(descriptor, Game.rooms[room]);
+                chosen.body = parseBodyParts(descriptor, Game.rooms[roomName]);
                 /* Prepare Initial Memory */
                 chosen.memory = {};
                 chosen.workingPos = descriptor.WorkingPos || undefined;
@@ -177,7 +172,42 @@ class CreepSpawnManager {
         this._roomCheckTick   = {};
     }
 };
-profiler.registerClass(CreepSpawnManager, "CreepSpawnManager");
-module.exports = {
-    CreepSpawnManager   :   CreepSpawnManager
+const _creepSpawnManager = new CreepSpawnManager();
+profiler.registerObject(_creepSpawnManager, "CreepSpawnManager");
+/** @type {import("./lucy.app").AppLifecycleCallbacks} */
+const CreepSpawnManagerPlugin = {
+    init : () => global.CreepSpawnManager = _creepSpawnManager,
+    tickEnd : () => {
+        for (const roomName in Game.rooms) {
+            const room = Game.rooms[roomName];
+            if (!isMyRoom(room)) continue;
+            // NOTICE : Query Creep is time-consuming, and it is unnecessary when no spawn is available.
+            /** @type {Array<StructureSpawn>} */
+            const candidateSpawns = room.spawns.filter(s => !s.spawning);
+            if (candidateSpawns.length === 0) continue;
+            // NOTICE : In order to avoid energy-consumption-overlapping, for each tick, only one Spawn will be allowed to spawn Creep.
+            /** @type {{} | { body : {[body in BodyPartConstant]? : number}, memory : {}, workingPos? : RoomPosition} } */
+            const spawnedCreep = global.CreepSpawnManager.Query(roomName);
+            if (!spawnedCreep.body) continue;
+            /** Record Spawn Room Name */
+            spawnedCreep.memory.spawnRoomName = roomName;
+            if (spawnedCreep.workingPos) candidateSpawns.sort((a, b) => calcInRoomDistance(a.pos, spawnedCreep.workingPos) - calcInRoomDistance(b.pos, spawnedCreep.workingPos));
+            candidateSpawns[0].spawnCreep(
+                parseBodyPartsConfiguration(spawnedCreep.body),
+                `@${Game.shard.name}-${roomName}-${Game.time}`,
+                {
+                    memory : spawnedCreep.memory,
+                    directions:
+                        [
+                            spawnedCreep.workingPos ?
+                                (candidateSpawns[0].pos.getRangeTo(spawnedCreep.workingPos) === 1 ?
+                                    candidateSpawns[0].pos.getDirectionTo(spawnedCreep.workingPos):
+                                    candidateSpawns[0].room.centralSpawn.SpawnDirection(candidateSpawns[0])) :
+                                candidateSpawns[0].room.centralSpawn.SpawnDirection(candidateSpawns[0])
+                        ]
+                }
+            );
+        }
+    }
 };
+global.Lucy.App.on(CreepSpawnManagerPlugin);

@@ -196,7 +196,7 @@ class ResourceManager {
      */
     Register(descriptor) {
         // const descriptorType = descriptor instanceof ResourceDescriptor ? "Provider" : "Receiver";
-        // console.log(`<p style="color:lightblue;display:inline;">[Register]</p> Registering ${descriptor.Obj}'s ${descriptor.ResourceType} into ResourceManager as ${descriptorType}...`);
+        // console.log(`<p style="color:lightblue;display:inline;">[Register]</p> Registering ${descriptor.Obj}'s ${descriptor.ResourceType} into ResourceManager...`);
         if (descriptor instanceof ResourceDescriptor) {
             this.resourceType2Resources[descriptor.ResourceType] = this.resourceType2Resources[descriptor.ResourceType] || {};
             this.resourceType2Resources[descriptor.ResourceType][descriptor.Obj.id] = descriptor;
@@ -235,7 +235,7 @@ class ResourceManager {
     /**
      * Query returns the best suitable object to be extracted or to store.
      * After querying, `amount` of that object will be locked, if transaction is dealt.
-     * @param {import("./task.prototype").GameObject} subject
+     * @param {import("./task.prototype").GameObject | RoomPosition} subject
      * @param {ResourceConstant} resourceType
      * @param {number} amount Retrieving Amount | Storing Amount
      * @param { { key? : string, confinedInRoom? : boolean, allowStore? : boolean, allowToHarvest? : boolean, type : "retrieve" | "store", excludeDefault? : boolean, allowStructureTypes? : Array<StructureConstant> } } [options = { key : "default", confinedInRoom : false, allowStore : true, allowToHarvest : true }] "default" has access to all registered resources, but those with specific tag will be penaltized. `allowStore` and `allowToHarvest` are useful while `type` === "retrieve". 0 length of allowStructureTypes indicate that all are allowed.
@@ -252,11 +252,10 @@ class ResourceManager {
          * Query takes care about the target to choose, so that `subject` will not get `subject` itself.
          */
         /** Subject with physical position */
-        if (subject.pos && subject.pos.roomName) {
-            /**
-             * @type {RoomPosition}
-             */
-            const pos = subject.pos;
+        if (subject.pos || subject instanceof RoomPosition) {
+            /** @type {RoomPosition} */
+            const pos = subject instanceof RoomPosition ? subject : subject.pos;
+            const id = subject instanceof RoomPosition ? null : subject.id;
             const roomName = pos.roomName;
             this.updateRoomCache(roomName, resourceType);
             /**
@@ -278,7 +277,7 @@ class ResourceManager {
             const calcKeyPenalty = function(des) {
                 if (options.key === "default" && des.Key !== "default") {
                     /* Calc the distance again */
-                    return calcInRoomDistance(des.Obj, subject) * 2 * getPrice("cpu") / 5;
+                    return calcInRoomDistance(des.Obj.pos, pos) * 2 * getPrice("cpu") / 5;
                 } else return 0;
             };
             for (const room of adjacentRooms) {
@@ -290,16 +289,16 @@ class ResourceManager {
                  */
                 let totalAvailableResourceObjects = [];
                 if (options.type === "retrieve") totalAvailableResourceObjects = (this.room2resourceTypes[room][resourceType] || [])
-                    .filter(a => a.Obj.id !== subject.id && a.Amount > 0)
+                    .filter(a => a.Obj.id !== id && a.Amount > 0)
                     .filter(a => !a.Obj.structureType || options.allowStructureTypes.length === 0 || options.allowStructureTypes.indexOf(a.Obj.structureType) !== -1)
                     .filter(a => (a.Key === "default" && !options.excludeDefault) || a.Key === options.key)
                     .filter(a => (options.allowStore && a.Obj.store !== undefined) || (options.allowToHarvest && isHarvestable(a.Obj))) // I suppose there is nothing which is harvestable and also has `store`
-                    .sort((a,b) => calcInRoomDistance(a.Obj.pos, subject.pos) * 2 * getPrice("cpu") / 5 + (amount - a.Amount) * getPrice(resourceType) / 1000 + calcKeyPenalty(a) - calcInRoomDistance(b.Obj.pos, subject.pos) * 2 * getPrice("cpu") / 5 - (amount - b.Amount) * getPrice(resourceType) / 1000 - calcKeyPenalty(b));
+                    .sort((a,b) => calcInRoomDistance(a.Obj.pos, pos) * 2 * getPrice("cpu") / 5 + (amount - a.Amount) * getPrice(resourceType) / 1000 + calcKeyPenalty(a) - calcInRoomDistance(b.Obj.pos, pos) * 2 * getPrice("cpu") / 5 - (amount - b.Amount) * getPrice(resourceType) / 1000 - calcKeyPenalty(b));
                 else if (options.type === 'store') totalAvailableResourceObjects = (this.room2StoringResourceTypes[room][resourceType] || [])
-                    .filter(a => a.Obj.id !== subject.id && a.FreeAmount > 0)
+                    .filter(a => a.Obj.id !== id && a.FreeAmount > 0)
                     .filter(a => !a.Obj.structureType || options.allowStructureTypes.length === 0 || options.allowStructureTypes.indexOf(a.Obj.structureType) !== -1)
                     .filter(a => (a.Key === "default" && !options.excludeDefault) || a.Key === options.key)
-                    .sort((a,b) => calcInRoomDistance(a.Obj.pos, subject.pos) * 2 * getPrice("cpu") / 5 + (amount - a.FreeAmount) * getPrice(resourceType) / 1000 + calcKeyPenalty(a) - calcInRoomDistance(b.Obj.pos, subject.pos) * 2 * getPrice("cpu") / 5 - (amount - b.FreeAmount) * getPrice(resourceType) / 1000 - calcKeyPenalty(b));
+                    .sort((a,b) => calcInRoomDistance(a.Obj.pos, pos) * 2 * getPrice("cpu") / 5 + (amount - a.FreeAmount) * getPrice(resourceType) / 1000 + calcKeyPenalty(a) - calcInRoomDistance(b.Obj.pos, pos) * 2 * getPrice("cpu") / 5 - (amount - b.FreeAmount) * getPrice(resourceType) / 1000 - calcKeyPenalty(b));
                 if (totalAvailableResourceObjects.length === 0) continue;
                 const adequateResourceObjects = _.filter(totalAvailableResourceObjects, d => (options.type === "retrieve" ? d.Amount : d.FreeAmount) >= amount);
                 chosen = (adequateResourceObjects[0] && adequateResourceObjects[0].Obj) || (totalAvailableResourceObjects[0] && totalAvailableResourceObjects[0].Obj);
@@ -357,9 +356,15 @@ class ResourceManager {
         this.room2StoringResourceTypesExpiration    = {};
     }
 };
-profiler.registerClass(ResourceManager, "ResourceManager");
+const _resourceManager = new ResourceManager();
+profiler.registerObject(_resourceManager, "ResourceManager");
+/** @type {import("./lucy.app").AppLifecycleCallbacks} */
+const ResourceManagerPlugin = {
+    init : () => global.ResourceManager = _resourceManager,
+    tickEnd : () => global.ResourceManager.Display()
+};
+global.Lucy.App.on(ResourceManagerPlugin);
 module.exports = {
-    ResourceManager             : ResourceManager,
     ResourceDescriptor          : ResourceDescriptor,
     StoringDescriptor           : StoringDescriptor,
     RESOURCE_POSSESSING_TYPES   : RESOURCE_POSSESSING_TYPES

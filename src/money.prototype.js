@@ -8,44 +8,12 @@
  * @typedef { {type : "resource", info : { resourceType : ResourceConstant, amount : Number }} } TransactionDescription
  * @typedef {Transaction} Transaction
  */
-
-const { EventMoneyIn, EventMoneyOut } = require('./lucy.log');
-/**
- * @type { (obj : import("./task.prototype").GameObject, resourceType : ResourceConstant) => number }
- */
-const checkForStore = require('util').checkForStore;
-/**
- * @type { (obj : import("./task.prototype").GameObject) => Boolean }
- */
-const isSpawn       = require('util').isSpawn;
-/**
- * @type { (obj : import("./task.prototype").GameObject) => boolean }
- */
-const isController  =   require('util').isController;
+const { EventMoneyIn, EventMoneyOut }   = require('./lucy.log');
+const checkForStore                     = require('./util').checkForStore;
+const isSpawn                           = require('./util').isSpawn;
+const isController                      = require('./util').isController;
 /* Record All Accounts */
 const accounts      = {};
-
-function mount() {
-    /**
-     * @property {Account}
-     * @name Object#account
-     */
-    Object.defineProperty(Object.prototype, "account", {
-        enumerable:false,
-        configurable:false,
-        get() {
-            if (!this.id) console.log(`<p style = "color : red; display : inline;">Cannot set "account" to object ${this}, who loses "id" property!</p>`);
-            if (!accounts[this.id]) return accounts[this.id] = new Account(this);
-            return accounts[this.id];
-        }
-    });
-    /* Code for building Bank */
-    if (!Memory.Bank) Memory.Bank = {};
-    /**
-     * @type {Bank}
-     */
-    global.Bank = new Bank();
-}
 /** 
  * Class Representation for Account
  * After global reset, all information about transaction or borrowing is lost (for the efficiency reason).
@@ -273,7 +241,7 @@ class Transaction {
         /**
          * Fast Resource Transfer among CentralTransferUnit
          */
-        if (this.Buyer.pos && this.Seller.pos && this.Buyer.pos.roomName === this.Seller.pos.roomName) {
+        if (this.Buyer.pos && this.Seller.pos && this.Buyer.pos.roomName === this.Seller.pos.roomName && Game.rooms[this.Buyer.pos.roomName].centralTransfer) {
             const room = Game.rooms[this.Buyer.pos.roomName];
             /** @type {import('./rooms.behaviors').CentralTransferUnit} */
             const centralTransferUnit = room.centralTransfer;
@@ -290,7 +258,7 @@ class Transaction {
      * @returns {boolean}
      */
     Done() {
-        console.log(`<p style="color:yellow;display:inline;">[Money]</p> Transaction between ${this.Buyer} and ${this.Seller} is done with ${JSON.stringify(this.description.info)}.`);
+        // console.log(`<p style="color:yellow;display:inline;">[Money]</p> Transaction between ${this.Buyer} and ${this.Seller} is done with ${JSON.stringify(this.description.info)}.`);
         if (this.state === TRANSACTION_STATE.DEAD) return false;
         if (this.state !== TRANSACTION_STATE.WORKING) return false;
         if (this.Buyer) this.Buyer.account.Dealt("asBuyer", this);
@@ -369,7 +337,7 @@ class Transaction {
          * @private
          */
         this.description = description;
-        console.log(`<p style="color:yellow;display:inline;">[Money]</p> Transaction between ${this.Buyer} and ${this.Seller} is created with ${JSON.stringify(this.description.info)}.`);
+        // console.log(`<p style="color:yellow;display:inline;">[Money]</p> Transaction between ${this.Buyer} and ${this.Seller} is created with ${JSON.stringify(this.description.info)}.`);
     }
 }
 /** 
@@ -433,8 +401,21 @@ class Bank {
         this.accountBooks = Memory.Bank.accountBooks || {};
     }
 }
+function mount() {
+    Object.defineProperty(Object.prototype, "account", {
+        get() {
+            if (!this.id) console.log(`<p style = "color : red; display : inline;">Cannot set "account" to object ${this}, who loses "id" property!</p>`);
+            if (!accounts[this.id]) return accounts[this.id] = new Account(this);
+            return accounts[this.id];
+        },
+        enumerable : false,
+        configurable : false
+    });
+}
+if (!Memory.Bank) Memory.Bank = {};
+global.Bank = new Bank();
+global.Lucy.App.mount(mount);
 module.exports = {
-    mount               : mount,
     TRANSACTION_STATE   : TRANSACTION_STATE,
     Transaction         : Transaction
 };

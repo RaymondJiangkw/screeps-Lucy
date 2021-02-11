@@ -1,13 +1,13 @@
 /**
  * @module creep.behaviors
  */
-function mount() {
+class MyCreep extends Creep {
     /**
      * checkIn does these 2 jobs:
      *  - ensure this Creep is empty.
      *  - ensure this Creep does not stands on any road.
      */
-    Creep.prototype.checkIn = function() {
+    checkIn() {
         /** In Case of Failing to Check In in the last Tick */
         if (this.memory._lastFailureTick === Game.time - 1) {
             this.memory._lastFailureTick = Game.time; // Prolong this influence into future
@@ -33,6 +33,4 @@ function mount() {
         if (this.transfer(Game.getObjectById(this.memory._lastStoringTargetId), this.memory._lastStoringResourceType) === ERR_NOT_IN_RANGE) this.travelTo(Game.getObjectById(this.memory._lastStoringTargetId));
     }
 }
-module.exports = {
-    mount : mount
-}
+global.Lucy.App.mount(Creep, MyCreep);

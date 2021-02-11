@@ -3,6 +3,11 @@
 - Automatic Plan
     - Unit-based, which allows for flexibility.
     - Run at every tick for some cases, while employing caching to speed up.
+- Automatic Claim
+    - Triggered whenever `GCL` is upgraded.
+    - Filter out rooms unfit for the `Automatic Plan` pattern.
+    - Filter out rooms the path to which inevitably contain hostile rooms.
+- *Automatic Remote Mining (Source and Mineral)* (Under Development ⛏️)
 - Task System
     - Allow for Function or in-built `Task Module` to create high-performance, clear and easy-to-program `run` function.
     - Event-Trigger, which is used to avoid attempt of issuing all possible tasks at every tick.
@@ -22,4 +27,4 @@
 - Central Transfer Unit
     - Enable flexible and fast transferring of Resources
 - Dynamic BodyParts
-- *Flag Trigger* (Under Development ⛏️)
+    - Determined based on demand

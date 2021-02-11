@@ -1,6 +1,7 @@
 /**
  * @module manager.link
  */
+const profiler = require("./screeps-profiler");
 class LinkManager {
     /**
      * @param {string} roomName
@@ -24,49 +25,50 @@ class LinkManager {
     }
     /**
      * Perhaps there exists a much more elegant way.
-     * @param {string} roomName
      */
-    Run(roomName) {
-        /**
-         * Transfer Energy from Source Link to Spawn / Controller Link
-         * Transfer Link is used while Source Links are empty, and, in this case, if Transfer Link is empty, Filling Order is issued.
-         */
-        for (const targetLink of [].concat(this.Fetch(roomName, FetchTag("spawn")), this.Fetch(roomName, FetchTag("controller")))) {
-            /** Has not been Used Up */
-            if (targetLink.store.getUsedCapacity(RESOURCE_ENERGY) > 0) continue;
-            for (const sourceLink of this.Fetch(roomName, FetchTag("source"))) {
-                if (sourceLink.store.getFreeCapacity(RESOURCE_ENERGY) > CARRY_CAPACITY || sourceLink.cooldown > 0 || sourceLink._hasTransferred) continue;
-                sourceLink.transferEnergy(targetLink);
-                break;
-            }
-            if (!targetLink._hasBeenTransferred) {
-                for (const transferLink of this.Fetch(roomName, FetchTag("transfer"))) {
-                    // NOTICE : _hasBeenWithdrawn is ignored here.
-                    if (transferLink.cooldown > 0 || transferLink._hasTransferred) continue;
-                    if (transferLink.store[RESOURCE_ENERGY] === 0) { // In this case : transferLink needs to be filled.
-                        /** @type {import("./rooms.behaviors").CentralTransferUnit} */
-                        const centralTransfer = Game.rooms[roomName].centralTransfer;
-                        centralTransfer.PushOrder({from : "any", to : "link", resourceType : RESOURCE_ENERGY, amount : LINK_CAPACITY});
-                        // NOTICE : Another Exhaustion Order is issued in case of blocking.
-                        centralTransfer.PushOrder({from : "link", to : "any", resourceType : RESOURCE_ENERGY, amount : LINK_CAPACITY});
-                        continue;
-                    }
-                    transferLink.transferEnergy(targetLink);
+    Run() {
+        for (const roomName in this.room2tags2links) {
+            /**
+             * Transfer Energy from Source Link to Spawn / Controller Link
+             * Transfer Link is used while Source Links are empty, and, in this case, if Transfer Link is empty, Filling Order is issued.
+             */
+            for (const targetLink of [].concat(this.Fetch(roomName, FetchTag("spawn")), this.Fetch(roomName, FetchTag("controller")))) {
+                /** Has not been Used Up */
+                if (targetLink.store.getUsedCapacity(RESOURCE_ENERGY) > 0) continue;
+                for (const sourceLink of this.Fetch(roomName, FetchTag("source"))) {
+                    if (sourceLink.store.getFreeCapacity(RESOURCE_ENERGY) > CARRY_CAPACITY || sourceLink.cooldown > 0 || sourceLink._hasTransferred) continue;
+                    sourceLink.transferEnergy(targetLink);
                     break;
                 }
+                if (!targetLink._hasBeenTransferred) {
+                    for (const transferLink of this.Fetch(roomName, FetchTag("transfer"))) {
+                        // NOTICE : _hasBeenWithdrawn is ignored here.
+                        if (transferLink.cooldown > 0 || transferLink._hasTransferred) continue;
+                        if (transferLink.store[RESOURCE_ENERGY] === 0) { // In this case : transferLink needs to be filled.
+                            /** @type {import("./rooms.behaviors").CentralTransferUnit} */
+                            const centralTransfer = Game.rooms[roomName].centralTransfer;
+                            centralTransfer.PushOrder({from : "any", to : "link", resourceType : RESOURCE_ENERGY, amount : LINK_CAPACITY});
+                            // NOTICE : Another Exhaustion Order is issued in case of blocking.
+                            centralTransfer.PushOrder({from : "link", to : "any", resourceType : RESOURCE_ENERGY, amount : LINK_CAPACITY});
+                            continue;
+                        }
+                        transferLink.transferEnergy(targetLink);
+                        break;
+                    }
+                }
             }
-        }
-        /**
-         * If Source Link is not empty and has not transferred any energy, they will be collected in Transfer Link.
-         */
-        for (const sourceLink of this.Fetch(roomName, FetchTag("source"))) {
-            if (sourceLink.store.getFreeCapacity(RESOURCE_ENERGY) > CARRY_CAPACITY || sourceLink.cooldown > 0 || sourceLink._hasTransferred) continue;
-            for (const transferLink of this.Fetch(roomName, FetchTag("transfer"))) {
-                if (transferLink.store.getUsedCapacity(RESOURCE_ENERGY) > 0 || transferLink._hasBeenTransferred) continue;
-                sourceLink.transferEnergy(transferLink);
-                const centralTransfer = Game.rooms[roomName].centralTransfer;
-                centralTransfer.PushOrder({from : "link", to : "any", resourceType : RESOURCE_ENERGY, amount : LINK_CAPACITY});
-                break;
+            /**
+             * If Source Link is not empty and has not transferred any energy, they will be collected in Transfer Link.
+             */
+            for (const sourceLink of this.Fetch(roomName, FetchTag("source"))) {
+                if (sourceLink.store.getFreeCapacity(RESOURCE_ENERGY) > CARRY_CAPACITY || sourceLink.cooldown > 0 || sourceLink._hasTransferred) continue;
+                for (const transferLink of this.Fetch(roomName, FetchTag("transfer"))) {
+                    if (transferLink.store.getUsedCapacity(RESOURCE_ENERGY) > 0 || transferLink._hasBeenTransferred) continue;
+                    sourceLink.transferEnergy(transferLink);
+                    const centralTransfer = Game.rooms[roomName].centralTransfer;
+                    centralTransfer.PushOrder({from : "link", to : "any", resourceType : RESOURCE_ENERGY, amount : LINK_CAPACITY});
+                    break;
+                }
             }
         }
     }
@@ -82,6 +84,11 @@ function FetchTag(type) {
     else if (type === "controller") return global.Lucy.Rules.arrangements.UPGRADE_ONLY;
     else if (type === "spawn") return global.Lucy.Rules.arrangements.SPAWN_ONLY;
 }
-module.exports = {
-    LinkManager : LinkManager
+const _linkManager = new LinkManager();
+profiler.registerObject(_linkManager, "LinkManager");
+/** @type {import("./lucy.app").AppLifecycleCallbacks} */
+const LinkManagerPlugin = {
+    init : () => global.LinkManager = _linkManager,
+    tickStart : () => global.LinkManager.Run()
 };
+global.Lucy.App.on(LinkManagerPlugin);

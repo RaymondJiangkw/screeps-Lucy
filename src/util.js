@@ -91,52 +91,48 @@ function roomNameToXY(name) {
     }
     return [xx, yy];
 }
+class MyArray extends Array {
+    /**
+     * `select` converts each `value` into number and selects the maximum one.
+     * null ones will be ignored.
+     * @template T, S
+     * @param { (value: S) => number } toNumber
+     * @param { (value: T) => S } [mapping]
+     * @returns {T | null}
+     */
+    select(toNumber, mapping = v => v) {
+        let maxIndex = null, maxValue = null;
+        for (let i = 0; i < this.length; i++) {
+            const S = mapping(this[i]);
+            if (!S) continue;
+            const number = toNumber(S);
+            if (maxValue === null || number > maxValue) {
+                maxValue = number;
+                maxIndex = i;
+            }
+        }
+        if (maxIndex === null) return null;
+        return this[maxIndex];
+    }
+    /**
+     * @template T
+     * @param { (value : T) => boolean } predicate
+     * @returns {number}
+     */
+    count(predicate) {
+        let cnt = 0;
+        for (const item of this) if (predicate(item)) ++cnt;
+        return cnt;
+    }
+    /**
+     * Shuffle the Array and Returns a new one.
+     */
+    shuffle() {
+        return _.shuffle(this);
+    }
+}
+global.Lucy.App.mount(Array, MyArray);
 module.exports = {
-    mount: function () {
-        /**
-         * `select` converts each `value` into number and selects the maximum one.
-         * null ones will be ignored.
-         * @extends Array
-         * @template T, S
-         * @param { (value: S) => number } toNumber
-         * @param { (value: T) => S } [mapping]
-         * @returns {T | null}
-         */
-        Array.prototype.select = function(toNumber, mapping) {
-            mapping = mapping || (v => v);
-            if (this.length === 0) return null;
-            if (this.length === 1) {
-                if (mapping(this[0])) return this[0];
-                else return null;
-            }
-            let maxIndex = null, maxValue = null;
-            for (let i = 0; i < this.length; i++) {
-                const S = mapping(this[i]);
-                if (!S) continue;
-                const number = toNumber(S);
-                if (maxValue === null || number > maxValue) {
-                    maxValue = number;
-                    maxIndex = i;
-                }
-            }
-            if (maxIndex === null) return null;
-            return this[maxIndex];
-        }
-        /**
-         * @extends Array
-         * @template T
-         * @param { (value : T) => boolean } predicate
-         * @returns {number}
-         */
-        Array.prototype.count = function(predicate) {
-            let cnt = 0;
-            for (let i = 0; i < this.length; ++i) if (predicate(this[i])) ++cnt;
-            return ret;
-        }
-        Array.prototype.shuffle = function() {
-            return _.shuffle(this);
-        }
-    },
     /**
      * isStructure distinguish `ConstructionSite` from `Structure`.
      * @param {import("./task.prototype").GameObject} obj

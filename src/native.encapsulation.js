@@ -6,7 +6,15 @@
 
 const { EventObjectConstruct, EventObjectDestroy } = require('./lucy.log');
 const evaluateAbility = require('./util').evaluateAbility;
-
+/**
+ * Define `id` for Flag
+ */
+const FLAG_ID_INDICATOR = "flag-";
+class MyFlag extends Flag {
+    get id() {
+        return FLAG_ID_INDICATOR + this.name;
+    }
+}
 function mount() {
     const createConstructionSite = Room.prototype.createConstructionSite;
     Room.prototype.createConstructionSite = function() {
@@ -49,6 +57,15 @@ function mount() {
         const ret = claimController.apply(this, arguments);
         if (ret === OK) {
             global.Lucy.Timer.add(Game.time + 1, StructureController.prototype.triggerUpgrading, target.id, [], `Upgrading Controller of ${target.room.name}`);
+            global.Lucy.Timer.add(Game.time + 1, function(roomName) {
+                const room = Game.rooms[roomName];
+                room.find(FIND_HOSTILE_CONSTRUCTION_SITES).forEach(c => c.remove());
+                room.find(FIND_STRUCTURES).forEach(s => s.destroy());
+                room.energies.forEach(source => source.register());
+            }, undefined, [target.room.name], `Cleaning Remained Structures`);
+            /** Monitor Controller Upgrade */
+            const r = target.room;
+            global.Lucy.App.monitor({label : `${r.name}.controller.level`, init : 0, fetch : (roomName) => Game.rooms[roomName] && Game.rooms[roomName].controller.level, fetchParams : [r.name], func : (newNumber, oldNumber, roomName) => Game.rooms[roomName] && Game.rooms[roomName].CheckSpawnIndependent(), funcParams : [r.name]});
         }
         return ret;
     };
@@ -129,21 +146,16 @@ function mount() {
         return ret;
     }
 }
-/**
- * This mount is executed at every tick, since it targets at the mount of Game object, which is refreshed frequently.
- */
-function mountEveryTick() {
-    /**
-     * @see {native.enhancement.flagIdIndicator}
-     */
-    const flagIdIndicator = "flag-";
-    const getObjectById = Game.getObjectById;
-    Game.getObjectById = function(id) {
-        if (typeof id === "string" && id.substring(0, flagIdIndicator.length) === flagIdIndicator) return Game.flags[id.substring(flagIdIndicator.length)];
-        else return getObjectById(id);
-    };
-}
-module.exports = {
-    mount : mount,
-    mountEveryTick : mountEveryTick
+global.Lucy.App.mount(Flag, MyFlag);
+global.Lucy.App.mount(mount);
+/** @type {import("./lucy.app").AppLifecycleCallbacks} */
+const NativeEncapsulationPlugin = {
+    beforeTickStart : () => {
+        const getObjectById = Game.getObjectById;
+        Game.getObjectById = function(id) {
+            if (typeof id === "string" && id.substring(0, FLAG_ID_INDICATOR.length) === FLAG_ID_INDICATOR) return Game.flags[id.substring(FLAG_ID_INDICATOR.length)];
+            else return getObjectById(id);
+        };
+    }
 };
+global.Lucy.App.on(NativeEncapsulationPlugin);

@@ -27,6 +27,7 @@ function giveSpawnBehaviors() {
     const nextFillingTIMEOUT = 10;
     const nextFillingOFFSET  = 5;
     const FILLING_ENERGY = "fillingEnergy";
+    const FILLING_FAR_AWAY_ENERGY = "fillingFarAwayEnergy";
     /**
      * General Triggering
      */
@@ -81,12 +82,7 @@ function giveSpawnBehaviors() {
                 if (isHarvestable(resource)) {
                     /** Pseudo-Energy-Consumption 5 is set. */
                     bodyParts = bodyPartDetermination({type : "exhuastEnergy", availableEnergy : amount, energyConsumptionPerUnitPerTick : 5});
-                } else {
-                    bodyParts = {
-                        [CARRY] : 32,
-                        [MOVE] : 16
-                    };
-                }
+                } else bodyParts = bodyPartDetermination({type : "transfer", transferAmount : nearSpawnLackingEnergy});
                 new Task(`[${this.room.name}:nearSpawnEnergyFilling]`, this.pos.roomName, this, new TaskDescriptor(Lucy.Rules.arrangements.SPAWN_ONLY, {
                     worker : {
                         minimumNumber : 1,
@@ -168,8 +164,8 @@ function giveSpawnBehaviors() {
                                     creep.memory.flags.target = null;
                                     for (let i = 0; i < targetStructures.length; ++i) {
                                         if (targetStructures[i].store.getFreeCapacity(RESOURCE_ENERGY) === 0) continue;
-                                        // NOTICE : The closest one will be choosed.
-                                        if (!creep.memory.flags.target || (creep.memory.flags.target && calcInRoomDistance(creep.pos, targetStructures[creep.memory.flags.target].pos) > calcInRoomDistance(creep.pos, targetStructures[i].pos))) {
+                                        // NOTICE : The closest one will be choosed. getRangeTo performs better than calcInRoomDistance.
+                                        if (!creep.memory.flags.target || (creep.memory.flags.target && creep.pos.getRangeTo(targetStructures[creep.memory.flags.target].pos) > creep.pos.getRangeTo(targetStructures[i].pos))) {
                                             creep.memory.flags.target = i;
                                             continue;
                                         }
@@ -196,8 +192,9 @@ function giveSpawnBehaviors() {
          * General Filling, which will fill those near spawns, but at lower priorities.
          */
         const issueFarFromSpawnEnergyFilling = function() {
+            if (global.TaskManager.Fetch(this.id, FILLING_FAR_AWAY_ENERGY).length > 0) return;
             let includeTransferExtension = false;
-            if (this.room.centralTransfer.Extension && this.room.centralTransfer.Extension.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+            if (this.room.centralTransfer && this.room.centralTransfer.Extension && this.room.centralTransfer.Extension.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
                 if (!this.room.centralTransfer.GetFetchStructure(RESOURCE_ENERGY)) includeTransferExtension = true;
                 else this.room.centralTransfer.PushOrder({from : "any", to : STRUCTURE_EXTENSION, resourceType : RESOURCE_ENERGY, amount : this.room.centralTransfer.Extension.store.getFreeCapacity(RESOURCE_ENERGY)});
             }
@@ -228,12 +225,7 @@ function giveSpawnBehaviors() {
             if (isHarvestable(resource)) {
                 /** Pseudo-Energy-Consumption 5 is set. */
                 bodyParts = bodyPartDetermination({type : "exhuastEnergy", availableEnergy : amount, energyConsumptionPerUnitPerTick : 5});
-            } else {
-                bodyParts = {
-                    [CARRY] : 32,
-                    [MOVE] : 16
-                };
-            }
+            } else bodyParts = bodyPartDetermination({type : "transfer", transferAmount : farFromSpawnExtensionsLackingEnergy});
             new Task(`[${this.room.name}:farFromSpawnEnergyFilling]`, this.pos.roomName, this, new TaskDescriptor(Lucy.Rules.arrangements.SPAWN_ONLY, {
                 worker : {
                     minimumNumber : 1,
@@ -256,7 +248,7 @@ function giveSpawnBehaviors() {
                     allowEmptyTag : true,
                     allowOtherTags : isHarvestable(resource) ? [`${1}-worker`] : undefined
                 }
-            }), {
+            }, {taskKey : FILLING_FAR_AWAY_ENERGY}), {
                 selfCheck : function() {
                     const _selfCheck = function() {
                         if (!this.mountObj || !Game.getObjectById(this.taskData.targetId)) return "dead";
@@ -313,8 +305,8 @@ function giveSpawnBehaviors() {
                                 creep.memory.flags.target = null;
                                 for (let i = 0; i < targetStructures.length; ++i) {
                                     if (targetStructures[i].store.getFreeCapacity(RESOURCE_ENERGY) === 0) continue;
-                                    // NOTICE : The closest one will be choosed.
-                                    if (!creep.memory.flags.target || (creep.memory.flags.target && calcInRoomDistance(creep.pos, targetStructures[creep.memory.flags.target].pos) > calcInRoomDistance(creep.pos, targetStructures[i].pos))) {
+                                    // NOTICE : The closest one will be choosed. getRangeTo performs better than calcInRoomDistance.
+                                    if (!creep.memory.flags.target || (creep.memory.flags.target && creep.pos.getRangeTo(targetStructures[creep.memory.flags.target].pos) > creep.pos.getRangeTo(targetStructures[i].pos))) {
                                         creep.memory.flags.target = i;
                                         continue;
                                     }
@@ -416,7 +408,8 @@ function giveControllerBehaviors() {
                 tag : `${energyConsumptionPerUnitPerTick}-worker`,
                 allowEmptyTag : true,
                 mode : "expand",
-                workingPos : this.pos
+                workingPos : this.pos,
+                confinedInRoom : false
             }
         }), {
             selfCheck : function() {
@@ -443,7 +436,7 @@ function giveControllerBehaviors() {
 function giveConstructionSiteBehaviors() {
     ConstructionSite.prototype.triggerBuilding = function() {
         /* As long as the constructionSite exists, the building is needed. */
-        TaskConstructor.BuildTask(this);
+        TaskConstructor.BuildTask(this.id, this.pos);
     };
 }
 function giveRoadBehaviors() {
@@ -463,7 +456,7 @@ function giveRoadBehaviors() {
             Lucy.Timer.add(nextTaskStartedTick, this.triggerRepairing, this.id, [], `Repair ${this} of Room ${this.room.name}`);
             return;
         }
-        TaskConstructor.RepairTask(this);
+        TaskConstructor.RepairTask(this.id, this.pos);
     }
 }
 function giveContainerBehaviors() {
@@ -485,7 +478,7 @@ function giveContainerBehaviors() {
             Lucy.Timer.add(nextTaskStartedTick, this.triggerRepairing, this.id, [], `Repair ${this} of Room ${this.room.name}`);
             return;
         }
-        TaskConstructor.RepairTask(this);
+        TaskConstructor.RepairTask(this.id, this.pos);
     };
     /**
      * @memberof StructureContainer
@@ -790,13 +783,16 @@ function mount() {
     giveStorageBehaviors();
     giveLinkBehaviors();
     giveRampartBehaviors();
-    /**
-     * Instant Check while Reloading, considering the loss of all undergoing tasks
-     */
-    for (const roomName in Game.rooms) {
-        if (isMyRoom(Game.rooms[roomName])) {
-            /** All is delayed one tick, because of dependence on planning. */
-            global.Lucy.Timer.add(Game.time + 1, function(roomName) {
+}
+global.Lucy.App.mount(mount);
+/** @type {import("./lucy.app").AppLifecycleCallbacks} */
+const RoomResetTriggerPlugin = {
+    reset : () => {
+        /**
+         * Instant Trigger after Resetting
+         */
+        for (const roomName in Game.rooms) {
+            if (isMyRoom(Game.rooms[roomName])) {
                 const room = Game.rooms[roomName];
                 if (room.spawns.length > 0) room.spawns[0].trigger(); // Choose Fixed One
                 room.controller.triggerUpgrading();
@@ -807,10 +803,8 @@ function mount() {
                 if (room.storage) room.storage.trigger();
                 room["links"].forEach(l => l.trigger());
                 room["ramparts"].forEach(r => r.trigger());
-            }, undefined, [roomName], `Trigger Links and Spawn of ${roomName}`);
+            }
         }
     }
-}
-module.exports = {
-    mount : mount
 };
+global.Lucy.App.on(RoomResetTriggerPlugin);

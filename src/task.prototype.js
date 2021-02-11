@@ -37,54 +37,6 @@ function CleanTaskById(id) {
         delete tasks[id];
     }
 }
-function mount() {
-    /** Prototype Extensions for `Object` to integrate into `Money` System and `Task` System */
-    /**
-     * @property {Task} task
-     * `task` should refresh automatically if it becomes invalid or finished.
-     * `task` is also the only interface to manipulate object's task status.
-     */
-    Object.defineProperty(Object.prototype, "task", {
-        configurable: false,
-        enumerable: false,
-        get() {
-            if (!this.id) console.log(`<p style="color:red;display:inline;">Cannot get "task" to object ${this}, who loses "id" property!</p>`);
-            return Game.getTaskById(this.id);
-        },
-        /**
-         * @param {Task | null} task
-         */
-        set(task) {
-            if (!this.id) console.log(`<p style="color:red;display:inline;">Cannot set "task" to object ${this}, who loses "id" property!</p>`);
-            if (task === null || task.State !== "dead") {
-                CleanTaskById(this.id);
-                tasks[this.id] = task;
-                if (task !== null) {
-                    task.Employ(this);
-                    Lucy.Logs.Push(new EventTaskOfObjectStatusChange("take", tasks[this.id], {obj: this}));
-                }
-            }
-        }
-    });
-}
-function mountEveryTick() {
-    /**
-     * @template T
-     * @param {Id<T>} id property of GameObject
-     * Task doesn't have id.
-     */
-    Game.getTaskById = function(id) {
-        // If State == "dead", `id` will automatically be fired and events will be issued appropriately.
-        if (tasks[id]) tasks[id].State;
-        return tasks[id] || null;
-    }
-    Game.cleanTaskById = function(id) {
-        // If State == "dead", `id` will automatically be fired and events will be issued appropriately.
-        if (tasks[id]) tasks[id].State;
-        // If task still exists, clean it by hand.
-        if (tasks[id]) CleanTaskById(id);
-    }
-}
 /**
  * Class representing a Descriptor for Task.
  * @typedef {"creep" | "common"} RoleType
@@ -596,10 +548,55 @@ class Task {
 profiler.registerClass(Task, "Task");
 profiler.registerClass(TaskDescriptor, "TaskDescriptor");
 profiler.registerClass(TaskCreepDescriptor, "TaskCreepDescriptor");
-
+function mount() {
+    Object.defineProperty(Object.prototype, "task", {
+        configurable : false,
+        enumerable : false,
+        /**
+         * `task` should refresh automatically if it becomes invalid or finished.
+         * `task` is also the only interface to manipulate object's task status.
+         */
+        get() {
+            if (!this.id) console.log(`<p style="color:red;display:inline;">Cannot get "task" to object ${this}, who loses "id" property!</p>`);
+            return Game.getTaskById(this.id);
+        },
+        set(_task) {
+            if (!this.id) console.log(`<p style="color:red;display:inline;">Cannot set "task" to object ${this}, who loses "id" property!</p>`);
+            if (_task === null || _task.State !== "dead") {
+                CleanTaskById(this.id);
+                tasks[this.id] = _task;
+                if (_task !== null) {
+                    _task.Employ(this);
+                    Lucy.Logs.Push(new EventTaskOfObjectStatusChange("take", tasks[this.id], {obj: this}));
+                }
+            }
+        }
+    });
+}
+global.Lucy.App.mount(mount);
+/** @type {import("./lucy.app").AppLifecycleCallbacks} */
+const TaskPlugin = {
+    beforeTickStart : () => {
+        /**
+         * @template T
+         * @param {Id<T>} id property of GameObject
+         * Task doesn't have id.
+         */
+        Game.getTaskById = function(id) {
+            // If State == "dead", `id` will automatically be fired and events will be issued appropriately.
+            if (tasks[id]) tasks[id].State;
+            return tasks[id] || null;
+        }
+        Game.cleanTaskById = function(id) {
+            // If State == "dead", `id` will automatically be fired and events will be issued appropriately.
+            if (tasks[id]) tasks[id].State;
+            // If task still exists, clean it by hand.
+            if (tasks[id]) CleanTaskById(id);
+        }
+    }
+};
+global.Lucy.App.on(TaskPlugin);
 module.exports = {
-    mount               : mount,
-    mountEveryTick      : mountEveryTick,
     Task                : Task,
     TaskDescriptor      : TaskDescriptor,
     TaskCreepDescriptor : TaskCreepDescriptor

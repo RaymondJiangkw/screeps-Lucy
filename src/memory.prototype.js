@@ -1,39 +1,42 @@
-const { random } = require("lodash");
-
-function mount() {
-    /**
-     * Extended Memory
-     * Modified Version from @author warinternal
-     * @see {@link https://github.com/screepers/screeps-snippets/blob/master/src/misc/JavaScript/OwnedStructure%20Memory.js}
-     * 
-     * `createdTick` is used for recycling purpose.
-     */
-    const memObjs = ["OwnedStructure", "Source", "Mineral", "Deposit", "StructurePowerBank", "ConstructionSite", "StructureRoad", "StructureContainer", "StructureWall"];
-    const memKeys = ["structures", "sources", "minerals", "deposits", "powerbanks", "constructionSites", "roads", "containers", "walls"];
-    const createdTick = "createdTick";
-    /* Hack to Optimize the time spent in finding reference */
-    const memDefineCode = function (objStr, memStr) {
-        return `Object.defineProperty(${objStr}.prototype, "memory", {
-            get: function() {
-                if (!Memory["${memStr}"][this.id]) Memory["${memStr}"][this.id] = { "${createdTick}": Game.time };
-                return Memory["${memStr}"][this.id];
-            },
-            set: function(v) {
-                v["${createdTick}"] = Game.time;
-                return _.set(Memory, \`${memStr}.\${this.id}\`, v);
-            },
-            configurable: true,
-            enumerable: false
-        });`;
-    };
-    for (let i = 0; i < memObjs.length; i++) {
-        if (!Memory[memKeys[i]]) Memory[memKeys[i]] = {};
-        eval(memDefineCode(memObjs[i], memKeys[i]));
-    }
-    /**
-     * Add slight variance to `Game.time` to avoid deleting operations being packed in a single tick.
-     */
-    global.GCMemory = function() {
+/**
+ * Extended Memory
+ * Modified Version from @author warinternal
+ * @source https://github.com/screepers/screeps-snippets/blob/master/src/misc/JavaScript/OwnedStructure%20Memory.js
+ */
+/** @type {Array<import("./lucy.app").AnyClass, import("./lucy.app").AnyClass>} */
+const mountList = [];
+const memObjKeyPair = [
+    [OwnedStructure     , "structures"],
+    [Source             , "sources"],
+    [Mineral            , "minerals"],
+    [Deposit            , "deposits"],
+    [StructurePowerBank , "powerbanks"],
+    [ConstructionSite   , "constructionSites"],
+    [StructureRoad      , "roads"],
+    [StructureContainer , "containers"],
+    [StructureWall      , "walls"]
+];
+const CREATED_TICK = "createdTick";
+for (const [memObj, memKey] of memObjKeyPair) {
+    if (!Memory[memKey]) Memory[memKey] = {};
+    Object.defineProperty(memObj.prototype, "memory", {
+        get() {
+            if (!Memory[memKey][this.id]) Memory[memKey][this.id] = { [CREATED_TICK] : Game.time };
+            return Memory[memKey][this.id];
+        },
+        set(mem) {
+            mem[CREATED_TICK] = Game.time;
+            return _.set(Memory, `${memKey}.${this.id}`, mem);
+        }
+    });
+}
+/**
+ * Plugin of Garbage Collector
+ * @type {import("./lucy.app").AppLifecycleCallbacks}
+ */
+const GCPlugin = {
+    tickStart : () => {
+        const { random } = require("lodash");
         if ((Game.time + random(0, 10, false)) % Lucy.Rules.memoryRecycleInterval.structure === 0) {
             for (var id in Memory.structures) {
                 if (!Game.structures[id]) {
@@ -98,9 +101,6 @@ function mount() {
                 delete Memory.creeps[creepName];
             }
         }
-    };
+    }
 }
-
-module.exports = {
-    mount: mount
-}
+global.Lucy.App.on(GCPlugin);

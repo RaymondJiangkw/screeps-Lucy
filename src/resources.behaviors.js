@@ -14,6 +14,7 @@ function giveContainerBehaviors() {
     StructureContainer.prototype.register = function() {
         /* Register */
         let storingResourceTypes = [];
+        // console.log(JSON.stringify(this.memory));
         if (this.memory.tag === global.Lucy.Rules.arrangements.SPAWN_ONLY) storingResourceTypes = [RESOURCE_ENERGY];
         else if (this.memory.tag === "forSource") storingResourceTypes = [RESOURCE_ENERGY];
         else if (this.memory.tag === "forMineral") storingResourceTypes = [this.room.mineral.mineralType];
@@ -58,34 +59,38 @@ function giveLinkBehaviors() {
         global.LinkManager.Register(this);
     };
 }
+function giveSourceBehaviors() {
+    Source.prototype.register = function() {
+        global.ResourceManager.Register(new ResourceDescriptor(this, RESOURCE_POSSESSING_TYPES.PRODUCING, RESOURCE_ENERGY, "default", function(source) {
+            // const vacantSpace = global.MapMonitorManager.FetchVacantSpaceCnt(source.pos.roomName, Math.max(source.pos.y - 1, 1), Math.max(source.pos.x - 1, 1), Math.min(source.pos.y + 1, 48), Math.min(source.pos.x + 1, 48)) - 1;
+            return source.energy;
+        }));
+    }
+}
 function mount() {
     giveContainerBehaviors();
     giveStorageBehaviors();
     giveLinkBehaviors();
-    /**
-     * @type {import('./manager.resources').ResourceManager}
-     */
-    const resourceManager = global.ResourceManager;
-    for (const roomName in Game.rooms) {
-        const room = Game.rooms[roomName];
-        if (isMyRoom(room)) {
-            room.energies.forEach((energy) => {
-                resourceManager.Register(new ResourceDescriptor(energy, RESOURCE_POSSESSING_TYPES.PRODUCING, RESOURCE_ENERGY, "default", function(source) {
-                    return source.energy;
-                }));
-            });
-            /**
-             * NOTICE : Mineral should only be harvested by specific `harvest` task.
-             * If other tasks require usage of some mineral, they must wait until some storage/container/terminal/... in room possess them.
-             * Thus, there is no need to register mineral into ResourceManager.
-             */
-            room["containers"].forEach(c => c.register());
-            if (room.storage) room.storage.register();
-            room["links"].forEach(l => l.register());
+    giveSourceBehaviors();
+}
+global.Lucy.App.mount(mount);
+/** @type {import("./lucy.app").AppLifecycleCallbacks} */
+const RoomResetTriggerPlugin = {
+    reset : () => {
+        for (const roomName in Game.rooms) {
+            const room = Game.rooms[roomName];
+            if (isMyRoom(room)) {
+                room.energies.forEach(source => source.register());
+                /**
+                 * NOTICE : Mineral should only be harvested by specific `harvest` task.
+                 * If other tasks require usage of some mineral, they must wait until some storage/container/terminal/... in room possess them.
+                 * Thus, there is no need to register mineral into ResourceManager.
+                 */
+                room["containers"].forEach(c => c.register());
+                if (room.storage) room.storage.register();
+                room["links"].forEach(l => l.register());
+            }
         }
     }
-}
-
-module.exports = {
-    mount : mount
 };
+global.Lucy.App.on(RoomResetTriggerPlugin);

@@ -5,15 +5,17 @@
  * @typedef {CentralTransferUnit} CentralTransferUnit
  * NOTICE : Whenever functions in `mount` use rooms' units, they should be delayed because of dependence on planning!
  */
-const Task = require('./task.prototype').Task;
-const TaskDescriptor = require('./task.prototype').TaskDescriptor;
-const Transaction = require('./money.prototype').Transaction;
-const getPrice = require('./util').getPrice;
-const checkForStore = require('./util').checkForStore;
-const checkForFreeStore = require('./util').checkForFreeStore;
+const Task                  = require('./task.prototype').Task;
+const TaskDescriptor        = require('./task.prototype').TaskDescriptor;
+const Transaction           = require('./money.prototype').Transaction;
+const getPrice              = require('./util').getPrice;
+const checkForStore         = require('./util').checkForStore;
+const checkForFreeStore     = require('./util').checkForFreeStore;
+const getCacheExpiration    = require('./util').getCacheExpiration;
+const isMyRoom              = require('./util').isMyRoom;
 /**
  * Class Representation for CentralSpawn
- * @hardcode @see {native.enhancement#centralSpawn}
+ * @hardcode @see {manager.map#centralSpawn}
  */
 class CentralSpawnUnit {
     /** @private @returns {boolean} */
@@ -26,7 +28,7 @@ class CentralSpawnUnit {
      * @param {boolean} value
      */
     SetSignal(index, key, value) {
-        console.log(`<p style="display:inline;color:gray;">[Log]</p> CentralSpawnUnit of ${this.room.name} : Set ${key}:${index} into ${value}`);
+        // console.log(`<p style="display:inline;color:gray;">[Log]</p> CentralSpawnUnit of ${this.room.name} : Set ${key}:${index} into ${value}`);
         if (index === "all") {
             this.signals[key] = [value, value, value, value];
         } else this.signals[key][index] = value;
@@ -118,15 +120,13 @@ class CentralSpawnUnit {
                 }
             }), {
                 selfCheck : function () {
-                    /** @type {CentralSpawnUnit} */
-                    const centralSpawn = this.taskData.centralSpawn;
-                    if (centralSpawn.Containers.length === 0) {
-                        const NEXT_CENTRAL_SPAWN_TIMEOUT = 100;
-                        const NEXT_CENTRAL_SPAWN_OFFSET  = 5;
-                        const nextTaskStartedTick = Game.time + getCacheExpiration(NEXT_CENTRAL_SPAWN_TIMEOUT, NEXT_CENTRAL_SPAWN_OFFSET);
-                        Lucy.Timer.add(nextTaskStartedTick, centralSpawn.issueTasks, centralSpawn, [], `CentralSpawnUnit of ${centralSpawn.room.name}`);
-                        return "dead";
-                    }
+                    /**
+                     * Practice of delaying this task until at least one container is built results in a total disaster.
+                     * Since 4 tasks are issued at the same time, once selfCheck finds there is no container available,
+                     * another 4 tasks for each task is issued. Thus, the number of tasks grows exponentially.
+                     * Considering the consumption of tasks is small, and the interval until containers are built is relatively short,
+                     * this task is always "working".
+                     */
                     return "working";
                 },
                 run : function() {
@@ -548,13 +548,13 @@ class CentralTransferUnit {
 const centralSpawnUnits = {};
 /** @type { {[roomName : string] : CentralTransferUnit} } */
 const centralTransferUnits = {};
-function mount() {
-    Room.prototype.init = function() {
+class MyRoom extends Room {
+    init() {
         /** Calling for Construction */
         this.centralSpawn;
         this.centralTransfer;
     }
-    Room.prototype.Detect = function() {
+    Detect() {
         console.log(`<p style="display:inline;color:red;">[Detect]</p> ${this.name}`);
         this.memory._lastCheckingTick = Game.time;
         this.memory.owner = this.controller ? this.controller.owner ? this.controller.owner.username : this.controller.reservation? this.controller.reservation.username : null : null;
@@ -566,36 +566,75 @@ function mount() {
         if (this.find(FIND_HOSTILE_STRUCTURES, {filter : {structureType : STRUCTURE_TOWER}}).length > 0) this.memory.avoid = true;
         else delete this.memory.avoid;
         if (!this.memory.sourceAmount) this.memory.sourceAmount = this.find(FIND_SOURCES).length;
-        this.memory.sourceCapacities = this.find(FIND_SOURCES).map(s => s.energyCapacity > SOURCE_ENERGY_CAPACITY ? s.energyCapacity : SOURCE_ENERGY_CAPACITY);
+        if (!this.memory.sourcePoses) this.memory.sourcePoses = this.find(FIND_SOURCES).map(s => s.pos);
+        if (!this.memory.sourceCapacities) this.memory.sourceCapacities = this.find(FIND_SOURCES).map(s => s.energyCapacity > SOURCE_ENERGY_CAPACITY ? s.energyCapacity : SOURCE_ENERGY_CAPACITY);
+        if (!this.memory.mineralType) this.memory.mineralType = this.mineral ? this.mineral.mineralType : null;
     }
+    NeutralTrigger() {
+        this["roads"].forEach(r => r.triggerRepairing());
+        this["containers"].forEach(c => c.triggerRepairing());
+        this.find(FIND_CONSTRUCTION_SITES).forEach(c => c.triggerBuilding());
+    }
+    CheckSpawnIndependent() {
+        if (this.controller.level >= 4 && this.spawns.length > 0 && global.MapMonitorManager.FetchStructureWithTag(this.name, "forSource", STRUCTURE_CONTAINER).length > 0) this.memory.rejectHelp = true;
+    }
+}
+function mount() {
     Object.defineProperty(Room.prototype, "centralSpawn", {
-        configurable : false,
-        enumerable : false,
-        get: function() {
+        get() {
             if (centralSpawnUnits[this.name]) return centralSpawnUnits[this.name];
-            if (!Memory.autoPlan[this.name] || !Memory.autoPlan[this.name]["centralSpawn"]) return null;
+            if (!Memory.autoPlan[this.name] || !Memory.autoPlan[this.name]["centralSpawn"] || Memory.autoPlan[this.name]["centralSpawn"].length <= 0) return null;
             if (!centralSpawnUnits[this.name]) centralSpawnUnits[this.name] = new CentralSpawnUnit(this);
             return centralSpawnUnits[this.name];
         }
     });
     Object.defineProperty(Room.prototype, "centralTransfer", {
-        configurable : false,
-        enumerable : false,
-        get : function() {
+        get() {
             if (centralTransferUnits[this.name]) return centralTransferUnits[this.name];
-            if (!Memory.autoPlan[this.name] || !Memory.autoPlan[this.name]["centralTransfer"]) return null;
+            if (!Memory.autoPlan[this.name] || !Memory.autoPlan[this.name]["centralTransfer"] || Memory.autoPlan[this.name]["centralTransfer"].length <= 0) return null;
             if (!centralTransferUnits[this.name]) centralTransferUnits[this.name] = new CentralTransferUnit(this);
             return centralTransferUnits[this.name];
         }
     });
     Object.defineProperty(Room.prototype, "controllerLink", {
-        configurable : false,
-        enumerable : false,
-        get : function() {
+        get() {
             return global.MapMonitorManager.FetchStructureWithTag(this.name, "forController", STRUCTURE_LINK)[0] || null;
         }
-    })
+    });
+    /**
+     * Visibility has just extended into this very room at current tick.
+     */
+    Object.defineProperty(Room.prototype, "becomeVisible", {
+        get() {
+            return !Memory.rooms[this.name] || !Memory.rooms[this.name]._lastCheckingTick || Memory.rooms[this.name]._lastCheckingTick < Game.time - 1;
+        }
+    });
+    Object.defineProperty(Room.prototype, "isResponsible", {
+        get() {
+            return isMyRoom(this) || (Memory.rooms[this.name] && Memory.rooms[this.name].isResponsible);
+        }
+    });
 }
-module.exports = {
-    mount : mount
+global.Lucy.App.mount(Room, MyRoom);
+global.Lucy.App.mount(mount);
+/** @type {import("./lucy.app").AppLifecycleCallbacks} */
+const RoomPlugin = {
+    tickStart : () => {
+        for (const roomName in Game.rooms) {
+            if (isMyRoom(Game.rooms[roomName])) {
+                Game.rooms[roomName].init();
+                global.Map.AutoPlan(roomName);
+                global.Map.RemoteMine(roomName);
+            } else {
+                /** Trigger Tasks in Neutral Room */
+                if (Game.rooms[roomName].becomeVisible && Game.rooms[roomName].isResponsible) Game.rooms[roomName].NeutralTrigger();
+                Game.rooms[roomName].Detect();
+            }
+        }
+    }
 };
+global.Lucy.App.on(RoomPlugin);
+/**
+ * Monitor Controller Upgrade
+ */
+Object.values(Game.rooms).filter(r => isMyRoom(r)).forEach(r => global.Lucy.App.monitor({label : `${r.name}.controller.level`, init : 0, fetch : (roomName) => Game.rooms[roomName] && Game.rooms[roomName].controller.level, fetchParams : [r.name], func : (newNumber, oldNumber, roomName) => Game.rooms[roomName] && Game.rooms[roomName].CheckSpawnIndependent(), funcParams : [r.name]}));

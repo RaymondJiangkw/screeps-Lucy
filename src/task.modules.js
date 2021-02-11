@@ -235,6 +235,23 @@ function ConstructStoreFullCheckComponent(resourceType) {
 }
 /**
  * @param {ResourceConstant} resourceType
+ */
+function ConstructStoreEmptyCheckComponent(resourceType) {
+    const component = new Component(function(object, task) {
+        const attachedData = this.attachedData[object.id] || {};
+        if (!object.store) return ConstructSignal(ERR_INVALID_ARGS, attachedData);
+        if (typeof object.store.getUsedCapacity(resourceType) !== 'number') return ConstructSignal(ERR_INVALID_ARGS, attachedData);
+        if (object.store.getUsedCapacity(resourceType) === 0) return ConstructSignal(OK, attachedData);
+        else {
+            attachedData.resourceType = resourceType;
+            return ConstructSignal(ERR_FULL, attachedData);
+        }
+    });
+    profiler.registerObject(component, `[Component StoreEmptyCheck]`);
+    return component;
+}
+/**
+ * @param {ResourceConstant} resourceType
  * @param {string} [key = "storeId"]
  */
 function ConstructObjectStoreFullCheckComponent(resourceType, key = "storeId") {
@@ -254,32 +271,14 @@ function ConstructObjectStoreFullCheckComponent(resourceType, key = "storeId") {
     return component;
 }
 /**
- * @param {ResourceConstant} resourceType
- */
-function ConstructStoreEmptyCheckComponent(resourceType) {
-    const component = new Component(function(object, task) {
-        const attachedData = this.attachedData[object.id] || {};
-        if (!object.store) return ConstructSignal(ERR_INVALID_ARGS, attachedData);
-        if (typeof object.store.getUsedCapacity(resourceType) !== 'number') return ConstructSignal(ERR_INVALID_ARGS, attachedData);
-        if (object.store.getUsedCapacity(resourceType) === 0) return ConstructSignal(OK, attachedData);
-        else {
-            attachedData.resourceType = resourceType;
-            return ConstructSignal(ERR_NOT_ENOUGH_RESOURCES, attachedData);
-        }
-    });
-    profiler.registerObject(component, `[Component StoreEmptyCheck]`);
-    return component;
-}
-/**
  * @param {number} [dist = 1] Distance between object and target
  */
 function ConstructMoveToComponent(dist = 1) {
     const component = new Component(function(object, task) {
         const attachedData = this.attachedData[object.id] || {};
-        const target = Game.getObjectById(attachedData.targetId);
-        if ((!target || !target.pos) && !attachedData.targetPos) return ConstructSignal(ERR_INVALID_ARGS, attachedData);
+        if (!attachedData.targetPos) return ConstructSignal(ERR_INVALID_ARGS, attachedData);
         /** @type {RoomPosition} */
-        const targetPos = target ? target.pos ? target.pos : attachedData.targetPos : attachedData.targetPos;
+        const targetPos = attachedData.targetPos;
         const currentPos = object.pos;
         // console.log(`<p style="display:inline;color:green;">Notice: </p>${target} : ${targetPos}, ${object} : ${currentPos}`);
         if (targetPos.roomName === currentPos.roomName && targetPos.getRangeTo(currentPos) <= dist) return ConstructSignal(OK, attachedData);
@@ -341,6 +340,7 @@ function ConstructDealTransactionComponent() {
     const component = new Component(function(object, task) {
         const attachedData = this.attachedData[object.id] || {};
         const target = Game.getObjectById(attachedData.targetId);
+        // console.log(attachedData.targetId, target, attachedData.amount, attachedData.resourceType);
         if (!target || !attachedData.amount || !attachedData.resourceType) return ConstructSignal(ERR_INVALID_ARGS, attachedData);
         const amount = Math.min(attachedData.amount, checkForStore(target, attachedData.resourceType));
         /* No Need To Check for Vacant Here */
@@ -427,7 +427,7 @@ function BuildGoToDoSomethingProject(dist, func) {
  * @param { ResourceConstant } resourceType
  * @param {(amount : number, resourceType : ResourceConstant) => Source | StructureContainer | StructureStorage | StructureLink} fetchFunc
  * @param {(object : import("./task.prototype").GameObject) => number } amountFunc
- * @param {import("./task.prototype").GameObject} target
+ * @param {import("./task.prototype").GameObject | { targetId : Id<any>, targetPos : RoomPosition }} target
  * @param {number} [dist = 1] Distance between object and target
  * @param {Function} func
  * @param {any[]} [params = []]
@@ -435,13 +435,13 @@ function BuildGoToDoSomethingProject(dist, func) {
 function BuildFetchResourceAndDoSomethingProject(resourceType, fetchFunc, amountFunc, target, dist = 1, func, params = []) {
     const project = new Project()
                         .InsertLayer({[OK] : ConstructStoreCheckComponent([resourceType])})
-                        .InsertLayer({[OK] : ConstructStoreFullCheckComponent(resourceType)})
+                        .InsertLayer({[OK] : ConstructStoreEmptyCheckComponent(resourceType)})
                         .InsertLayer({
-                            [OK] : ConstructEmptyComponent(OK),
-                            [ERR_NOT_ENOUGH_RESOURCES] : 
+                            [ERR_FULL] : ConstructEmptyComponent(OK),
+                            [OK] : 
                                 new Project()
                                     .InsertLayer({
-                                        [OK] : ConstructFetchResourceComponent(fetchFunc, amountFunc)})
+                                        [OK] : ConstructFetchResourceComponent(fetchFunc, amountFunc, resourceType)})
                                     .InsertLayer({
                                         [OK] : ConstructDealTransactionComponent()
                                     })
@@ -463,14 +463,14 @@ function BuildFetchResourceAndDoSomethingProject(resourceType, fetchFunc, amount
                         })
                         .InsertLayer({
                             [OK] : new Project()
-                                        .InsertLayer({[OK] : ConstructStaticTargetComponent(target.id)})
-                                        .InsertLayer({[OK] : ConstructStaticDataComponent(target.pos, "targetPos")})
+                                        .InsertLayer({[OK] : ConstructStaticDataComponent(target.id || target.targetId, "targetId")})
+                                        .InsertLayer({[OK] : ConstructStaticDataComponent(target.pos || target.targetPos, "targetPos")})
                                         .InsertLayer({[OK] : ConstructStaticDataComponent(params, "params")}),
                             [ERR_NOT_FOUND] : new Project()
                                                 .InsertLayer({[OK] : ConstructStoreEmptyCheckComponent(resourceType)})
                                                 .InsertLayer({
                                                     [OK] : ConstructEmptyComponent(ERR_NOT_ENOUGH_RESOURCES),
-                                                    [ERR_NOT_ENOUGH_RESOURCES] : ConstructEmptyComponent(OK)
+                                                    [ERR_FULL] : ConstructEmptyComponent(OK)
                                                 })
                         })
                         .InsertLayer({[OK] : BuildGoToDoSomethingProject(dist, func)});
