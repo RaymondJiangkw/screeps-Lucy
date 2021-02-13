@@ -1,5 +1,5 @@
 /**
- * @module native.enhancement
+ * @module manager.map
  */
 const getCacheExpiration    =   require('./util').getCacheExpiration;
 const constructArray        =   require('./util').constructArray;
@@ -11,7 +11,12 @@ const PriorityQueue         =   require('./util').PriorityQueue;
 const username              =   require('./util').username;
 const isMyRoom              =   require('./util').isMyRoom;
 const TaskConstructor       =   require('./manager.tasks').TaskConstructor;
+const StructureConstants    =   require("./util").StructureConstants;
+const Traveler = require("./Traveler");
 const profiler = require('./screeps-profiler');
+
+const DEBUG = false;
+
 /**
  * Class Representation for a Unit
  * Road Nodes will be used to calculate path.
@@ -22,48 +27,60 @@ class Unit {
      * @private
      */
     prep() {
-        /**
-         * @private
-         */
+        /** @private */
         this._dx = this.pattern[0].length;
-        /**
-         * @private
-         */
+        /** @private */
         this._dy = this.pattern.length;
-        /* Reshape pattern into 3-dim */
+        /* Reshape pattern into 3-dimensions one */
         for (let j = 0; j < this._dy; ++j) {
             for (let i = 0; i < this._dx; ++i) {
                 // NO COMPILE HERE : take care ourselves
                 if (typeof this.pattern[j][i] === "string") this.pattern[j][i]=[this.pattern[j][i]];
             }
         }
-        /**
-         * @private
-         * @type { {[type in StructureConstant]? : number} }
-         */
+        /** @type { {[type in StructureConstant]? : number} } @private*/
         this.num = {};
-        /**
-         * @private
-         * @type { {[type in StructureConstant]? : Array<[number,number]>} }
-         */
+        /** @private @type { {[type in StructureConstant]? : Array<[number,number]>} } */
         this.structureType2pos = {};
-        /**
-         * @private
-         */
+        /** @private */
         this.vacantSpace = 0;
-        /**
-         * @private
-         */
+        /** @private */
         this._total = 0;
+        /**
+         * Compile Process
+         *  - Filter out Options
+         *  - Collect Information for further usage
+         */
         for (let y = 0; y < this.pattern.length; ++y) {
             for (let x = 0; x < this.pattern[y].length; ++x) {
+                /**
+                 * Signal whether position here requires a vacant space.
+                 */
                 let isVacantSpaceNeeded = true;
+                /**
+                 * Modifiers, used to control the behaviors.
+                 */
+                let modifiers = this.pattern[y][x].filter(v => !(StructureConstants[v] || v === this.PLACE_ANY || v === this.PLACE_VACANT));
+                this.pattern[y][x] = this.pattern[y][x].filter(v => StructureConstants[v] || v === this.PLACE_ANY || v === this.PLACE_VACANT);
+                /**
+                 * Mount Modifiers directly on `this.pattern[y][x]`.
+                 */
+                modifiers.forEach(modifier => this.pattern[y][x][modifier] = true);
+                /**
+                 * Ensure PLACE_ANY and PLACE_VACANT are not set with others.
+                 */
+                if ((this.pattern[y][x].indexOf(this.PLACE_ANY) !== -1 || this.pattern[y][x].indexOf(this.PLACE_VACANT) !== -1) && this.pattern[y][x].length > 1) {
+                    console.log(`<p style="display:inline;color:red;">[Compile]</p> PLACE_ANY and PLACE_VACANT cannot be set with other options in unit "${this.tag}"`);
+                }
                 for (let k = 0; k < this.pattern[y][x].length; ++k) {
-                    if (this.pattern[y][x][k] === this.PLACE_ANY || this.pattern[y][x][k] === this.PLACE_WALL) {
+                    if (this.pattern[y][x][k] === this.PLACE_ANY) {
                         isVacantSpaceNeeded = false;
                         continue;
                     }
                     if (this.pattern[y][x][k] === this.PLACE_VACANT) continue;
+                    /**
+                     * Information Collection
+                     */
                     ++this._total;
                     if (!this.num[this.pattern[y][x][k]]) this.num[this.pattern[y][x][k]] = 0;
                     if (!this.structureType2pos[this.pattern[y][x][k]]) this.structureType2pos[this.pattern[y][x][k]] = [];
@@ -146,23 +163,41 @@ class Unit {
     FetchConnectionNodes() {
         return this.FetchStructurePos(STRUCTURE_ROAD);
     }
+    /**
+     * @param {string} roomName
+     * @param {number} y
+     * @param {number} x
+     */
     Display(roomName, y, x) {
         new RoomVisual(roomName).rect(x, y, this.dx-1, this.dy-1, {"stroke" : this.strokeColor, "strokeWidth" : 0.5})
                                 .text(this.pinText, x, y)
                                 .text(this.pinText, x+this.dx-1,y+this.dy-1);
     }
     /**
-     * @param {Array<Array<StructureConstant | "any" | "vacant">} pattern Unit.PLACE_WALL fits into STRUCTURE_WALL and TERRAIN_MASK_WALL.
+     * @param {number} y
+     * @param {number} x
+     * @param {string} modifier
+     * @returns {boolean}
+     */
+    FetchModifier(y, x, modifier) {
+        return this.pattern[y][x][modifier] || false;
+    }
+    /**
+     * @typedef {StructureConstant | "any" | "vacant"} PlaceIndicators
+     * @typedef {"first_build_here"} Modifiers
+     * @param {Array<Array<PlaceIndicators | Array<PlaceIndicators | Modifiers> >} pattern
+     * @param {string} unitType
      * @param {string} tag used to denote all the structures belonging to this pattern
      * @param {string} pinText
      * @param {string} strokeColor
      * @param { {type : "distanceSum", objects : Array<StructureConstant | "energies" | MineralConstant | "mineral">, subjects : Array<StructureConstant> } } metrics
      * @param { {alongRoad? : boolean, avoidOverLapRoad? : boolean, avoidOtherToOverLapRoad? : boolean, primary? : boolean} } [options] specify some other specifications
      */
-    constructor(pattern, tag, pinText, strokeColor, metrics, options = {}) {
+    constructor(pattern, unitType, tag, pinText, strokeColor, metrics, options = {}) {
         _.defaults(options, {alongRoad:false, avoidOverLapRoad : false, avoidOtherToOverLapRoad : false, primary : false});
         /** @private */
         this.pattern = pattern;
+        this.unitType = unitType;
         /** @private */
         this.tag = tag;
         /** @private */
@@ -180,7 +215,23 @@ class Unit {
              * @param {number} y Top
              * @param {number} x Left
              */
-            this.evaluatePos = function(room, y, x) {
+            this.evaluatePos = (room, y, x) => {
+                /**
+                 * Positions away from exits are preferred.
+                 */
+                const exits = Game.map.describeExits(room.name);
+                const evaluateDistanceToExit_X = (x_1, x_2) => {
+                    let sum = 0;
+                    if (exits[LEFT]) sum += Math.abs(x_1 - 0);
+                    if (exits[RIGHT]) sum += Math.abs(49 - x_2);
+                    return sum;
+                };
+                const evaluateDistanceToExit_Y = (y_1, y_2) => {
+                    let sum = 0;
+                    if (exits[TOP]) sum += Math.abs(y_1 - 0);
+                    if (exits[BOTTOM]) sum += Math.abs(49 - y_2);
+                    return sum;
+                };
                 let objects = [];
                 for (const key of this.metrics.objects) {
                     // if (key === STRUCTURE_SPAWN) console.log(tag, planer.FetchRoomPlannedStructures(room.name, key));
@@ -190,11 +241,11 @@ class Unit {
                     else objects = objects.concat(planer.FetchRoomPlannedStructures(room.name, key));
                 }
                 let subjects = [];
-                for (const structureType of this.metrics.subjects) subjects = subjects.concat(this.FetchStructurePos(structureType).map(p => p = [p[0]+y,p[1]+x]).map(p => new RoomPosition(p[1],p[0],room.name)));
+                for (const structureType of this.metrics.subjects) subjects = subjects.concat(this.FetchStructurePos(structureType).map(p => new RoomPosition(p[1] + x, p[0] + y, room.name)));
                 let ret = 0;
                 subjects.forEach(s_p => objects.forEach(o_p => ret += calcInRoomDistance(s_p, o_p)));
-                return ret;
-            }.bind(this);
+                return ret + evaluateDistanceToExit_X(x, x + this.dx - 1) + evaluateDistanceToExit_Y(y, y + this.dy - 1);
+            };
         }
     }
 };
@@ -204,176 +255,16 @@ class Unit {
 Unit.prototype.PLACE_ANY            = "any";
 Unit.prototype.PLACE_VACANT         = "vacant";
 /**
- * Wall Here means natural wall or artificial wall.
+ * Modifiers
  */
-Unit.prototype.PLACE_WALL           = "wall";
+Unit.prototype.FIRST_BUILD_HERE     = "first_build_here";
 
 /**
  * Class Representation for MapMonitor.
+ * MapMonitor only cares about real-life situations, not including those "planned".
  * Single Class
  */
 class MapMonitor {
-    /**
-     * @private
-     * @returns {Boolean}
-     */
-    needUpdate() {
-        return global.signals.IsAnyNewStructure || global.signals.IsAnyNewConstructionSite || global.signals.IsAnyStructureDestroy || global.signals.IsAnyConstructionSiteCancel || false;
-    }
-    /**
-     * Specialized at Structure and ConstructionSite.
-     * @private
-     */
-    updateStructureCache() {
-        if (!this._init || (this.needUpdate() && Game.time > this._lastUpdatingTick)) {
-            console.log(`<p style="color:gray;display:inline;">[Log]</p> Updating Cache of Structure.`);
-            this._init = true;
-            this._lastUpdatingTick = Game.time;
-            /**
-             * @private
-             * @type { {[roomName : string] : Array<Array<Id<Structure>> >} }
-             */
-            this.structures = {};
-            /**
-             * @private
-             * @type { {[roomName : string] : Array<Array<Id<ConstructionSite>> > } }
-             */
-            this.constructionSites = {};
-            /**
-             * @private
-             * @type { {[roomName : string] : {[structureType in StructureConstant] : {structures : number, constructionSites : number, total : number}}} }
-             */
-            this.cnts = {};
-            /**
-             * Since Road, Container, ConstructedWall are not included in Game.structures. They should be manually added.
-             * @param {Structure} structure
-             */
-            const addStructure = (structure) => {
-                /* Structure */
-                if (!this.structures[structure.pos.roomName]) {
-                    this.structures[structure.pos.roomName] = constructArray([50,50],new Array());
-                }
-                this.structures[structure.pos.roomName][structure.pos.y][structure.pos.x].push(structure.id);
-                /* Cnt */
-                if (!this.cnts[structure.pos.roomName]) this.cnts[structure.pos.roomName] = {};
-                if (!this.cnts[structure.pos.roomName][structure.structureType]) this.cnts[structure.pos.roomName][structure.structureType] = {"structures" : 0, "constructionSites" : 0, "total" : 0};
-                ++this.cnts[structure.pos.roomName][structure.structureType]["structures"];
-                ++this.cnts[structure.pos.roomName][structure.structureType]["total"];
-            };
-            for (const structureId in Game.structures) addStructure(Game.structures[structureId]);
-            for (const roomName in Game.rooms) {
-                /** road, container and wall need to be found instantly. */
-                Game.rooms[roomName].find(FIND_STRUCTURES, {filter : s => s.structureType === STRUCTURE_ROAD || s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_WALL}).forEach(s => addStructure(s));
-            }
-            for (const constructionSiteId in Game.constructionSites) {
-                const constructionSite = Game.constructionSites[constructionSiteId];
-                /* ConstructionSite */
-                if (!this.constructionSites[constructionSite.pos.roomName]) {
-                    this.constructionSites[constructionSite.pos.roomName] = constructArray([50,50],new Array());
-                }
-                this.constructionSites[constructionSite.pos.roomName][constructionSite.pos.y][constructionSite.pos.x].push(constructionSite.id);
-                /* Cnt */
-                if (!this.cnts[constructionSite.pos.roomName]) this.cnts[constructionSite.pos.roomName] = {};
-                if (!this.cnts[constructionSite.pos.roomName][constructionSite.structureType]) this.cnts[constructionSite.pos.roomName][constructionSite.structureType] = {"structures" : 0, "constructionSites" : 0, "total" : 0};
-                ++this.cnts[constructionSite.pos.roomName][constructionSite.structureType]["constructionSites"];
-                ++this.cnts[constructionSite.pos.roomName][constructionSite.structureType]["total"];
-            }
-        }
-    }
-    /**
-     * @private
-     * @param {string} roomName
-     */
-    updateTerrainCache(roomName) {
-        this.terrains[roomName] = constructArray([50,50],0);
-        this.roomVacantTerrain[roomName] = [];
-        const terrain = new Room.Terrain(roomName);
-        for (let y = 0; y < 50; ++y) {
-            for (let x = 0; x < 50; ++x) {
-                this.terrains[roomName][y][x] = terrain.get(x, y);
-                if (this.terrains[roomName][y][x] !== TERRAIN_MASK_WALL) this.roomVacantTerrain[roomName].push(new RoomPosition(x, y, roomName));
-            }
-        }
-    }
-    /**
-     * @private
-     * @param {string} roomName
-     */
-    updateSpaceCache(roomName) {
-        const terrains = this.FetchTerrain(roomName);
-        this.spaces[roomName] = constructArray([50,50],0);
-        this.spaces[roomName].get = (y,x) => {
-            if (y < 0 || y >= 50 || x < 0 || x >= 50) return 0;
-            return this.spaces[roomName][y][x];
-        };
-        for (let y = 0; y < 50; ++y) {
-            for (let x = 0; x < 50; ++x) {
-                this.spaces[roomName][y][x] = this.spaces[roomName].get(y,x-1)+this.spaces[roomName].get(y-1,x)-this.spaces[roomName].get(y-1,x-1)+((terrains[y][x] === TERRAIN_MASK_LAVA || terrains[y][x] === TERRAIN_MASK_WALL)? 0 : 1);
-            }
-        }
-    }
-    updateStructureCntCache(roomName) {
-        this.updateStructureCache();
-        if (!this.structureCnt[roomName] || this.needUpdate()) {
-            this.structureCnt[roomName] = constructArray([50,50],0);
-            this.structureCnt[roomName].get = (y,x) => {
-                if (y < 0 || y >= 50 || x < 0 || x >= 50) return 0;
-                return this.structureCnt[roomName][y][x];
-            };
-            for (let y = 0; y < 50; ++y) {
-                for (let x = 0; x < 50; ++x) {
-                    this.structureCnt[roomName][y][x] = this.structureCnt[roomName].get(y,x-1)+this.structureCnt[roomName].get(y-1,x)-this.structureCnt[roomName].get(y-1,x-1)+this.FetchStructure(roomName,y,x).length;
-                }
-            }
-        }
-    }
-    updateStructureAndConstructionSiteCntCache(roomName) {
-        this.updateStructureCache();
-        if (!this.structureAndConstructionSiteCnt[roomName] || this.needUpdate()) {
-            this.structureAndConstructionSiteCnt[roomName] = constructArray([50,50],0);
-            this.structureAndConstructionSiteCnt[roomName].get = (y,x) => {
-                if (y < 0 || y >= 50 || x < 0 || x >= 50) return 0;
-                return this.structureAndConstructionSiteCnt[roomName][y][x];
-            };
-            for (let y = 0; y < 50; ++y) {
-                for (let x = 0; x < 50; ++x) {
-                    this.structureAndConstructionSiteCnt[roomName][y][x] = this.structureAndConstructionSiteCnt[roomName].get(y,x-1)+this.structureAndConstructionSiteCnt[roomName].get(y-1,x)-this.structureAndConstructionSiteCnt[roomName].get(y-1,x-1)+this.Fetch(roomName,y,x).length;
-                }
-            }
-        }
-    }
-    /**
-     * @private
-     * @friend @see {Planner}
-     * @param {Structure} structure
-     */
-    registerStructureWithTag(structure) {
-        if (!this.room2tag2structureType2structureIds[structure.pos.roomName]) this.room2tag2structureType2structureIds[structure.pos.roomName] = {};
-        if (!this.room2tag2structureType2structureIds[structure.pos.roomName][structure.memory.tag]) this.room2tag2structureType2structureIds[structure.pos.roomName][structure.memory.tag] = {};
-        if (!this.room2tag2structureType2structureIds[structure.pos.roomName][structure.memory.tag][structure.structureType]) this.room2tag2structureType2structureIds[structure.pos.roomName][structure.memory.tag][structure.structureType] = {};
-        this.room2tag2structureType2structureIds[structure.pos.roomName][structure.memory.tag][structure.structureType][structure.id] = true;
-    }
-    /**
-     * @param {string} roomName
-     * @param {string} tag
-     * @param {StructureConstant} structureType
-     * @returns {Array<Structure<structureType>>}
-     */
-    FetchStructureWithTag(roomName, tag, structureType) {
-        if (!this.room2tag2structureType2structureIds[roomName] || !this.room2tag2structureType2structureIds[roomName][tag] || !this.room2tag2structureType2structureIds[roomName][tag][structureType]) return [];
-        const idMap = this.room2tag2structureType2structureIds[roomName][tag][structureType];
-        if (!idMap._lastUpdatingTick || idMap._lastUpdatingTick < Game.time) {
-            idMap._lastUpdatingTick = Game.time;
-            idMap._structures = [];
-            const ids = Object.keys(idMap).filter(k => !k.startsWith("_"));
-            for (const id of ids) {
-                const object = Game.getObjectById(id);
-                if (!object) delete idMap[id];
-                else idMap._structures.push(object);
-            }
-        }
-        return idMap._structures;
-    }
     /**
      * @private
      * @param {number} y
@@ -384,11 +275,147 @@ class MapMonitor {
         return false;
     }
     /**
+     * Update Structure Cache whenever
+     *  - ConstructionSite completes or cancels.
+     *  - Structure is built or destroyed.
+     *  - Visibility extends or shrinks.
+     * @private
+     * @returns {Boolean}
+     */
+    needUpdate() {
+        const visibleRooms = Object.keys(Game.rooms).length;
+        if (!this._visibleRooms || this._visibleRooms !== visibleRooms) {
+            this._visibleRooms = visibleRooms;
+            return true;
+        }
+        return global.signals.IsAnyNewStructure || global.signals.IsAnyNewConstructionSite || global.signals.IsAnyStructureDestroy || global.signals.IsAnyConstructionSiteCancel || false;
+    }
+    /**
+     * Cache for Structure and ConstructionSite.
+     * @private
+     */
+    updateStructureCache() {
+        if (this.needUpdate() && (!this._lastUpdatingTick || Game.time > this._lastUpdatingTick)) {
+            console.log(`<p style="color:gray;display:inline;">[Log]</p> Updating Cache of Structure.`);
+            this._lastUpdatingTick = Game.time;
+            /** @type { {[roomName : string] : Array<Array<Id<Structure>> >} } */
+            this.structures = {};
+            /** @type { {[roomName : string] : Array<Array<Id<ConstructionSite>> > } } */
+            this.constructionSites = {};
+            /** @type { {[roomName : string] : {[structureType in StructureConstant] : {structures : number, constructionSites : number, total : number}}} } */
+            this.cnts = {};
+            /**
+             * Since Road, Container, ConstructedWall are not included in Game.structures. They should be manually added.
+             * @param {Structure} structure
+             */
+            const addStructure = (structure) => {
+                /** Record Id of Structure */
+                if (!this.structures[structure.pos.roomName]) this.structures[structure.pos.roomName] = constructArray([50,50],new Array());
+                this.structures[structure.pos.roomName][structure.pos.y][structure.pos.x].push(structure.id);
+                /** Count Structure */
+                if (!this.cnts[structure.pos.roomName]) this.cnts[structure.pos.roomName] = {};
+                if (!this.cnts[structure.pos.roomName][structure.structureType]) this.cnts[structure.pos.roomName][structure.structureType] = {"structures" : 0, "constructionSites" : 0, "total" : 0};
+                ++this.cnts[structure.pos.roomName][structure.structureType]["structures"];
+                ++this.cnts[structure.pos.roomName][structure.structureType]["total"];
+            };
+            /**
+             * Since constructionSites should be recorded in all visible rooms, Game.constructionSites is not suitable for its only involvement of owned constructionSites.
+             * @param {ConstructionSite} constructionSite
+             */
+            const addConstructionSite = (constructionSite) => {
+                /** Record Id of ConstructionSite */
+                if (!this.constructionSites[constructionSite.pos.roomName]) this.constructionSites[constructionSite.pos.roomName] = constructArray([50,50], new Array());
+                this.constructionSites[constructionSite.pos.roomName][constructionSite.pos.y][constructionSite.pos.x].push(constructionSite.id);
+                /** Cnt */
+                if (!this.cnts[constructionSite.pos.roomName]) this.cnts[constructionSite.pos.roomName] = {};
+                if (!this.cnts[constructionSite.pos.roomName][constructionSite.structureType]) this.cnts[constructionSite.pos.roomName][constructionSite.structureType] = {"structures" : 0, "constructionSites" : 0, "total" : 0};
+                ++this.cnts[constructionSite.pos.roomName][constructionSite.structureType]["constructionSites"];
+                ++this.cnts[constructionSite.pos.roomName][constructionSite.structureType]["total"];
+            };
+            for (const roomName in Game.rooms) {
+                /** road, container and wall need to be found instantly. */
+                Game.rooms[roomName].find(FIND_STRUCTURES).forEach(s => addStructure(s));
+                /** constructionSites need to be found instantly too. */
+                Game.rooms[roomName].find(FIND_CONSTRUCTION_SITES).forEach(c => addConstructionSite(c));
+            }
+        }
+    }
+    /**
+     * @private
      * @param {string} roomName
-     * @param {string} _y1
-     * @param {string} _x1
-     * @param {strin} _y2
-     * @param {string} _x2
+     */
+    updateTerrainCache(roomName) {
+        if (!this.terrains[roomName] || !this.roomVacantTerrain[roomName]) {
+            this.terrains[roomName] = constructArray([50,50],0);
+            this.roomVacantTerrain[roomName] = [];
+            const terrain = new Room.Terrain(roomName);
+            for (let y = 0; y < 50; ++y) {
+                for (let x = 0; x < 50; ++x) {
+                    this.terrains[roomName][y][x] = terrain.get(x, y);
+                    if (this.terrains[roomName][y][x] !== TERRAIN_MASK_WALL) this.roomVacantTerrain[roomName].push(new RoomPosition(x, y, roomName));
+                }
+            }
+        }
+    }
+    /**
+     * @param {string} roomName
+     * @returns {Array<Array<number>>}
+     */
+    FetchTerrain(roomName) {
+        this.updateTerrainCache(roomName);
+        return this.terrains[roomName];
+    }
+    /**
+     * @param {string} roomName
+     */
+    FetchVacantSpace(roomName) {
+        this.updateTerrainCache(roomName);
+        return this.roomVacantTerrain[roomName];
+    }
+    /**
+     * @private
+     * @param {string} roomName
+     */
+    updateSpaceCache(roomName) {
+        if (!this.spaces[roomName]) {
+            const terrains = this.FetchTerrain(roomName);
+            this.spaces[roomName] = constructArray([50,50],0);
+            this.spaces[roomName].get = (y,x) => {
+                if (y < 0 || y >= 50 || x < 0 || x >= 50) return 0;
+                return this.spaces[roomName][y][x];
+            };
+            for (let y = 0; y < 50; ++y) {
+                for (let x = 0; x < 50; ++x) {
+                    /**
+                     * Compute Vacant Spaces in the region whose right-bottom corner is (x, y) and left-top corner is (0, 0).
+                     */
+                    this.spaces[roomName][y][x] = this.spaces[roomName].get(y,x-1)+this.spaces[roomName].get(y-1,x)-this.spaces[roomName].get(y-1,x-1)+(terrains[y][x] === TERRAIN_MASK_WALL? 0 : 1);
+                }
+            }
+        }
+    }
+    /**
+     * Returns number of vacant spaces in the region.
+     * @param {string} roomName
+     * @param {number} _y1
+     * @param {number} _x1
+     * @param {number} _y2
+     * @param {number} _x2
+     * @returns {number}
+     */
+    FetchVacantSpaceCnt(roomName, _y1, _x1, _y2, _x2) {
+        this.updateSpaceCache(roomName);
+        const y1 = Math.min(_y1, _y2), y2 = Math.max(_y1, _y2);
+        const x1 = Math.min(_x1, _x2), x2 = Math.max(_x1, _x2);
+        return this.spaces[roomName].get(y2,x2)-this.spaces[roomName].get(y2,x1-1)-this.spaces[roomName].get(y1-1,x2)+this.spaces[roomName].get(y1-1,x1-1);
+    }
+    /**
+     * @param {string} roomName
+     * @param {number} _y1
+     * @param {number} _x1
+     * @param {number} _y2
+     * @param {number} _x2
+     * @returns {boolean}
      */
     IsVacant(roomName, _y1, _x1, _y2, _x2) {
         const y1 = Math.min(_y1, _y2), y2 = Math.max(_y1, _y2);
@@ -396,61 +423,34 @@ class MapMonitor {
         return this.FetchVacantSpaceCnt(roomName, _y1, _x1, _y2, _x2) === (y2 - y1 + 1) * (x2 - x1 + 1);
     }
     /**
-     * @param {string} roomName
-     * @param {string} _y1
-     * @param {string} _x1
-     * @param {strin} _y2
-     * @param {string} _x2
-     * @returns {number}
+     * Register Structure into MapMonitor with its tag, so that it could be found with specification of tag.
+     * @param {Structure & {memory : {tag : string}}} structure
      */
-    FetchVacantSpaceCnt(roomName, _y1, _x1, _y2, _x2) {
-        if (!this.spaces[roomName]) this.updateSpaceCache(roomName);
-        const y1 = Math.min(_y1, _y2), y2 = Math.max(_y1, _y2);
-        const x1 = Math.min(_x1, _x2), x2 = Math.max(_x1, _x2);
-        return this.spaces[roomName].get(y2,x2)-this.spaces[roomName].get(y2,x1-1)-this.spaces[roomName].get(y1-1,x2)+this.spaces[roomName].get(y1-1,x1-1);
+    registerStructure(structure) {
+        _.set(this.room2tag2structureType2structureIds, [structure.pos.roomName, structure.memory.tag, structure.structureType, structure.id], true);
     }
     /**
+     * @template {ResourceConstant} T
      * @param {string} roomName
+     * @param {string} tag
+     * @param {T} structureType
+     * @returns {Array<Structure<T>>}
      */
-    FetchVacantSpace(roomName) {
-        if (!this.roomVacantTerrain[roomName]) this.updateTerrainCache(roomName);
-        return this.roomVacantTerrain[roomName];
-    }
-    /**
-     * @param {string} roomName
-     * @param {number} _y1
-     * @param {number} _x1
-     * @param {number} _y2
-     * @param {number} _x2
-     * @returns {number}
-     */
-    FetchStructureCnt(roomName, _y1, _x1, _y2, _x2) {
-        this.updateStructureCntCache(roomName);
-        const y1 = Math.min(_y1, _y2), y2 = Math.max(_y1, _y2);
-        const x1 = Math.min(_x1, _x2), x2 = Math.max(_x1, _x2);
-        return this.structureCnt[roomName].get(y2,x2)-this.structureCnt[roomName].get(y2,x1-1)-this.structureCnt[roomName].get(y1-1,x2)+this.structureCnt[roomName].get(y1-1,x1-1);
-    }
-    /**
-     * @param {string} roomName
-     * @param {number} _y1
-     * @param {number} _x1
-     * @param {number} _y2
-     * @param {number} _x2
-     * @returns {number}
-     */
-    FetchStructureAndConstructionSiteCnt(roomName, _y1, _x1, _y2, _x2) {
-        this.updateStructureAndConstructionSiteCntCache(roomName);
-        const y1 = Math.min(_y1, _y2), y2 = Math.max(_y1, _y2);
-        const x1 = Math.min(_x1, _x2), x2 = Math.max(_x1, _x2);
-        return this.structureAndConstructionSiteCnt[roomName].get(y2,x2)-this.structureAndConstructionSiteCnt[roomName].get(y2,x1-1)-this.structureAndConstructionSiteCnt[roomName].get(y1-1,x2)+this.structureAndConstructionSiteCnt[roomName].get(y1-1,x1-1);
-    }
-    /**
-     * @param {string} roomName
-     * @returns {Array<Array<number>>}
-     */
-    FetchTerrain(roomName) {
-        if (!this.terrains[roomName]) this.updateTerrainCache(roomName);
-        return this.terrains[roomName];
+    FetchStructureWithTag(roomName, tag, structureType) {
+        const idMap = _.get(this.room2tag2structureType2structureIds, [roomName, tag, structureType], undefined);
+        if (!idMap) return [];
+        if (!idMap._lastUpdatingTick || idMap._lastUpdatingTick < Game.time) {
+            idMap._lastUpdatingTick = Game.time;
+            idMap._structures = [];
+            /** @type {Array<Id<T>>} */
+            const ids = Object.keys(idMap).filter(k => !k.startsWith("_"));
+            for (const id of ids) {
+                const object = Game.getObjectById(id);
+                if (!object) delete idMap[id];
+                else idMap._structures.push(object);
+            }
+        }
+        return idMap._structures;
     }
     /**
      * @param {string} roomName
@@ -459,8 +459,7 @@ class MapMonitor {
      */
     FetchCnt(roomName, structureType) {
         this.updateStructureCache();
-        if (!this.cnts[roomName] || !this.cnts[roomName][structureType]) return {"constructionSites" : 0, "structures" : 0, "total" : 0};
-        return this.cnts[roomName][structureType]; 
+        return _.get(this.cnts, [roomName, structureType], {"constructionSites" : 0, "structures" : 0, "total" : 0});
     }
     /**
      * @param {string} roomName
@@ -469,13 +468,15 @@ class MapMonitor {
      * @returns {Array<Structure | ConstructionSite>}
      */
     Fetch(roomName, y, x) {
-        if (!this["fetch"+ roomName + "," + y + "," + x + "tick"] || this["fetch"+ roomName + "," + y + "," + x + "tick"] < Game.time) {
-            this["fetch"+ roomName + "," + y + "," + x + "tick"] = Game.time;
+        if (!this.isValidPos(y, x)) return [];
+        const prefix = `_fetch_${roomName}_${y}_${x}`;
+        if (!this[prefix + "tick"] || this[prefix + "tick"] < Game.time) {
+            this[prefix + "tick"] = Game.time;
             this.updateStructureCache();
             const structures = (this.structures[roomName]? this.structures[roomName][y][x] : []);
             const constructionSites = (this.constructionSites[roomName]? this.constructionSites[roomName][y][x] : []);
-            return this["fetch"+ roomName + "," + y + "," + x] = [].concat(structures, constructionSites).map(Game.getObjectById);
-        } else return this["fetch"+ roomName + "," + y + "," + x];
+            return this[prefix] = [].concat(structures, constructionSites).map(Game.getObjectById);
+        } else return this[prefix];
     }
     /**
      * @param {string} roomName
@@ -484,11 +485,28 @@ class MapMonitor {
      * @returns {Array<Structure>}
      */
     FetchStructure(roomName, y, x) {
-        if (!this["fetchstructure" + roomName + "," + y + "," + x + "tick"] || this["fetchstructure" + roomName + "," + y + "," + x + "tick"] < Game.time) {
-            this["fetchstructure" + roomName + "," + y + "," + x + "tick"] = Game.time;
+        if (!this.isValidPos(y, x)) return [];
+        const prefix = `_fetchStructure_${roomName}_${y}_${x}`;
+        if (!this[prefix + "tick"] || this[prefix + "tick"] < Game.time) {
+            this[prefix + "tick"] = Game.time;
             this.updateStructureCache();
-            return this["fetchstructure" + roomName + "," + y + "," + x] = (this.structures[roomName]? this.structures[roomName][y][x] : []).map(Game.getObjectById);
-        } else return this["fetchstructure" + roomName + "," + y + "," + x];
+            return this[prefix] = (this.structures[roomName]? this.structures[roomName][y][x] : []).map(Game.getObjectById);
+        } else return this[prefix];
+    }
+    /**
+     * @param {string} roomName
+     * @param {number} y
+     * @param {number} x
+     * @returns {Array<ConstructionSite>}
+     */
+    FetchConstructionSites(roomName, y, x) {
+        if (!this.isValidPos(y, x)) return [];
+        const prefix = `_fetchConstructionSites_${roomName}_${y}_${x}`;
+        if (!this[prefix + "tick"] || this[prefix + "tick"] < Game.time) {
+            this[prefix + "tick"] = Game.time;
+            this.updateStructureCache();
+            return this[prefix] = (this.constructionSites[roomName]? this.constructionSites[roomName][y][x] : []).map(Game.getObjectById);
+        } else return this[prefix];
     }
     /**
      * @param {string} roomName
@@ -498,13 +516,34 @@ class MapMonitor {
      */
     FetchAroundStructure(roomName, y, x) {
         let ret = [];
-        const dy = [-1,-1,-1,0,0,1,1,1], dx = [-1,0,1,-1,1,-1,0,1], dlen = dy.length;
-        for (let i = 0; i < dlen; ++i) {
-            const _y = y + dy[i], _x = x + dx[i];
-            if (!this.isValidPos(_y, _x)) continue;
+        for (let i = 0; i < this.dlen; ++i) {
+            const _y = y + this.dy[i], _x = x + this.dx[i];
             ret = ret.concat(this.FetchStructure(roomName, _y, _x));
         }
         return ret;
+    }
+    /**
+     * @param {string} roomName
+     * @param {number} y
+     * @param {number} x
+     * @returns {Array<ConstructionSite>}
+     */
+    FetchAroundConstructionSites(roomName, y, x) {
+        let ret = [];
+        for (let i = 0; i < this.dlen; ++i) {
+            const _y = y + this.dy[i], _x = x + this.dx[i];
+            ret = ret.concat(this.FetchConstructionSites(roomName, _y, _x));
+        }
+        return ret;
+    }
+    /**
+     * @param {string} roomName
+     * @param {number} y
+     * @param {number} x
+     * @returns {Array<Structure | ConstructionSite>}
+     */
+    FetchAround(roomName, y, x) {
+        return [].concat(this.FetchAroundStructure(roomName, y, x), this.FetchAroundConstructionSites(roomName, y, x));
     }
     /**
      * @param {string} roomName
@@ -520,174 +559,144 @@ class MapMonitor {
         for (let i = 0; i < dlen; ++i) {
             const _y = y + dy[i], _x = x + dx[i];
             if (!this.isValidPos(_y, _x) || terrain[_y][_x] === TERRAIN_MASK_WALL) continue;
-            const structures = [].concat(this.FetchStructure(roomName, _y, _x), this.FetchConstructionSites(roomName, _y, _x));
+            const structures = this.Fetch(roomName, _y, _x);
             if (structures.length > 0 && structures.filter(s => allowedStructureTypes.indexOf(s.structureType) === -1).length > 0) continue;
             ret.push(new RoomPosition(_x, _y, roomName));
         }
         return ret;
     }
-    /**
-     * @param {string} roomName
-     * @param {number} y
-     * @param {number} x
-     * @returns {Array<ConstructionSite>}
-     */
-    FetchConstructionSites(roomName, y, x) {
-        if (!this["fetchconstructionsites" + roomName + "," + y + "," + x + "tick"] || this["fetchconstructionsites" + roomName + "," + y + "," + x + "tick"] < Game.time) {
-            this["fetchconstructionsites" + roomName + "," + y + "," + x + "tick"] = Game.time;
-            this.updateStructureCache();
-            return this["fetchconstructionsites" + roomName + "," + y + "," + x] = (this.constructionSites[roomName]? this.constructionSites[roomName][y][x] : []).map(Game.getObjectById);
-        } else return this["fetchconstructionsites" + roomName + "," + y + "," + x];
-    }
-    /**
-     * @param {string} roomName
-     * @param {number} y
-     * @param {number} x
-     * @returns {Array<Structure>}
-     */
-    FetchAroundConstructionSites(roomName, y, x) {
-        let ret = [];
-        const dy = [-1,-1,-1,0,0,1,1,1], dx = [-1,0,1,-1,1,-1,0,1], dlen = dy.length;
-        for (let i = 0; i < dlen; ++i) {
-            const _y = y + dy[i], _x = x + dx[i];
-            if (!this.isValidPos(_y, _x)) continue;
-            ret = ret.concat(this.FetchConstructionSites(roomName, _y, _x));
-        }
-        return ret;
-    }
     constructor() {
-        /**
-         * @private
-         * @type { {[roomName : string] : Array<Array<number>>} }
-         */
+        /** @type { {[roomName : string] : Array<Array<number>>} } */
         this.terrains       = {};
-        /**
-         * @private
-         * @type { {[roomName : string] : Array<RoomPosition>} }
-         */
+        /** @type { {[roomName : string] : Array<RoomPosition>} } */
         this.roomVacantTerrain = {};
-        /**
-         * @private
-         * @type { {[roomName : string] : Array<Array<number> >} }
-         */
+        /** @type { {[roomName : string] : Array<Array<number> >} } */
         this.spaces         = {};
-        /**
-         * @private
-         * @type { {[roomName : string] : Array<Array<number> >} }
-         */
-        this.structureCnt   = {};
-        /**
-         * @private
-         * @type { {[roomName : string] : Array<Array<number> >} }
-         */
-        this.structureAndConstructionSiteCnt = {};
-        /**
-         * @private
-         * @type { {[roomName : string] : {[tag : string] : {[structure in StructureConstant] : {[id : string] : boolean}}}} }
-         */
+        /** @type { {[roomName : string] : {[tag : string] : {[structure in StructureConstant] : {[id : string] : boolean}}}} } */
         this.room2tag2structureType2structureIds           = {};
         this.updateStructureCache();
     }
 };
 /**
- * @type {MapMonitor}
+ * Static Variables
  */
+MapMonitor.prototype.dy = [-1,-1,-1,0,0,1,1,1];
+MapMonitor.prototype.dx = [-1,0,1,-1,1,-1,0,1];
+MapMonitor.prototype.dlen = 8;
+
 const mapMonitor = new MapMonitor();
+
+class Response {
+    /**
+     * @param {0 | 1 | 2 | 3 | Response} value
+     */
+    Feed(value) {
+        if (value instanceof Response) value = value.value;
+        if (value === this.PLACE_HOLDER) return this;
+        if (DEBUG) {
+            if (value === undefined) throw 1;
+        }
+        if (this.value === this.PLACE_HOLDER || this.value === this.FINISH) this.value = value;
+        else if (value === this.WAIT_UNTIL_TIMEOUT) this.value = value;
+        if (this.value === this.WAIT_UNTIL_TIMEOUT) this.timeout = Game.time + getCacheExpiration(this.TIMEOUT_MEAN, this.TIMEOUT_VARIANCE);
+        return this;
+    }
+    /**
+     * @param {0 | 1 | 2 | 3 | Response} value
+     */
+    constructor(value) {
+        if (value instanceof Response) value = value.value;
+        this.value = value;
+        this.timeout = null;
+        if (this.value === this.WAIT_UNTIL_TIMEOUT) this.timeout = Game.time + getCacheExpiration(this.TIMEOUT_MEAN, this.TIMEOUT_VARIANCE);
+    }
+}
+Response.prototype.TIMEOUT_MEAN = 500;
+Response.prototype.TIMEOUT_VARIANCE = 100;
+
+Response.prototype.FINISH = 0;
+Response.prototype.WAIT_UNTIL_UPGRADE = 1;
+Response.prototype.WAIT_UNTIL_TIMEOUT = 2;
+Response.prototype.PLACE_HOLDER = 3;
+
+class ResponsePatch {
+    /**
+     * @param {ResponsePatch} patch
+     */
+    Merge(patch) {
+        Object.keys(patch).filter(key => !key.startsWith("_")).forEach(key => this.Pick(key).Feed(patch.Pick(key)));
+    }
+    /**
+     * @param {string} patchKey
+     * @returns {Response}
+     */
+    Pick(patchKey) {
+        if (this[patchKey]) return this[patchKey];
+        else console.log(`<p style="display:inline;color:red;">Error:</p> ${patchKey} not found.`);
+    }
+    /**
+     * @param {0 | 1 | 2 | 3 | Response} value
+     * @danger if `value` is passed as an instance of Response, once original instance changes, default value of all following newly-created Response will change too.
+     * @param {...string} keys
+     */
+    constructor(value, ...keys) {
+        /** @private */
+        this._value = value;
+        keys.forEach(key => this[key] = new Response(this._value));
+    }
+}
+const RAMPART_BUILD_CONTROLLER_LEVEL = 4;
 
 class Planer {
     /**
-     * @param {string} roomType
-     * @param {string} unitType
-     * @param {Unit} unit
-     */
-    RegisterUnit(roomType, unitType, unit) {
-        if (!this.units[roomType]) this.units[roomType] = {};
-        this.units[roomType][unitType] = unit;
-    }
-    /**
-     * Registered Unit's Position will be avoided overlapping when planning another unit.
-     * However, PLACE_ANY will not be counted.
-     * @param {string} roomName
-     * @param {Unit} unit
+     * @private
      * @param {number} _y1
      * @param {number} _x1
      * @param {number} _y2
      * @param {number} _x2
+     * @returns {Array<number, number, number, number>}
      */
-    RegisterUnitPos(roomName, unit, _y1, _x1, _y2, _x2) {
-        // console.log(`Registering : ${roomName} : (${_x1}, ${_y1}, ${_x2}, ${_y2})`);
-        const y1 = Math.min(_y1, _y2), y2 = Math.max(_y1, _y2);
-        const x1 = Math.min(_x1, _x2), x2 = Math.max(_x1, _x2);
-        if (!this.roomOccupiedSpace[roomName]) this.roomOccupiedSpace[roomName] = constructArray([50,50], false);
-        if (!this.roomStructureRegistered[roomName]) this.roomStructureRegistered[roomName] = {};
-        if (!this.room2avoidPoses[roomName]) this.room2avoidPoses[roomName] = [];
-        for (let y = y1; y <= y2; ++y) for (let x = x1; x <= x2; ++x) {
-            const containPureRoad = unit.Fetch(y - y1, x - x1).length === 1 && unit.Fetch(y - y1, x - x1)[0] === STRUCTURE_ROAD;
-            if (unit.Fetch(y - y1, x - x1).indexOf(unit.PLACE_ANY) === -1 && unit.Fetch(y - y1, x - x1).length > 0 && (!containPureRoad || (containPureRoad && unit.Options.avoidOtherToOverLapRoad))) {
-                this.roomOccupiedSpace[roomName][y][x] = true;
-                /* Update CostFinder. Road here is not considered as obstacles, however. */
-                if (unit.Fetch(y - y1, x - x1).filter(v => v !== STRUCTURE_ROAD && v !== STRUCTURE_CONTAINER && v !== STRUCTURE_RAMPART).length > 0) {
-                    // console.log(`Disable (${x}, ${y})`);
-                    this.room2avoidPoses[roomName].push(new RoomPosition(x, y, roomName));
-                }
-            }
-            unit.Fetch(y - y1, x- x1).filter(s => s !== unit.PLACE_ANY && s !== unit.PLACE_VACANT && s !== unit.PLACE_WALL).forEach(s => {
-                if (!this.roomStructureRegistered[roomName][s]) this.roomStructureRegistered[roomName][s] = [];
-                this.roomStructureRegistered[roomName][s].push({x, y});
-            })
-        }
+    normalizeCoordinations(_y1, _x1, _y2, _x2) {
+        return [Math.min(_y1, _y2), Math.min(_x1, _x2), Math.max(_y1, _y2), Math.max(_x1, _x2)];
+    }
+    /**
+     * @param {string} roomType
+     * @param {Unit} unit
+     */
+    RegisterUnit(roomType, unit) {
+        _.set(this.units, [roomType, unit.unitType], unit);
     }
     /**
      * @private
-     * Returns the number of structures in the region specified by paramters, which fits the unit's pattern.
-     * If there is any violation (only allow for perfect match), returns will become -1.
-     * @param {number} _y1
-     * @param {number} _x1
-     * @param {number} _y2
-     * @param {number} _x2
      * @param {string} roomName
-     * @param {string} roomType
-     * @param {string} unitType
-     * @param {boolean} [debug = false]
-     * @returns {number}
+     * @param {number} y
+     * @param {number} x
+     * @param {StructureConstant | "vacant" | "wall"} structureTypes
      */
-    isUnitFit(_y1, _x1, _y2, _x2, roomName, roomType, unitType, debug = false) {
-        if (!this.units[roomType] || !this.units[roomType][unitType]) return -1;
-        const unit = this.units[roomType][unitType];
-        /* Optimize : Checking whether the terrain is fit for unit based on vacant space */
-        if (mapMonitor.FetchVacantSpaceCnt(roomName, _y1, _x1, _y2, _x2) < unit.VacantSpaceCnt) return -1;
-        const terrain = mapMonitor.FetchTerrain(roomName);
-        const y1 = Math.min(_y1, _y2), y2 = Math.max(_y1, _y2);
-        const x1 = Math.min(_x1, _x2), x2 = Math.max(_x1, _x2);
-        let ret = 0;
-        for (let y = y1, j = 0; y <= y2; ++y, ++j) {
-            for (let x = x1, i = 0; x <= x2; ++x, ++i) {
-                if (debug) console.log(`(${x}, ${y})`);
-                if (!unit.Fetch(j,i)) return -1;
-                /* Has Been Occupied */
-                if (this.roomOccupiedSpace.get(roomName, y, x)) return -1;
-                if (unit.Fetch(j,i).indexOf(unit.PLACE_ANY) !== -1) continue;
-                if (unit.Fetch(j,i).indexOf(unit.PLACE_VACANT) !== -1) {
-                    if (_.filter(mapMonitor.Fetch(roomName,y,x), s => s.structureType !== STRUCTURE_CONTAINER && s.structureType !== STRUCTURE_ROAD && s.structureType !== STRUCTURE_RAMPART).length > 0) return -1;
-                    else if (terrain[y][x] === TERRAIN_MASK_WALL) return -1;
-                    else continue;
-                }
-                if (unit.Fetch(j,i).indexOf(unit.PLACE_WALL) !== -1) {
-                    if (terrain[y][x] === TERRAIN_MASK_LAVA) return -1;
-                    if (terrain[y][x] === TERRAIN_MASK_WALL || _.filter(mapMonitor.Fetch(roomName,y,x),s => s.structureType === STRUCTURE_WALL).length > 0) ++ret;
-                    else if (_.filter(mapMonitor.Fetch(roomName,y,x),s => s.structureType !== STRUCTURE_WALL).length > 0) return -1;
-                    continue;
-                }
-                // Structure
-                // Structure Road is Ignored, however.
-                if (terrain[y][x] === TERRAIN_MASK_WALL) return -1;
-                if (_.filter(mapMonitor.Fetch(roomName,y,x),s => s.structureType !== STRUCTURE_ROAD && s.structureType !== STRUCTURE_RAMPART && unit.Fetch(j,i).indexOf(s.structureType) === -1).length > 0) return -1;
-                if (unit.Options.avoidOverLapRoad && unit.Fetch(j, i).indexOf(STRUCTURE_ROAD) === -1 && _.filter(mapMonitor.Fetch(roomName,y,x),s => s.structureType === STRUCTURE_ROAD).length > 0) return -1;
-                const matchedNum = _.filter(mapMonitor.Fetch(roomName,y,x),s => unit.Fetch(j,i).indexOf(s.structureType) !== -1).length;
-                if (matchedNum > 0) ret += matchedNum;
+    setPositionOccupied(roomName, y, x, ...structureTypes) {
+        /**
+         * Initialize relevant variables with default empty values
+         */
+        if (!this.roomOccupiedSpace[roomName]) this.roomOccupiedSpace[roomName] = constructArray([50,50], new Array());
+        if (!this.roomStructureRegistered[roomName]) this.roomStructureRegistered[roomName] = {};
+        if (!this.room2avoidPoses[roomName]) this.room2avoidPoses[roomName] = [];
+        /**
+         * Ensure only one position is added to `this.room2avoidPoses`.
+         */
+        let posHasBeenAvoided = false;
+        for (const structureType of structureTypes) {
+            if (!this.roomStructureRegistered[roomName][structureType]) this.roomStructureRegistered[roomName][structureType] = [];
+            this.roomOccupiedSpace[roomName][y][x].push(structureType);
+            this.roomStructureRegistered[roomName][structureType].push(new RoomPosition(x, y, roomName));
+            /**
+             * Register Preoccupied Positions
+             * road, rampart and container are considered to be walkable.
+             */
+            if (!posHasBeenAvoided && structureType !== STRUCTURE_ROAD && structureType !== STRUCTURE_RAMPART && structureType !== STRUCTURE_CONTAINER) {
+                posHasBeenAvoided = true;
+                this.room2avoidPoses[roomName].push(new RoomPosition(x, y, roomName));
             }
         }
-        return ret;
     }
     /**
      * @param {string} roomName
@@ -695,187 +704,299 @@ class Planer {
      * @returns {Array<RoomPosition>}
      */
     FetchRoomPlannedStructures(roomName, structureType) {
-        if (!this.roomStructureRegistered[roomName] || !this.roomStructureRegistered[roomName][structureType]) return [];
-        return this.roomStructureRegistered[roomName][structureType].map(p => new RoomPosition(p.x, p.y, roomName));
+        return _.get(this.roomStructureRegistered, [roomName, structureType], []);
     }
     /**
-     * @TODO
-     * Exclude Planned Places
+     * @private
      * @param {string} roomName
-     * @param {string} roomType
-     * @param {string} unitType
+     * @param {number} y
+     * @param {number} x
      */
-    FetchAvailablePos(roomName, roomType, unitType) {
-        if (!this.units[roomType] || !this.units[roomType][unitType]) return [];
-        const unit = this.units[roomType][unitType];
+    getPositionOccupied(roomName, y, x) {
+        if (!this.roomOccupiedSpace[roomName]) return false;
+        return this.roomOccupiedSpace[roomName][y][x].length > 0;
+    }
+    /**
+     * Occupied Positions of Registered Unit will be avoided reusing when planning another unit.
+     * PLACE_ANY is not counted.
+     * @param {string} roomName
+     * @param {Unit} unit
+     * @param {string} unitType
+     * @param {number} _y1
+     * @param {number} _x1
+     * @param {number} _y2
+     * @param {number} _x2
+     */
+    RegisterUnitPos(roomName, unit, unitType, _y1, _x1, _y2, _x2) {
+        const [y1, x1, y2, x2] = this.normalizeCoordinations(_y1, _x1, _y2, _x2);
+        /**
+         * Obviously, one region could only fit into one unit.
+         * Used to avoid duplication.
+         */
+        const prefix = `_${roomName}_unit_${y1}_${x1}_${y2}_${x2}`;
+        if (this[prefix]) return; else this[prefix] = true;
+        /**
+         * Set as center of room if primary.
+         */
+        if (unit.Options.primary) _Map.setCenter(new RoomPosition(Math.floor((x1 + x2) / 2), Math.floor((y1 + y2) / 2), roomName));
+        /**
+         * Register Unit's Positions.
+         */
+        if (!this.units2pos[roomName]) this.units2pos[roomName] = {};
+        if (!this.units2pos[roomName][unitType]) this.units2pos[roomName][unitType] = [];
+        this.units2pos[roomName][unitType].push([y1, x1, y2, x2]);
+        for (let y = y1; y <= y2; ++y) for (let x = x1; x <= x2; ++x) {
+            /**
+             * Road is dealt with special treatments.
+             *  - Case 1 : Road is placed with some other structures -> Position is occupied.
+             *  - Case 2 : Road isn't placed with some other structures.
+             *      - if unit requires others not to occupy positions of roads, Position is occupied.
+             *      - Otherwise, Position is not occupied.
+             */
+            if (unit.Fetch(y - y1, x - x1)[0] === unit.PLACE_ANY) continue;
+            const isThereRoad = unit.Fetch(y - y1, x - x1).indexOf(STRUCTURE_ROAD) !== -1;
+            if (!isThereRoad || unit.Fetch(y - y1, x - x1).length > 1 || unit.Options.avoidOtherToOverLapRoad) this.setPositionOccupied(roomName, y, x, ...unit.Fetch(y - y1, x - x1));
+        }
+    }
+    /**
+     * @private
+     * Returns the number of structures in the region, which fit the unit's pattern.
+     * If there is any violation (only perfect match is allowed), returns will become -1.
+     * PLACE_ANY, however, allows for any kind of settings, including occupied space.
+     * @param {number} _y1
+     * @param {number} _x1
+     * @param {number} _y2
+     * @param {number} _x2
+     * @param {string} roomName
+     * @param {Unit} unit
+     * @returns {number}
+     */
+    isUnitFit(_y1, _x1, _y2, _x2, roomName, unit) {
+        /** Optimize : Checking whether the region is fit for unit based on required vacant positions. */
+        if (mapMonitor.FetchVacantSpaceCnt(roomName, _y1, _x1, _y2, _x2) < unit.VacantSpaceCnt) return -1;
+        const [y1, x1, y2, x2] = this.normalizeCoordinations(_y1, _x1, _y2, _x2);
+        /** Optimize : Size should fit. */
+        if (y2 - y1 + 1 !== unit.dy || x2 - x1 + 1 !== unit.dx) return -1;
+        const terrain = mapMonitor.FetchTerrain(roomName);
+        let ret = 0;
+        for (let y = y1, j = 0; y <= y2; ++y, ++j) {
+            for (let x = x1, i = 0; x <= x2; ++x, ++i) {
+                if (unit.Fetch(j,i)[0] === unit.PLACE_ANY) continue;
+                /**
+                 * Optimization is rather complex here, since unit allows for polygon.
+                 */
+                if (this.getPositionOccupied(roomName, y, x)) return -1;
+                if (unit.Fetch(j,i)[0] === unit.PLACE_VACANT) {
+                    if (mapMonitor.Fetch(roomName,y,x).length > 0) return -1;
+                    else if (terrain[y][x] === TERRAIN_MASK_WALL) return -1;
+                    else continue;
+                }
+                // Structure
+                if (terrain[y][x] === TERRAIN_MASK_WALL) return -1;
+                const existStructureTypes = mapMonitor.Fetch(roomName, y, x).map(s => s.structureType);
+                const desiredStructureTypes = unit.Fetch(j, i);
+                const difference = _.difference(existStructureTypes, desiredStructureTypes);
+                if (difference > 0) return -1;
+                ret += existStructureTypes.length;
+            }
+        }
+        return ret;
+    }
+    /**
+     * @param {string} roomName
+     * @param {Unit} unit
+     * @returns { {[fitNumber : number] : [number, number, number, number][]} }
+     */
+    FetchAvailablePos(roomName, unit) {
         /**
          * In order to ensure there are enough candidates to choose from, all are reserved but sorted.
          */
         /** @type { {[fitNumber : number] : Array<[number, number, number, number]>} } */
-        let record = {};
+        const record = {};
         /**
          * Module could not be placed near the edge so that ramparts are hard to protect them.
          */
-        for (let y = 0 + 5; y + unit.dy <= 50 - 5; ++y) {
-            for (let x = 0 + 5; x + unit.dx <= 50 - 5; ++x) {
+        for (let y = 0 + this.DISTANCE_FROM_EDGE; y + unit.dy <= 50 - this.DISTANCE_FROM_EDGE; ++y) {
+            for (let x = 0 + this.DISTANCE_FROM_EDGE; x + unit.dx <= 50 - this.DISTANCE_FROM_EDGE; ++x) {
                 /** Apply Options of Unit */
                 if (unit.Options.alongRoad) {
-                    /** Left-Top Node should be strictly adjacent to Road and not on the Road */
-                    if ([].concat(mapMonitor.FetchAroundConstructionSites(roomName, y, x).filter(c => c.structureType === STRUCTURE_ROAD).map(c => c.pos), mapMonitor.FetchAroundStructure(roomName, y, x).filter(c => c.structureType === STRUCTURE_ROAD).map(c => c.pos)).filter(pos => !this.roomOccupiedSpace.get(pos.roomName, pos.y, pos.x)).length === 0) {
-                        continue;
-                    }
-                    if (mapMonitor.FetchStructure(roomName, y, x).filter(c => c.structureType === STRUCTURE_ROAD).length > 0 || mapMonitor.FetchConstructionSites(roomName, y, x).filter(c => c.structureType === STRUCTURE_ROAD).length > 0) {
-                        continue;
-                    }
+                    /**
+                     * Left-Top Node should be strictly adjacent to roads used for linking (not those specified in unit)
+                     * and not on the Road.
+                     */
+                    if (mapMonitor.FetchAround(roomName, y, x).filter(s => s.structureType === STRUCTURE_ROAD && !this.getPositionOccupied(roomName, s.pos.y, s.pos.x)).length === 0 || mapMonitor.Fetch(roomName, y, x).filter(s => s.structureType === STRUCTURE_ROAD).length > 0) continue;
                 }
-                const fitNumber = this.isUnitFit(y,x,y+unit.dy-1,x+unit.dx-1,roomName, roomType, unitType);
+                const fitNumber = this.isUnitFit(y,x,y+unit.dy-1,x+unit.dx-1,roomName, unit);
+                /** Not Fit */
                 if (fitNumber === -1) continue;
                 if (!record[fitNumber]) record[fitNumber] = [];
                 record[fitNumber].push([y,x,y+unit.dy-1,x+unit.dx-1]);
-                // if (fitNumber > 0) console.log(`${roomName} : ${unitType} : (${x}, ${y}) : ${fitNumber} : ${record[fitNumber]} : ${Object.keys(record)}`);
             }
         }
         return record;
     }
     /**
-     * ConstructUnit constructs all possible units, which is ordered by number of adjacent existed ConstructionSites and Structures, at one time.
      * @param {string} roomName
-     * @param {string} roomType
      * @param {string} unitType
+     * @returns {[number, number, number, number][] | null} y1, x1, y2, x2
+     */
+    FetchUnitPos(roomName, unitType) {
+        return _.get(this.units2pos, [roomName, unitType], null);
+    }
+    /**
+     * @private
+     * @param {string} roomName
+     * @param {Unit} unit
+     * @param {number} num
+     * @returns {[number, number, number, number][]}
+     */
+    computeUnitPos(roomName, unit, num) {
+        const record = this.FetchAvailablePos(roomName, unit);
+        const fetchNumbers = Object.keys(record).map(v => parseInt(v, 10)).sort((a, b) => b - a);
+        /** @type { [number, number, number, number][] } */
+        let pos = [];
+        for (let i = 0; i < fetchNumbers.length && pos.length < num; ++i) pos = pos.concat(record[fetchNumbers[i]].sort((a, b) => unit.EvaluatePos(Game.rooms[roomName], a[0], a[1]) - unit.EvaluatePos(Game.rooms[roomName], b[0], b[1])));
+        return pos.slice(0, num);
+    }
+    /**
+     * ConstructUnit constructs all possible units, which is ordered by number of adjacent existed ConstructionSites and Structures.
+     * @param {string} roomName
+     * @param {Unit} unit
      * @param {number} y Top
      * @param {number} x Left
-     * @returns {boolean | "need_to_call_again"}
+     * @returns {Response}
      */
-    ConstructUnit(roomName, roomType, unitType, y, x) {
-        if (!this.units[roomType] || !this.units[roomType][unitType]) return false;
-        const unit = this.units[roomType][unitType];
-        const terrain = mapMonitor.FetchTerrain(roomName);
-        const isConstructed = constructArray([unit.dy, unit.dx], false);
-        isConstructed.get = function(y, x) {
-            if (y < 0 || y >= isConstructed.length || x < 0 || x >= isConstructed[0].length) return false;
-            return isConstructed[y][x];
+    ConstructUnit(roomName, unit, y, x) {
+        const isPositionConstructed = constructArray([unit.dy, unit.dx], false);
+        const get = (y, x) => {
+            if (y < 0 || y >= unit.dy || x < 0 || x >= unit.dx) return false;
+            return isPositionConstructed[y][x];
+        };
+        const calc = (y, x) => {
+            const dy = [-1,-1,-1,0,0,1,1,1], dx = [-1,0,1,-1,1,-1,0,1], dlen = 8;
+            let ret = 0;
+            for (let i = 0; i < dlen; ++i) if (get(y, x)) ++ret;
+            return ret;
+        };
+        const evaluate = (y, x) => {
+            const MAXIMUM = 8;
+            if (unit.FetchModifier(y, x, unit.FIRST_BUILD_HERE)) return MAXIMUM + 1;
+            return calc(y, x);
+        };
+        /** @type { {[structureType : string] : Array<[number,number]>} } */
+        const constructionSites    = {};
+        const add = (structureType, y, x) => {
+            if (!constructionSites[structureType]) constructionSites[structureType] = [];
+            constructionSites[structureType].push([y, x]);
         };
         /**
-         * @type { {[structureType in StructureConstant] : Array<[number,number]>} } y, x
+         * Comparing Process
          */
-        const scheduledConstructionSites    = {};
         for (let j = y; j < y + unit.dy; ++j) {
             for (let i = x; i < x + unit.dx; ++i) {
-                const fetchedStructures = unit.Fetch(j - y, i - x);
-                let isThereAnyToBeBuilt = false;
-                for (const fetchedStructure of fetchedStructures) {
-                    if (fetchedStructure === unit.PLACE_ANY || fetchedStructure === unit.PLACE_VACANT) continue;
-                    if (fetchedStructure === unit.PLACE_WALL) {
-                        if (terrain[j][i] === TERRAIN_MASK_WALL) continue;
-                        else if (_.filter(mapMonitor.Fetch(roomName, j, i), s => s.structureType === STRUCTURE_WALL).length > 0) continue;
-                        else {
-                            if (!scheduledConstructionSites[STRUCTURE_WALL]) scheduledConstructionSites[STRUCTURE_WALL] = [];
-                            scheduledConstructionSites[STRUCTURE_WALL].push([j,i]);
-                            isThereAnyToBeBuilt = true;
-                        }
-                        continue;
-                    }
-                    const existStructureOrConstructionSites = mapMonitor.Fetch(roomName, j, i).map(s => s.structureType);
-                    const toBeConstructed = _.difference(fetchedStructures, existStructureOrConstructionSites);
-                    if (toBeConstructed.length === 0) continue;
-                    else {
-                        for (const structureType of toBeConstructed) {
-                            if (!scheduledConstructionSites[structureType]) scheduledConstructionSites[structureType] = [];
-                            scheduledConstructionSites[structureType].push([j,i]);
-                        }
-                        isThereAnyToBeBuilt = true;
-                    }
-                }
-                if (!isThereAnyToBeBuilt) isConstructed[j - y][i - x] = true;
+                const desiredStructureTypes = unit.Fetch(j - y, i - x).filter(v => StructureConstants[v]);
+                const existStructureTypes = mapMonitor.Fetch(roomName, j, i).map(s => s.structureType);
+                const difference = _.difference(desiredStructureTypes, existStructureTypes);
+                if (difference.length === 0) isPositionConstructed[j - y][i - x] = true;
+                else difference.forEach(v => add(v, j, i));
             }
         }
         /* Nothing to be built */
-        if (Object.keys(scheduledConstructionSites).length === 0) return false;
-        const pdy = [-1,-1,-1,0,0,1,1,1], pdx = [-1,0,1,-1,1,-1,0,1], pcnt = pdy.length;
-        const calSurroundedExistedNum = (y,x) => {
-            let ret = 0;
-            for (let i = 0; i < pcnt; ++i) if (isConstructed.get(y+pdy[i],x+pdx[i])) ++ret;
-            return ret;
-        };
-        let isThereAnyImpede = false;
-        for (const structureType in scheduledConstructionSites) {
-            /** Require : STRUCTURE_RAMPART is only built after controller level reaches 3. */
-            if (structureType === STRUCTURE_RAMPART && Game.rooms[roomName].controller.level <= 3) continue;
-            if (CONTROLLER_STRUCTURES[structureType][Game.rooms[roomName].controller.level] <= mapMonitor.FetchCnt(roomName, structureType)["total"]) continue;
-            const cntInRoom = mapMonitor.FetchCnt(roomName, structureType);
-            scheduledConstructionSites[structureType].sort((a,b)=>calSurroundedExistedNum(b[0],b[1])-calSurroundedExistedNum(a[0],a[1]));
-            for (let i = 0; i < scheduledConstructionSites[structureType].length && cntInRoom["total"] < CONTROLLER_STRUCTURES[structureType][Game.rooms[roomName].controller.level]; ++i) {
-                /* Special Signal for unfinished ConstructionSite, which impedes the construction of new Target */
-                if (mapMonitor.FetchConstructionSites(roomName, scheduledConstructionSites[structureType][i][0], scheduledConstructionSites[structureType][i][1]).length > 0) {
-                    isThereAnyImpede = true;
+        if (Object.keys(constructionSites).length === 0) return new Response(Response.prototype.FINISH);
+        const retResponse = new Response(Response.prototype.PLACE_HOLDER);
+        for (const structureType in constructionSites) {
+            /**
+             * Special Case : rampart.
+             */
+            if (structureType === STRUCTURE_RAMPART && Game.rooms[roomName].controller.level < RAMPART_BUILD_CONTROLLER_LEVEL) {
+                retResponse.Feed(Response.prototype.WAIT_UNTIL_UPGRADE);
+                continue;
+            }
+            /**
+             * Checking for Structure Number Limitation
+             */
+            if (CONTROLLER_STRUCTURES[structureType][Game.rooms[roomName].controller.level] <= mapMonitor.FetchCnt(roomName, structureType)["total"]) {
+                retResponse.Feed(Response.prototype.WAIT_UNTIL_UPGRADE);
+                continue;
+            }
+            /**
+             * Modify statistics of structures in the room to solve conflict of constructionSites in the same tick.
+             */
+            const statistics = mapMonitor.FetchCnt(roomName, structureType);
+            /**
+             * Sort based on modifiers and number of ambient existing structures.
+             */
+            constructionSites[structureType].sort(([u_y, u_x], [v_y, v_x]) => evaluate(v_y - y, v_x - x) - evaluate(u_y - y, u_x - x));
+            for (const [pos_y, pos_x] of constructionSites[structureType]) {
+                if (statistics["total"] >= CONTROLLER_STRUCTURES[structureType][Game.rooms[roomName].controller.level]) break;
+                /**
+                 * Multiply Structures in the same position.
+                 */
+                if (mapMonitor.FetchConstructionSites(roomName, pos_y, pos_x).length > 0) {
+                    retResponse.Feed(Response.prototype.WAIT_UNTIL_TIMEOUT);
                     continue;
                 }
-                let ret = Game.rooms[roomName].createConstructionSite(scheduledConstructionSites[structureType][i][1], scheduledConstructionSites[structureType][i][0], structureType);
-                if (ret !== OK) {
-                    console.log(`<p style="display:inline;color:red;">Error:</p> Creating ConstructionSite of ${structureType} at (${scheduledConstructionSites[structureType][i][1]}, ${scheduledConstructionSites[structureType][i][0]}) of ${roomName} Fails with code ${ret} and ${mapMonitor.FetchConstructionSites(roomName, scheduledConstructionSites[structureType][i][0], scheduledConstructionSites[structureType][i][1]).length}.`);
+                const retCode = Game.rooms[roomName].createConstructionSite(pos_x, pos_y, structureType);
+                if (retCode !== OK) {
+                    console.log(`<p style="display:inline;color:red;">Error:</p> Creation of ConstructionSite of ${structureType} at (${pos_x}, ${pos_y}) in ${roomName} fails with code ${retCode}`);
+                    retResponse.Feed(Response.prototype.WAIT_UNTIL_TIMEOUT);
                     continue;
                 }
-                ++cntInRoom["constructionSites"];
-                ++cntInRoom["total"];
+                /**
+                 * Update Statistics, so that changes in the same tick could be detected.
+                 */
+                ++statistics["constructionSites"];
+                ++statistics["total"];
             }
         }
-        if (!isThereAnyImpede) return true;
-        else return "need_to_call_again";
+        return retResponse;
     }
     /**
      * TagUnit tags all structures in the region matched with the unit.
+     * In order to simplify work, whenever a new structure appears, `TagUnit` should be called.
+     * Thus, comparison and recall are avoided.
      * @param {string} roomName
-     * @param {string} roomType
-     * @param {string} unitType
+     * @param {Unit} unit
      * @param {number} y Top
      * @param {number} x Left
+     * @returns {Response}
      */
-    TagUnit(roomName, roomType, unitType, y, x) {
-        if (!this.units[roomType] || !this.units[roomType][unitType]) return false;
-        const unit = this.units[roomType][unitType];
+    TagUnit(roomName, unit, y, x) {
         for (let j = y; j < y + unit.dy; ++j) {
             for (let i = x; i < x + unit.dx; ++i) {
-                /* Special Case regarding "wall" because of potential natural wall */
-                if (unit.Fetch(j - y, i - x).indexOf(unit.PLACE_WALL) !== -1) {
-                    if (terrain[j][i] === TERRAIN_MASK_WALL) continue;
-                    else _.filter(mapMonitor.FetchStructure(roomName, j, i), s => s.structureType === STRUCTURE_WALL).forEach(w => {
-                        w.memory.tag = unit.Tag;
-                        mapMonitor.registerStructureWithTag(w);
-                    });
-                    continue;
-                }
-                _.filter(mapMonitor.FetchStructure(roomName, j, i), s => unit.Fetch(j - y, i - x).indexOf(s.structureType) !== -1).forEach(s => {
+                mapMonitor.FetchStructure(roomName, j, i).forEach(s => {
                     s.memory.tag = unit.Tag;
-                    mapMonitor.registerStructureWithTag(s);
+                    mapMonitor.registerStructure(s);
                 });
             }
         }
-        return false;
+        return new Response(Response.prototype.FINISH);
     }
     /**
-     * @param {string} roomName
-     * @param {string} unitType
-     */
-    FetchUnitPos(roomName, unitType) {
-        if (!this.units2pos[roomName]) return [];
-        return this.units2pos[roomName][unitType] || [];
-    }
-    /**
+     * Check whether Room fits into the pattern of automatic plan.
+     * @TODO ENHANCEMENT
      * @param {string} roomName
      * @param {string} roomType
      */
     IsRoomFit(roomName, roomType) {
+        /**
+         * Cache Process : Memory and Heap
+         */
         if (!this.roomType2fittedRoomNames[roomType]) this.roomType2fittedRoomNames[roomType] = {};
         if (this.roomType2fittedRoomNames[roomType][roomName] !== undefined) return this.roomType2fittedRoomNames[roomType][roomName];
         if (!Memory.rooms[roomName]) Memory.rooms[roomName] = {};
         if (!Memory.rooms[roomName].planFit) Memory.rooms[roomName].planFit = {};
         if (Memory.rooms[roomName].planFit[roomType] !== undefined) return this.roomType2fittedRoomNames[roomType][roomName] = Memory.rooms[roomName].planFit[roomType];
         if (!this.units[roomType]) return false;
+        /**
+         * Check whether primary units could be placed inside room.
+         * @danger a position could be occupied twice.
+         */
         const primaryUnits = Object.values(this.units[roomType]).filter(unit => unit.Options.primary).map(unit => [unit.dy, unit.dx]);
         for (const [dy, dx] of primaryUnits) {
             let success = false;
-            for (let y = 0 + 5; y + dy <= 50 - 5; ++y) {
-                for (let x = 0 + 5; x + dx <= 50 - 5; ++x) {
+            for (let y = 0 + this.DISTANCE_FROM_EDGE; y + dy <= 50 - this.DISTANCE_FROM_EDGE; ++y) {
+                for (let x = 0 + this.DISTANCE_FROM_EDGE; x + dx <= 50 - this.DISTANCE_FROM_EDGE; ++x) {
                     if (mapMonitor.IsVacant(roomName, y, x, y + dy - 1, x + dx - 1)) {
                         success = true;
                         break;
@@ -891,323 +1012,335 @@ class Planer {
      * @param {string} roomName
      * @param {string} roomType
      * @param {string} unitType
-     * @param { {display? : boolean, tag? : boolean, build? : boolean, road? : boolean, writeToMemory? : boolean, readFromMemory? : boolean, num : number, linkedRoomPosition? : Array<RoomPosition>, linkedUnits? : Array<string>, unitTypeAlias? : string } } options
-     * @returns { {tag : {ret:boolean | "need_to_call_again"}, build : {ret:boolean | "need_to_call_again"}, road : {ret:boolean | "need_to_call_again"} } | null }
-     * NOTICE : `linkedUnits` should be planned before linking.
+     * @param { {display? : boolean, tag? : boolean, build? : boolean, road? : boolean, writeToMemory? : boolean, readFromMemory? : boolean, num : number, linkedRoomPosition? : Array<RoomPosition>, linkedUnits? : Array<string>, unitTypeAlias? : string } } options `linkedUnits` should be planned before linking.
+     * @returns { {tag : Response, build : Response, road : Response } }
      */
     Plan(roomName, roomType, unitType, options) {
         _.defaults(options, {display : true, tag : false, build : false, road : false, writeToMemory : false, readFromMemory : false, num : 1, linkedRoomPosition : [], linkedUnits : [], unitTypeAlias : undefined});
-        // console.log(roomName, unitType, JSON.stringify(options));
-        const originalUnitType = unitType;
-        if (!this.units[roomType] || !this.units[roomType][originalUnitType]) return null;
+        if (DEBUG) {
+            console.log(roomName, unitType, `tag : ${options.tag} build : ${options.build} road : ${options.road}`);
+        }
+        const unit = this.units[roomType][unitType];
+        /** Switch to unitTypeAlias if possible */
         unitType = options.unitTypeAlias || unitType;
-        const unit = this.units[roomType][originalUnitType];
-        const ret = {tag : {ret:false}, build : {ret:false}, road : {ret:false}};
-        /* Init Cache */
-        if (!this.roomSpaceRegistered[roomName]) this.roomSpaceRegistered[roomName] = {};
-        if (!this.units2pos[roomName]) this.units2pos[roomName] = {};
-        if (!this._unit2unit[roomName]) this._unit2unit[roomName] = {};
-        if (!this._unit2unit[roomName][unitType]) this._unit2unit[roomName][unitType] = {};
-        if (!Memory._plannerCache._unit2unit) Memory._plannerCache._unit2unit = {};
-        if (!Memory._plannerCache._unit2unit[roomName]) Memory._plannerCache._unit2unit[roomName] = {};
-        if (!Memory._plannerCache._unit2unit[roomName][unitType]) Memory._plannerCache._unit2unit[roomName][unitType] = {};
-        if (!this.units2pos[roomName][unitType]) {
+        const ret = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
+        /** Trigger Planning */
+        if (!this.FetchUnitPos(roomName, unitType)) {
             /** Memory Caching */
-            if (options.readFromMemory && Memory.autoPlan[roomName][unitType]) this.units2pos[roomName][unitType] = Memory.autoPlan[roomName][unitType];
+            if (options.readFromMemory && Memory.autoPlan[roomName][unitType]) Memory.autoPlan[roomName][unitType].forEach(([y1, x1, y2, x2]) => this.RegisterUnitPos(roomName, unit, unitType, y1, x1, y2, x2));
             else {
-                const record = this.FetchAvailablePos(roomName, roomType, originalUnitType);
-                // console.log(`${roomName}:${unitType} ${Object.keys(record)}`);
-                const fetchNumbers = Object.keys(record).map(s => typeof s === "number" ? s : parseInt(s, 10)).filter(i => typeof i === "number").sort((a, b) => b - a);
-                // console.log(`${roomName}:${unitType} ${JSON.stringify(fetchNumbers)}`);
-                this.units2pos[roomName][unitType] = [];
-                const exits = Game.map.describeExits(roomName);
-                const evaluateDistanceToExit_X = (x_1, x_2) => {
-                    let sum = 0;
-                    if (exits[LEFT]) sum += Math.abs(x_1 - 0);
-                    if (exits[RIGHT]) sum += Math.abs(49 - x_2);
-                    return sum;
-                };
-                const evaluateDistanceToExit_Y = (y_1, y_2) => {
-                    let sum = 0;
-                    if (exits[TOP]) sum += Math.abs(y_1 - 0);
-                    if (exits[BOTTOM]) sum += Math.abs(49 - y_2);
-                    return sum;
-                };
-                for (const fetchNumber of fetchNumbers) {
-                    // Central Position is generally prefered.
-                    this.units2pos[roomName][unitType] = this.units2pos[roomName][unitType].concat(record[fetchNumber].sort((a, b) => unit.EvaluatePos(Game.rooms[roomName], a[0], a[1]) + evaluateDistanceToExit_X(a[1], a[3]) + evaluateDistanceToExit_Y(a[0], a[2]) - unit.EvaluatePos(Game.rooms[roomName], b[0], b[1]) - evaluateDistanceToExit_X(b[1], b[3]) - evaluateDistanceToExit_Y(b[0], b[2])));
-                    // console.log(roomName, fetchNumber, JSON.stringify(this.units2pos[roomName][unitType]));
-                    // console.log(roomName, fetchNumber, this.units2pos[roomName][unitType].map(a => unit.EvaluatePos(Game.rooms[roomName], a[0], a[1])));
-                    if (this.units2pos[roomName][unitType].length >= options.num) break;
-                }
-                this.units2pos[roomName][unitType] = this.units2pos[roomName][unitType].slice(0, options.num);
-                if (options.writeToMemory) Memory.autoPlan[roomName][unitType] = this.units2pos[roomName][unitType];
+                const pos = this.computeUnitPos(roomName, unit, options.num);
+                pos.forEach(([y1, x1, y2, x2]) => this.RegisterUnitPos(roomName, unit, unitType, y1, x1, y2, x2));
+                if (options.writeToMemory) Memory.autoPlan[roomName][unitType] = pos;
             }
         }
-        // console.log(`${roomName}:${roomType}:${unitType}->${JSON.stringify(this.units2pos[roomName][unitType])}`);
         /* Working Body */
-        const candidatePoses = this.units2pos[roomName][unitType];
-        for (let i = 0; i < candidatePoses.length; ++i) {
-            if (!this.roomSpaceRegistered[roomName][unitType]) this.RegisterUnitPos(roomName, unit, candidatePoses[i][0], candidatePoses[i][1], candidatePoses[i][2], candidatePoses[i][3]);
-            /* Display Module */
-            if (options.display) unit.Display(roomName, candidatePoses[i][0], candidatePoses[i][1]);
-            /* Build Module */
-            if (options.build) {
-                const constructRet = this.ConstructUnit(roomName, roomType, originalUnitType, candidatePoses[i][0], candidatePoses[i][1]);
-                if (ret.build.ret === false) ret.build.ret = constructRet;
-                else if (constructRet === "need_to_call_again") ret.build.ret = constructRet;
+        for (const pos of this.FetchUnitPos(roomName, unitType) || []) {
+            /** Display Module */
+            if (options.display) unit.Display(roomName, pos[0], pos[1]);
+            /** Build Module */
+            if (options.build) ret.Pick("build").Feed(this.ConstructUnit(roomName, unit, pos[0], pos[1]));
+            /** Tag Module */
+            if (options.tag) ret.Pick("tag").Feed(this.TagUnit(roomName, unit, pos[0], pos[1]));    
+            /** Road Module */
+            for (const linkedUnitType of options.linkedUnits) {
+                for (const targetPos of this.FetchUnitPos(roomName, linkedUnitType) || []) {
+                    const nodes = this.fetchBestNode2Unit(unit, new RoomPosition(pos[1], pos[0], roomName), this.units[roomType][linkedUnitType], new RoomPosition(targetPos[1], targetPos[0], roomName));
+                    const road = this.FetchRoad(nodes.origin, nodes.dist, {range : 0});
+                    if (options.display) this.displayRoad(road);
+                    if (options.road) ret.Pick("road").Feed(this.linkRoad(road, {excludeHeadTail : true}));
+                }
             }
-            /* Tag Module */
-            if (options.tag) {
-                const tagRet = this.TagUnit(roomName, roomType, originalUnitType, candidatePoses[i][0], candidatePoses[i][1]);
-                if (ret.tag.ret === false) ret.tag.ret = tagRet;
-                else if (tagRet === "need_to_call_again") ret.tag.ret = tagRet;
-            }
-            /**
-             * Road Module
-             */
-            /**
-             * @param {RoomPosition} posU
-             * @param {RoomPosition} posV
-             */
-            const distance = (posU, posV) => {
-                return this.roomRoadCache.get(roomName, posU.x, posU.y, posV.x, posV.y).length;
-            };
-            /**
-             * @param {RoomPosition} targetPosition
-             */
-            const fetchBestNode = (targetPosition) => {
-                if (!this._bestNodeCache) this._bestNodeCache = {};
-                if (!this._bestNodeCache[roomName]) this._bestNodeCache[roomName] = {};
-                if (!this._bestNodeCache[roomName][unitType]) this._bestNodeCache[roomName][unitType] = {};
-                if (this._bestNodeCache[roomName][unitType][Map.prototype.roomPosition2String(targetPosition)]) return this._bestNodeCache[roomName][unitType][Map.prototype.roomPosition2String(targetPosition)];
-                else {
-                    if (options.readFromMemory && (Memory._plannerCache._bestNodeCache && Memory._plannerCache._bestNodeCache[roomName] && Memory._plannerCache._bestNodeCache[roomName][unitType] && Memory._plannerCache._bestNodeCache[roomName][unitType][Map.prototype.roomPosition2String(targetPosition)])) return this._bestNodeCache[roomName][unitType][Map.prototype.roomPosition2String(targetPosition)] = Memory._plannerCache._bestNodeCache[roomName][unitType][Map.prototype.roomPosition2String(targetPosition)];
-                    this._bestNodeCache[roomName][unitType][Map.prototype.roomPosition2String(targetPosition)] = unit.FetchStructurePos(STRUCTURE_ROAD).map(p => new RoomPosition(p[1] + candidatePoses[i][1], p[0] + candidatePoses[i][0], roomName)).sort((a, b) => distance(a, targetPosition) - distance(b, targetPosition))[0];
-                    if (options.writeToMemory) {
-                        if (!Memory._plannerCache._bestNodeCache) Memory._plannerCache._bestNodeCache = {};
-                        if (!Memory._plannerCache._bestNodeCache[roomName]) Memory._plannerCache._bestNodeCache[roomName] = {};
-                        if (!Memory._plannerCache._bestNodeCache[roomName][unitType]) Memory._plannerCache._bestNodeCache[roomName][unitType] = {};
-                        Memory._plannerCache._bestNodeCache[roomName][unitType][Map.prototype.roomPosition2String(targetPosition)] = this._bestNodeCache[roomName][unitType][Map.prototype.roomPosition2String(targetPosition)];
-                    }
-                    return this._bestNodeCache[roomName][unitType][Map.prototype.roomPosition2String(targetPosition)];
-                }
-            };
-            /**
-             * @param {RoomPosition} targetPosition
-             */
-            const linkToPosition = (targetPosition) => {
-                const roadPosition = fetchBestNode(targetPosition);
-                if (!roadPosition) return;
-                const roadRet = this.linkRoad(roomName, this.roomRoadCache.get(roomName, roadPosition.x, roadPosition.y, targetPosition.x, targetPosition.y));
-                if (ret.road.ret === false) ret.road.ret = roadRet;
-                else if (roadRet === "need_to_call_again") ret.road.ret = roadRet;
-            };
-            /**
-             * @param {RoomPosition} targetPosition
-             * @param {string} color
-             */
-            const displayRoad2Position = (targetPosition, color = "lightblue") => {
-                const roadPosition = fetchBestNode(targetPosition);
-                if (!roadPosition) return;
-                this.displayRoad(roomName, this.roomRoadCache.get(roomName, roadPosition.x, roadPosition.y, targetPosition.x, targetPosition.y), color);
-            };
-            for (const pos of options.linkedRoomPosition) {
-                if (options.road) linkToPosition(pos);
-                if (options.display) displayRoad2Position(pos);
-            }
-            for (const entry of options.linkedUnits) {
-                if (!this.units[roomType][entry]) {
-                    console.log(`<p style="display:inline;color:red;">Error: </p>Unable to find ${entry} in ${roomType}.`);
-                    continue;
-                }
-                if (!this.units2pos[roomName][entry]) {
-                    console.log(`<p style="display:inline;color:red;">Error: </p>${entry} cannot be connected before being planed.`);
-                    continue;
-                }
-                const linkedUnit = this.units[roomType][entry];
-                if (!this._unit2unit[roomName][unitType][candidatePoses[i][0] + "," + candidatePoses[i][1]]) this._unit2unit[roomName][unitType][candidatePoses[i][0] + "," + candidatePoses[i][1]] = {};
-                const cachedPoses = this._unit2unit[roomName][unitType][candidatePoses[i][0] + "," + candidatePoses[i][1]];
-                if (cachedPoses[entry] === undefined) {
-                    if (options.readFromMemory && Memory._plannerCache._unit2unit[roomName][unitType][candidatePoses[i][0] + "," + candidatePoses[i][1]] && Memory._plannerCache._unit2unit[roomName][unitType][candidatePoses[i][0] + "," + candidatePoses[i][1]][entry]) cachedPoses[entry] = Memory._plannerCache._unit2unit[roomName][unitType][candidatePoses[i][0] + "," + candidatePoses[i][1]][entry];
-                    else {
-                        cachedPoses[entry] = [];
-                        for (const pos of this.units2pos[roomName][entry]) {
-                            const selectedPos = linkedUnit.FetchConnectionNodes().map(p => new RoomPosition(p[1] + pos[1], p[0] + pos[0], roomName)).sort((a,b)=>distance(a, fetchBestNode(a)) - distance(b, fetchBestNode(b)))[0];
-                            if (selectedPos) cachedPoses[entry].push(selectedPos);
-                        }
-                        if (options.writeToMemory) {
-                            if (!Memory._plannerCache._unit2unit[roomName][unitType][candidatePoses[i][0] + "," + candidatePoses[i][1]]) Memory._plannerCache._unit2unit[roomName][unitType][candidatePoses[i][0] + "," + candidatePoses[i][1]] = {};
-                            Memory._plannerCache._unit2unit[roomName][unitType][candidatePoses[i][0] + "," + candidatePoses[i][1]][entry] = cachedPoses[entry];
-                        }
-                    }
-                }
-                const chosenNodes = cachedPoses[entry];
-                if (chosenNodes.length !== this.units2pos[roomName][entry].length) {
-                    console.log(`<p style="display:inline;color:red;">Error: </p>Unable to connect some ${entry}s to ${unitType}.`);
-                }
-                for (const chosenNode of chosenNodes) {
-                    if (options.road) linkToPosition(chosenNode);
-                    if (options.display) displayRoad2Position(chosenNode);
-                }
+            for (const targetPos of options.linkedRoomPosition) {
+                const origin = this.fetchBestNode2Pos(unit, new RoomPosition(pos[1], pos[0], roomName), targetPos);
+                const road = this.FetchRoad(origin, targetPos, {range : 1});
+                if (options.display) this.displayRoad(road);
+                if (options.road) ret.Pick("road").Feed(this.linkRoad(road, {excludeHeadTail : true}));
             }
         }
-        /* Update After Processing */
-        this.roomSpaceRegistered[roomName][unitType] = true;
-        // console.log(`Plan ret : ${roomName} ${unitType} tag : ${options.tag} build : ${options.build} road : ${options.road} : ${JSON.stringify(ret)}`);
+        if (DEBUG) {
+            console.log(`Return: ${JSON.stringify(ret)}`);
+        }
         return ret;
     }
     /**
+     * Link is planned on the vacant place which is around the road that is around the object.
+     * Prefer closer one.
+     * @param { {pos : RoomPosition} } object
+     * @param {string} tag
+     * @returns {Response}
+     */
+    PlanForAroundLink(object, tag) {
+        /** @type {RoomPosition} */
+        const pos = object.pos;
+        const roomName = pos.roomName;
+        /** @type {StructureRoad} */
+        const road = mapMonitor.FetchAroundStructure(roomName, pos.y, pos.x).filter(s => s.structureType === STRUCTURE_ROAD)[0];
+        if (!road) return new Response(Response.prototype.WAIT_UNTIL_TIMEOUT);
+        const vacantPos = mapMonitor.FetchAroundVacantPos(road.pos.roomName, road.pos.y, road.pos.x, [STRUCTURE_LINK, STRUCTURE_RAMPART]).filter(pos => !planer.getPositionOccupied(roomName, pos.y, pos.x)).sort((posU, posV) => posU.getRangeTo(object) - posV.getRangeTo(object))[0];
+        if (!vacantPos) {
+            console.log(`<p style="display:inline;color:red;">Error: </p>Unable to construct Link for ${object} : ${mapMonitor.FetchAroundVacantPos(road.pos.roomName, road.pos.y, road.pos.x, [STRUCTURE_LINK, STRUCTURE_RAMPART])}`);
+            return new Response(Response.prototype.WAIT_UNTIL_TIMEOUT);
+        } else if (DEBUG) {
+            console.log(`${object}->${vacantPos}`);
+        }
+        /** @type {StructureLink | ConstructionSite<StructureLink>} */
+        const link = mapMonitor.Fetch(roomName, vacantPos.y, vacantPos.x).filter(s => s.structureType === STRUCTURE_LINK)[0];
+        const rampart = mapMonitor.Fetch(roomName, vacantPos.y, vacantPos.x).filter(s => s.structureType === STRUCTURE_RAMPART)[0];
+        /**
+         * Haven't been built -> wait until built / wait until upgrade
+         */
+        if (!link) {
+            if (CONTROLLER_STRUCTURES[STRUCTURE_LINK][Game.rooms[roomName].controller.level] === mapMonitor.FetchCnt(roomName, STRUCTURE_LINK)["total"]) return new Response(Response.prototype.WAIT_UNTIL_UPGRADE);
+            const retCode = Game.rooms[roomName].createConstructionSite(vacantPos.x, vacantPos.y, STRUCTURE_LINK);
+            if (retCode !== OK) {
+                console.log(`<p style="display:inline;color:red;">Error:</p> Unable to create StructureLink at ${vacantPos.roomName} (${vacantPos.x}, ${vacantPos.y}) with code ${retCode}`);
+            }
+            return new Response(Response.prototype.WAIT_UNTIL_TIMEOUT);
+        } else if (!isConstructionSite(link)) { // Structure
+            link.memory.tag = tag;
+            mapMonitor.registerStructure(link);
+            /**
+             * Link finishes.
+             * Rampart
+             *  - Controller haven't reached level so that construction of rampart is allowed -> wait until grade.
+             *  - Reach -> finish.
+             */
+            if (Game.rooms[roomName].controller.level >= RAMPART_BUILD_CONTROLLER_LEVEL){
+                if (!rampart) Game.rooms[roomName].createConstructionSite(vacantPos.x, vacantPos.y, STRUCTURE_RAMPART);
+                return new Response(Response.prototype.FINISH);
+            } else return new Response(Response.prototype.WAIT_UNTIL_UPGRADE);
+        } else return new Response(Response.prototype.WAIT_UNTIL_TIMEOUT); // ConstructionSite -> wait until timeout
+    }
+    /**
+     * Container will be placed on the road which is around `object`.
+     * @param { {pos : RoomPosition} } object
+     * @param { string } tag
+     * @param {boolean} [isRampart = false]
+     * @returns {Response}
+     */
+    PlanForAroundOverlapContainer(object, tag, isRampart = false) {
+        /** @type {RoomPosition} */
+        const pos = object.pos;
+        const roomName = pos.roomName;
+        /** @type {StructureRoad} */
+        const road = mapMonitor.FetchAroundStructure(roomName, pos.y, pos.x).filter(s => s.structureType === STRUCTURE_ROAD)[0];
+        if (!road) return new Response(Response.prototype.WAIT_UNTIL_TIMEOUT);
+        /** @type {StructureContainer | ConstructionSite<StructureContainer>} */
+        const container = mapMonitor.Fetch(roomName, road.pos.y, road.pos.x).filter(s => s.structureType === STRUCTURE_CONTAINER)[0];
+        /** @type {StructureRampart | ConstructionSite<StructureRampart>} */
+        const rampart = mapMonitor.Fetch(roomName, road.pos.y, road.pos.x).filter(s => s.structureType === STRUCTURE_RAMPART)[0];
+        /**
+         * Haven't been built -> wait until built
+         */
+        if (!container) {
+            const retCode = Game.rooms[roomName].createConstructionSite(road.pos.x, road.pos.y, STRUCTURE_CONTAINER);
+            if (retCode !== OK) {
+                console.log(`<p style="display:inline;color:red;">Error:</p> Unable to create StructureContainer at ${road.pos.roomName} (${road.pos.x, road.pos.y}) with code ${retCode}`);
+            }
+            return new Response(Response.prototype.WAIT_UNTIL_TIMEOUT);
+        } else if (!isConstructionSite(container)) { // Structure
+            container.memory.tag = tag;
+            mapMonitor.registerStructure(container);
+            /**
+             * Container finishes.
+             * Rampart
+             *  - Controller haven't reached level so that construction of rampart is allowed -> wait until grade.
+             *  - Reach -> finish.
+             */
+            if (isRampart) {
+                if (Game.rooms[roomName].controller.level >= RAMPART_BUILD_CONTROLLER_LEVEL){
+                    if (!rampart) Game.rooms[roomName].createConstructionSite(road.pos.x, road.pos.y, STRUCTURE_RAMPART);
+                    return new Response(Response.prototype.FINISH);
+                } else return new Response(Response.prototype.WAIT_UNTIL_UPGRADE);
+            } else return new Response(Response.prototype.FINISH);
+        } else return new Response(Response.prototype.WAIT_UNTIL_TIMEOUT); // ConstructionSite -> wait until built
+    }
+    /**
      * @private
-     * @param {string} roomName
      * @param {RoomPosition} posU
      * @param {RoomPosition} posV
+     * @param { {range? : number, maxRooms? : number} } [options]
      */
-    updateLinkedRoad(roomName, posU, posV) {
-        PathFinder.use(false);
-        let path = Game.rooms[roomName].findPath(posU, posV, {
-            plainCost : 0,
-            swampCost : 0,
-            ignoreCreeps : true,
-            ignoreDestructibleStructures : false,
-            avoid : this.room2avoidPoses[roomName] || [],
-            maxOps : 2000
-        });
-        path.unshift({x : posU.x, y : posU.y, dx : 0, dy : 0, direction : null});
-        this.roomRoadCache.set(roomName ,posU.x, posU.y, posV.x, posV.y, path);
+    updateRoadBetweenPositions(posU, posV, options = {}) {
+        _.defaults(options, {range : 0});
+        const key = `${posU}->${posV}`;
+        /**
+         * Decide whether road is built in rooms or between rooms.
+         */
+        if (posU.roomName === posV.roomName) {
+            PathFinder.use(false);
+            const path = Game.rooms[posU.roomName].findPath(posU, posV, {
+                plainCost : 1,
+                swampCost : 1,
+                ignoreCreeps : true,
+                ignoreDestructibleStructures : false,
+                avoid : this.room2avoidPoses[posU.roomName] || [],
+                maxOps : 2000,
+                range : options.range
+            });
+            path.unshift({x : posU.x, y : posU.y});
+            this.roads[key] = path.map(v => new RoomPosition(v.x, v.y, posU.roomName));
+        } else {
+            const path = Traveler.findTravelPath(posU, posV, {range : options.range, ignoreCreeps : true, maxOps : 20000, maxRooms : options.maxRooms, obstacles : [].concat(...Object.values(this.room2avoidPoses))});
+            if (path.incomplete) {
+                console.log(`<p style="display:inline;color:red;">Error:</p> Path from ${posU} to ${posV} is incomplete.`);
+            }
+            this.roads[key] = path.path;
+        }
+    }
+    /**
+     * @param {RoomPosition} posU
+     * @param {RoomPosition} posV
+     * @param { {range? : number, maxRooms? : number} } [options]
+     */
+    FetchRoad(posU, posV, options = {}) {
+        const key = `${posU}->${posV}`;
+        if (!this.roads[key]) this.updateRoadBetweenPositions(posU, posV, options);
+        return this.roads[key];
+    }
+    /**
+     * Used to fetch the best node of unit, which connects unit to pos.
+     * @private
+     * @param {Unit} unit
+     * @param {RoomPosition} pos
+     * @param {RoomPosition} targetPos
+     * @returns {RoomPosition}
+     */
+    fetchBestNode2Pos(unit, pos, targetPos) {
+        /** Init Cache */
+        const key = `_fetchBestNode2Pos_${unit.unitType}_${pos}_${targetPos}`;
+        if (this[key]) return this[key];
+        if (!Memory._plannerCache.bestNodeCache) Memory._plannerCache.bestNodeCache = {};
+        if (!Memory._plannerCache.bestNodeCache[unit.unitType]) Memory._plannerCache.bestNodeCache[unit.unitType] = {};
+        if (Memory._plannerCache.bestNodeCache[unit.unitType][`${pos}->${targetPos}`]) {
+            const $ = Memory._plannerCache.bestNodeCache[unit.unitType][`${pos}->${targetPos}`];
+            return this[key] = new RoomPosition($.x, $.y, $.roomName);
+        }
+        return this[key] = Memory._plannerCache.bestNodeCache[unit.unitType][`${pos}->${targetPos}`] = unit.FetchConnectionNodes().map(([y, x]) => new RoomPosition(x + pos.x, y + pos.y, pos.roomName)).sort((posU, posV) => this.FetchRoad(posU, targetPos).length - this.FetchRoad(posV, targetPos).length)[0];
     }
     /**
      * @private
-     * @param {string} roomName
-     * @param {Array<PathStep>} path
-     * @param {boolean} excludeHeadTail
-     * NOTICE : Only potential Error is ERR_FULL
-     * @returns {boolean | "need_to_call_again"}
+     * @param {Unit} unitU
+     * @param {RoomPosition} posU
+     * @param {Unit} unitV
+     * @param {RoomPosition} posV
+     * @returns {{dist : RoomPosition, origin : RoomPosition}}
      */
-    linkRoad(roomName, path, excludeHeadTail = true) {
-        const room = Game.rooms[roomName];
-        let ret = false;
-        let iStart = excludeHeadTail ? 1 : 0, iEnd = excludeHeadTail ? path.length - 1 : path.length;
-        for (let i = iStart; i < iEnd; ++i) {
-            /**
-             * @type {PathStep}
-             */
-            const singleStep = path.get(i);
-            if (mapMonitor.Fetch(roomName, singleStep.y, singleStep.x).filter(s => s.structureType === STRUCTURE_ROAD).length === 0) {
-                const _ret = room.createConstructionSite(singleStep.x, singleStep.y, STRUCTURE_ROAD);
-                if (_ret !== OK) {
-                    console.log(`<p style="color:red;display:inline;">Error: </p>Construct Road at ${roomName} (${singleStep.x}, ${singleStep.y}) Fails with Code ${_ret} and ${mapMonitor.Fetch(roomName, singleStep.y, singleStep.x)}!`);
-                    ret = "need_to_call_again";
-                    continue;
+    fetchBestNode2Unit(unitU, posU, unitV, posV) {
+        /** Init Cache */
+        const key = `_fetchBestNode2Unit_${unitU.unitType}_${posU}_${unitV.unitType}_${posV}`;
+        if (this[key]) return this[key];
+        if (!Memory._plannerCache.bestNodeCache) Memory._plannerCache.bestNodeCache = {};
+        if (!Memory._plannerCache.bestNodeCache[`${unitU.unitType}->${unitV.unitType}`]) Memory._plannerCache.bestNodeCache[`${unitU.unitType}->${unitV.unitType}`] = {};
+        if (Memory._plannerCache.bestNodeCache[`${unitU.unitType}->${unitV.unitType}`][`${posU}->${posV}`]) {
+           const $ = Memory._plannerCache.bestNodeCache[`${unitU.unitType}->${unitV.unitType}`][`${posU}->${posV}`];
+           return this[key] = {origin : new RoomPosition($.origin.x, $.origin.y, $.origin.roomName), dist : new RoomPosition($.dist.x, $.dist.y, $.dist.roomName)};
+        }
+        const dist = unitV.FetchConnectionNodes().map(([y, x]) => new RoomPosition(x + posV.x, y + posV.y, posV.roomName)).sort((u, v) => this.FetchRoad(this.fetchBestNode2Pos(unitU, posU, u), u).length - this.FetchRoad(this.fetchBestNode2Pos(unitU, posU, v), v).length)[0];
+        const origin = this.fetchBestNode2Pos(unitU, posU, dist);
+        return this[key] = Memory._plannerCache.bestNodeCache[`${unitU.unitType}->${unitV.unitType}`][`${posU}->${posV}`] = {dist, origin};
+    }
+    /**
+     * @private
+     * @param {Array<RoomPosition>} path
+     */
+    displayRoad(path) {
+        /** @type { {[roomName : string] : Array<RoomPosition>} } */
+        const pathByRoom = _.groupBy(path, "roomName");
+        for (const roomName in pathByRoom) {
+            const visual = new RoomVisual(roomName);
+            for (let i = 1; i < pathByRoom[roomName].length; ++i) visual.line(pathByRoom[roomName][i - 1], pathByRoom[roomName][i], {width : .5, color : "lightblue"});
+        }
+    }
+    /**
+     * @private
+     * @param {Array<RoomPosition>} path
+     * @param { {excludeHeadTail? : boolean} } [options]
+     * @returns {Response}
+     */
+    linkRoad(path, options = {}) {
+        _.defaults(options, {excludeHeadTail : true});
+        const ret = new Response(Response.prototype.PLACE_HOLDER);
+        const headRoomName = path[0].roomName, tailRoomName = path[path.length - 1].roomName;
+        /** @type { {[roomName : string] : Array<RoomPosition>} } */
+        const pathByRoom = _.groupBy(path, "roomName");
+        for (const roomName in pathByRoom) {
+            if (!Game.rooms[roomName]) {
+                _Map.EnsureVisibility(roomName);
+                ret.Feed(Response.prototype.WAIT_UNTIL_TIMEOUT);
+                continue;
+            }
+            const iStart = options.excludeHeadTail && roomName === headRoomName? 1 : 0;
+            const iEnd = options.excludeHeadTail && roomName === tailRoomName ? pathByRoom[roomName].length - 1 : pathByRoom[roomName].length;
+            for (let i = iStart ; i < iEnd; ++i) {
+                const step = pathByRoom[roomName][i];
+                if (mapMonitor.Fetch(step.roomName, step.y, step.x).filter(s => s.structureType === STRUCTURE_ROAD).length === 0) {
+                    const retCode = Game.rooms[roomName].createConstructionSite(step.x, step.y, STRUCTURE_ROAD);
+                    if (retCode !== OK) {
+                        console.log(`<p style="display:inline;color:red;">Error:</p> Construct Road at ${roomName} (${step.x}, ${step.y}) fails with code ${retCode}`);
+                        ret.Feed(Response.prototype.WAIT_UNTIL_TIMEOUT);
+                        continue;
+                    }
                 }
             }
         }
         return ret;
     }
-    /**
-     * @private
-     * @param {string} roomName
-     * @param {Array<PathStep} path
-     * @param {string} color
-     */
-    displayRoad(roomName, path, color = "lightblue") {
-        for (let i = 1; i < path.length; ++i) new RoomVisual(roomName).line(path[i].x, path[i].y, path[i - 1].x, path[i - 1].y, {width : 0.5, color : color});
-    }
     constructor() {
-        /**
-         * @private
-         * @type {{ [roomType : string] : {[unitType : string] : Unit} }}
-         */
-        this.units      = {};
-        /**
-         * @private
-         * @type { {[roomName : string] : { [unitType : string] : Array<[number, number, number, number]>}} }
-         */
-        this.units2pos  = {};
-        /**
-         * @private
-         * @type { {[roomName : string] : { [x_1 : number] : {[y_1 : number] : {[x_2 : number] : {[y_2 : number] : Array<PathStep>}}} }} } from -> to
-         * NOTICE : Array of Path should be indexed with .get to adapt to optimization targeted at solving double search.
-         */
-        this.roomRoadCache            = {};
-        this.roomRoadCache.set = function(roomName, x_1, y_1, x_2, y_2, path) {
-            if (!this[roomName]) this[roomName] = {};
-            if (!this[roomName][x_1]) this[roomName][x_1] = {};
-            if (!this[roomName][x_1][y_1]) this[roomName][x_1][y_1] = {};
-            if (!this[roomName][x_1][y_1][x_2]) this[roomName][x_1][y_1][x_2] = {};
-            this[roomName][x_1][y_1][x_2][y_2] = path;
-        }.bind(this.roomRoadCache);
-        const that = this;
-        this.roomRoadCache.get = function(roomName, x_1, y_1, x_2, y_2) {
-            if (!this[roomName] || ((!this[roomName][x_1] || !this[roomName][x_1][y_1] || !this[roomName][x_1][y_1][x_2] || !this[roomName][x_1][y_1][x_2][y_2]) && (!this[roomName][x_2] || !this[roomName][x_2][y_2] || !this[roomName][x_2][y_2][x_1] || !this[roomName][x_2][y_2][x_1][y_1]))) that.updateLinkedRoad(roomName, new RoomPosition(x_1, y_1, roomName), new RoomPosition(x_2, y_2, roomName));
-            if (this[roomName] && this[roomName][x_1] && this[roomName][x_1][y_1] && this[roomName][x_1][y_1][x_2] && this[roomName][x_1][y_1][x_2][y_2]) {
-                this[roomName][x_1][y_1][x_2][y_2].get = function(index) {
-                    return this[index];
-                }.bind(this[roomName][x_1][y_1][x_2][y_2]);
-                return this[roomName][x_1][y_1][x_2][y_2];
-            }
-            if (this[roomName] && this[roomName][x_2] && this[roomName][x_2][y_2] && this[roomName][x_2][y_2][x_1] && this[roomName][x_2][y_2][x_1][y_1]) {
-                this[roomName][x_2][y_2][x_1][y_1].get = function(index) {
-                    return this[this.length - 1 - index];
-                }.bind(this[roomName][x_2][y_2][x_1][y_1]);
-                return this[roomName][x_2][y_2][x_1][y_1];
-            }
-            return undefined;
-        }.bind(this.roomRoadCache);
-        /**
-         * @type { {[roomName : string] : Array<Array<boolean> >} }
-         */
-        this.roomOccupiedSpace      = {};
-        this.roomOccupiedSpace.get = (roomName, y, x) => {
-            if (!this.roomOccupiedSpace[roomName]) return false;
-            return this.roomOccupiedSpace[roomName][y][x];
-        };
-        /**
-         * @type { {[roomName : string] : {[structure in StructureConstant] : Array<{x : number, y : number}>}} }
-         */
+        /** @type {{ [roomType : string] : {[unitType : string] : Unit} }} */
+        this.units = {};
+        /** @type { {[roomName : string] : { [unitType : string] : Array<[number, number, number, number]>}} } */
+        this.units2pos = {};
+        /** @type { {[roomName : string] : StructureConstant[][][]} } */
+        this.roomOccupiedSpace = {};
+        /** @type { {[roomName : string] : {[structure in StructureConstant] : Array<RoomPosition>}} } */
         this.roomStructureRegistered = {};
-        /** @type { {[roomName : string] : {[unitType : string] : boolean}} } */
-        this.roomSpaceRegistered    = {};
-        /** @type { {[roomName : string] : {[unitType : string] : {[pos : string] : {[entry : string] : RoomPosition | null}}}} } */
-        this._unit2unit = {};
         /** @type { {[roomName : string] : Array<RoomPosition>} } */
         this.room2avoidPoses = {};
         /** @type { {[roomType : string] : {[roomName : string] : boolean}} } */
         this.roomType2fittedRoomNames = {};
+        /** @type { {[posUandposV : string] : Array<RoomPosition>} } */
+        this.roads = {};
     }
 };
+/**
+ * Static Variable
+ */
+Planer.prototype.DISTANCE_FROM_EDGE = 5;
+
 /* Room Design Type */
 const ROOM_TYPE_NORMAL_CONTROLLED_ROOM  = "normal";
 
 const planer = new Planer();
 
-planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "centralSpawn", new Unit(
+planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, new Unit(
     [
         [Unit.prototype.PLACE_ANY, STRUCTURE_ROAD, STRUCTURE_ROAD, STRUCTURE_ROAD, STRUCTURE_ROAD, STRUCTURE_ROAD, Unit.prototype.PLACE_ANY],
-        [STRUCTURE_ROAD, STRUCTURE_EXTENSION,   STRUCTURE_EXTENSION,        [STRUCTURE_SPAWN, STRUCTURE_RAMPART],        STRUCTURE_EXTENSION,        STRUCTURE_EXTENSION,    STRUCTURE_ROAD],
-        [STRUCTURE_ROAD, STRUCTURE_EXTENSION,   Unit.prototype.PLACE_VACANT,STRUCTURE_EXTENSION,    Unit.prototype.PLACE_VACANT,STRUCTURE_EXTENSION,    STRUCTURE_ROAD],
-        [STRUCTURE_ROAD, STRUCTURE_CONTAINER,   STRUCTURE_EXTENSION,        STRUCTURE_LINK,         STRUCTURE_EXTENSION,        STRUCTURE_CONTAINER,    STRUCTURE_ROAD],
-        [STRUCTURE_ROAD, [STRUCTURE_SPAWN, STRUCTURE_RAMPART],       Unit.prototype.PLACE_VACANT,STRUCTURE_EXTENSION,    Unit.prototype.PLACE_VACANT,[STRUCTURE_SPAWN, STRUCTURE_RAMPART],        STRUCTURE_ROAD],
-        [STRUCTURE_ROAD, STRUCTURE_EXTENSION,   STRUCTURE_EXTENSION,        STRUCTURE_EXTENSION,    STRUCTURE_EXTENSION,        STRUCTURE_EXTENSION,    STRUCTURE_ROAD],
+        [STRUCTURE_ROAD, STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, [STRUCTURE_SPAWN, STRUCTURE_RAMPART], STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, STRUCTURE_ROAD],
+        [STRUCTURE_ROAD, STRUCTURE_EXTENSION, Unit.prototype.PLACE_VACANT, STRUCTURE_EXTENSION, Unit.prototype.PLACE_VACANT, STRUCTURE_EXTENSION, STRUCTURE_ROAD],
+        [STRUCTURE_ROAD, STRUCTURE_CONTAINER, STRUCTURE_EXTENSION, STRUCTURE_LINK, STRUCTURE_EXTENSION, STRUCTURE_CONTAINER, STRUCTURE_ROAD],
+        [STRUCTURE_ROAD, [STRUCTURE_SPAWN, STRUCTURE_RAMPART], Unit.prototype.PLACE_VACANT, STRUCTURE_EXTENSION, Unit.prototype.PLACE_VACANT, [STRUCTURE_SPAWN, STRUCTURE_RAMPART], STRUCTURE_ROAD],
+        [STRUCTURE_ROAD, STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, STRUCTURE_ROAD],
         [Unit.prototype.PLACE_ANY, STRUCTURE_ROAD, STRUCTURE_ROAD, STRUCTURE_ROAD, STRUCTURE_ROAD, STRUCTURE_ROAD, Unit.prototype.PLACE_ANY]
     ]
-    , global.Lucy.Rules.arrangements.SPAWN_ONLY, "", "red", {type:"distanceSum", objects : [STRUCTURE_CONTROLLER, "mineral", "energies"], subjects : [STRUCTURE_SPAWN]}, {avoidOtherToOverLapRoad : true, primary : true}));
+    , "centralSpawn", global.Lucy.Rules.arrangements.SPAWN_ONLY, "", "red", {type:"distanceSum", objects : [STRUCTURE_CONTROLLER, "mineral", "energies"], subjects : [STRUCTURE_SPAWN]}, {avoidOtherToOverLapRoad : true, primary : true}));
 
-planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "centralTransfer", new Unit(
+planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, new Unit(
     [
         [[STRUCTURE_STORAGE, STRUCTURE_RAMPART], [STRUCTURE_NUKER, STRUCTURE_RAMPART], [STRUCTURE_POWER_SPAWN, STRUCTURE_RAMPART]],
         [[STRUCTURE_TERMINAL, STRUCTURE_RAMPART], STRUCTURE_ROAD, STRUCTURE_EXTENSION],
         [STRUCTURE_LINK, [STRUCTURE_FACTORY, STRUCTURE_RAMPART], STRUCTURE_ROAD]
     ]
-    , global.Lucy.Rules.arrangements.TRANSFER_ONLY, "", "orange", {type:"distanceSum", objects : [STRUCTURE_CONTROLLER, STRUCTURE_SPAWN], subjects : [STRUCTURE_STORAGE, STRUCTURE_TERMINAL, STRUCTURE_FACTORY]}, {avoidOverLapRoad : true}));
+    , "centralTransfer", global.Lucy.Rules.arrangements.TRANSFER_ONLY, "", "orange", {type:"distanceSum", objects : [STRUCTURE_CONTROLLER, STRUCTURE_SPAWN], subjects : [STRUCTURE_STORAGE, STRUCTURE_TERMINAL, STRUCTURE_FACTORY]}, {avoidOverLapRoad : true}));
 
-planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "towers", new Unit(
+planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, new Unit(
     [
         [[STRUCTURE_TOWER, STRUCTURE_RAMPART]]
     ]
-    , "defense", "⛫", "yellow", {type : "distanceSum", objects : [STRUCTURE_STORAGE, STRUCTURE_CONTAINER, STRUCTURE_TERMINAL], subjects : [STRUCTURE_TOWER]}, {alongRoad : true}));
+    , "towers", "defense", "⛫", "yellow", {type : "distanceSum", objects : [STRUCTURE_STORAGE, STRUCTURE_CONTAINER, STRUCTURE_TERMINAL], subjects : [STRUCTURE_TOWER]}, {alongRoad : true}));
 
-planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "extensionUnit", new Unit(
+planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, new Unit(
     [
         [STRUCTURE_ROAD, STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, STRUCTURE_ROAD],
         [STRUCTURE_EXTENSION, STRUCTURE_ROAD, STRUCTURE_EXTENSION, STRUCTURE_ROAD, STRUCTURE_EXTENSION],
@@ -1215,22 +1348,22 @@ planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "extensionUnit", new Unit(
         [STRUCTURE_EXTENSION, STRUCTURE_ROAD, STRUCTURE_EXTENSION, STRUCTURE_ROAD, STRUCTURE_EXTENSION],
         [STRUCTURE_ROAD, STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, STRUCTURE_ROAD]
     ]
-    , "extension", "", "yellow", {type : "distanceSum", objects : [STRUCTURE_SPAWN, STRUCTURE_STORAGE, STRUCTURE_TERMINAL], subjects : [STRUCTURE_EXTENSION]}, {avoidOtherToOverLapRoad : true, avoidOverLapRoad : true}));
+    , "extensionUnit", "extension", "", "yellow", {type : "distanceSum", objects : [STRUCTURE_SPAWN, STRUCTURE_STORAGE, STRUCTURE_TERMINAL], subjects : [STRUCTURE_EXTENSION]}, {avoidOtherToOverLapRoad : true, avoidOverLapRoad : true}));
 
-planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "labUnit", new Unit(
+planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, new Unit(
     [
         [Unit.prototype.PLACE_ANY, [STRUCTURE_LAB, STRUCTURE_RAMPART], [STRUCTURE_LAB, STRUCTURE_RAMPART], Unit.prototype.PLACE_ANY],
-        [[STRUCTURE_LAB, STRUCTURE_RAMPART], [STRUCTURE_LAB, STRUCTURE_RAMPART], STRUCTURE_ROAD, [STRUCTURE_LAB, STRUCTURE_RAMPART]],
-        [[STRUCTURE_LAB, STRUCTURE_RAMPART], STRUCTURE_ROAD, [STRUCTURE_LAB, STRUCTURE_RAMPART], [STRUCTURE_LAB, STRUCTURE_RAMPART]],
+        [[STRUCTURE_LAB, STRUCTURE_RAMPART], [STRUCTURE_LAB, STRUCTURE_RAMPART, Unit.prototype.FIRST_BUILD_HERE], STRUCTURE_ROAD, [STRUCTURE_LAB, STRUCTURE_RAMPART]],
+        [[STRUCTURE_LAB, STRUCTURE_RAMPART], STRUCTURE_ROAD, [STRUCTURE_LAB, STRUCTURE_RAMPART, Unit.prototype.FIRST_BUILD_HERE], [STRUCTURE_LAB, STRUCTURE_RAMPART]],
         [Unit.prototype.PLACE_ANY, [STRUCTURE_LAB, STRUCTURE_RAMPART], [STRUCTURE_LAB, STRUCTURE_RAMPART], Unit.prototype.PLACE_ANY]
     ]
-    , "labs", "", "purple", {type : "distanceSum", objects : [STRUCTURE_SPAWN], subjects : [STRUCTURE_LAB]}, {avoidOverLapRoad : true}));
+    , "labUnit", "labs", "", "purple", {type : "distanceSum", objects : [STRUCTURE_SPAWN], subjects : [STRUCTURE_LAB]}, {avoidOverLapRoad : true}));
 
-planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "extensions", new Unit(
+planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, new Unit(
     [
         [STRUCTURE_EXTENSION]
     ]
-    , "extension", "🟡", "yellow", {type : "distanceSum", objects : [STRUCTURE_SPAWN, STRUCTURE_STORAGE, STRUCTURE_TERMINAL], subjects : [STRUCTURE_EXTENSION]}, {alongRoad : true}));
+    , "extensions", "extension", "🟡", "yellow", {type : "distanceSum", objects : [STRUCTURE_SPAWN, STRUCTURE_STORAGE, STRUCTURE_TERMINAL], subjects : [STRUCTURE_EXTENSION]}, {alongRoad : true}));
 const ROOM_DISTANCE_CACHE_TIMEOUT       = 50;
 const ROOM_DISTANCE_CACHE_OFFSET        = 5;
 
@@ -1238,17 +1371,9 @@ const ROOM_DISTANCE_CACHE_OFFSET        = 5;
 /**
  * Class Representation for Map.
  * Single.
- * @TODO
  * Cross-Shard Cases
  */
 class Map {
-    /**
-     * @param {RoomPosition} pos
-     * @returns {string}
-     */
-    roomPosition2String(pos) {
-        return `${pos.roomName}:(${pos.x}, ${pos.y})`;
-    }
     /**
      * @private
      * @param {string} roomName
@@ -1258,18 +1383,42 @@ class Map {
             this.sortedDistancesExpiration[roomName] = Game.time + getCacheExpiration(ROOM_DISTANCE_CACHE_TIMEOUT, ROOM_DISTANCE_CACHE_OFFSET);
             this.updateAdjacentRooms(roomName, {fullDistrict : true});
             this.updateDistanceBetweenRooms(roomName);
+            /**
+             * Only those
+             *  - presumably, "reachable"
+             *  - neutral
+             *  - controlled
+             *  - reserved
+             * rooms are added.
+             */
             let roomNames = Object.keys(Game.rooms).filter((r) => this.disFromRoom[roomName][r].distance !== Infinity && (!Game.rooms[r].controller || (Game.rooms[r].controller.my || (Game.rooms[r].controller.reservation && Game.rooms[r].controller.reservation.username === username) || (!Game.rooms[r].controller.owner && !Game.rooms[r].controller.reservation))));
             this.sortedDistances[roomName] = roomNames.sort((u, v) => this.disFromRoom[roomName][u].distance - this.disFromRoom[roomName][v].distance);
         }
     }
     /**
+     * @private
+     * @param {RoomPosition} pos
+     */
+    setCenter(pos) {
+        this.room2center[pos.roomName] = pos;
+    }
+    /**
+     * @private
+     * @param {string} roomName
+     * @returns {RoomPosition | null}
+     */
+    getCenter(roomName) {
+        return this.room2center[roomName] || null;
+    }
+    /**
      * Ticks taken :
      *  - E7S27 7.477542799999981
+     * @private
      * @param {string} roomName
      */
     updateInRoomDistance(roomName) {
-        if (!this.room2center[roomName]) return;
-        const center = this.room2center[roomName];
+        const center = this.getCenter(roomName);
+        if (!center) return;
         const terrain = mapMonitor.FetchTerrain(roomName);
         this.room2distanceFromCenter[roomName] = constructArray([50,50], -1);
         const dx = [-1,-1,-1,0,0,1,1,1], dy = [-1,0,1,-1,1,-1,0,1], dlen = dx.length;
@@ -1291,10 +1440,20 @@ class Map {
     }
     /**
      * @param {string} roomName
-     * @param { {fullDistrict : boolean} } options
+     * @param { {fullDistrict : boolean} | undefined } options
      */
-    updateAdjacentRooms(roomName, options = {maximumDepth : 1}) {
-        if (options.fullDistrict) {
+    updateAdjacentRooms(roomName, options) {
+        if (!options) {
+            if (this.roomVisited[roomName]) return;
+            if (!this.roomEdges[roomName]) this.roomEdges[roomName] = [];
+            this.roomVisited[roomName] = true;
+            this.registerRoom(roomName);
+            const exits = Game.map.describeExits(roomName);
+            for (const direction in exits) {
+                this.roomEdges[roomName].push(exits[direction]);
+                this.registerRoom(exits[direction]);
+            }
+        } else if (options.fullDistrict) {
             /**
              * @param {string} roomName
              */
@@ -1302,13 +1461,13 @@ class Map {
                 if (this.roomVisited[roomName]) return;
                 if (!this.roomEdges[roomName]) this.roomEdges[roomName] = [];
                 this.roomVisited[roomName] = true;
-                this.roomRecorded.add(roomName);
+                this.registerRoom(roomName);
                 const exits = Game.map.describeExits(roomName);
                 for (const direction in exits) {
                     this.roomEdges[roomName].push(exits[direction]);
-                    if (decideRoomStatus(roomName) === "sideway") {
+                    if (decideRoomStatus(roomName) === "highway") {
                         /** Only Record Path, no Extension */
-                        this.roomRecorded.add(exits[direction]);
+                        this.registerRoom(exits[direction]);
                         continue;
                     }
                     dfs(exits[direction]);
@@ -1318,10 +1477,25 @@ class Map {
         }
     }
     /**
+     * @private
+     * @param {string} roomName
+     */
+    registerRoom(roomName) {
+        const status = decideRoomStatus(roomName);
+        this.roomRecorded.add(roomName);
+        if (status === "normal") this.NormalRoomRecorded.add(roomName);
+        else if (status === "SK") this.SKRoomRecorded.add(roomName);
+        else if (status === "highway") this.highwayRoomRecorded.add(roomName);
+        else if (status === "portal") this.PortalRoomRecorded.add(roomName);
+    }
+    /**
      * @param {string} origin
      */
     updateDistanceBetweenRooms(origin) {
         if (!this.disFromRoom[origin]) this.disFromRoom[origin] = {};
+        /**
+         * Update distance whenever there are new rooms registerred.
+         */
         if (!this.disFromRoomTotalRooms[origin] || this.disFromRoomTotalRooms[origin] < Object.keys(this.roomRecorded).length) {
             this.disFromRoomTotalRooms[origin] = Object.keys(this.roomRecorded).length;
             for (const roomName of this.roomRecorded) {
@@ -1345,6 +1519,7 @@ class Map {
             }
         }
     }
+
     /**
      * @param {string} roomName
      * @param {RoomPosition} posU
@@ -1356,7 +1531,6 @@ class Map {
         if (!this.room2distanceFromCenter[roomName]) return null;
         const distanceFromposU = this.room2distanceFromCenter[roomName][posU.y][posU.x];
         const distanceFromposV = this.room2distanceFromCenter[roomName][posV.y][posV.x];
-        // console.log(this.room2distanceFromCenter[roomName][posU.y][posU.x], this.room2distanceFromCenter[roomName][posV.y][posV.x]);
         return (distanceFromposU < 0 ? Infinity : distanceFromposU) + (distanceFromposV < 0 ? Infinity : distanceFromposV);
     }
     /**
@@ -1368,11 +1542,18 @@ class Map {
         this.updateAdjacentRooms(roomNameV, {fullDistrict : true});
         if (this.disFromRoom[roomNameU]) this.updateDistanceBetweenRooms(roomNameU);
         else this.updateDistanceBetweenRooms(roomNameV);
-        if (this.disFromRoom[roomNameU]) {
-            return this.disFromRoom[roomNameU][roomNameV].distance;
-        } else {
-            return this.disFromRoom[roomNameV][roomNameU].distance;
-        }
+        if (this.disFromRoom[roomNameU]) return this.disFromRoom[roomNameU][roomNameV].distance;
+        else return this.disFromRoom[roomNameV][roomNameU].distance;
+    }
+    /**
+     * @param {string} roomName
+     * @returns {"invisible" | "visible" | "scouting"}
+     */
+    EnsureVisibility(roomName) {
+        if (Game.rooms[roomName]) return "visible";
+        if (this.IsUnreachable(roomName)) return "invisible";
+        if (TaskConstructor.ScoutTask(roomName, {default : true}) === false) return "invisible";
+        else return "scouting";
     }
     /**
      * @param {string} fromRoomName
@@ -1380,6 +1561,7 @@ class Map {
      * @returns {Array<string> | null}
      */
     DescribeRoute(fromRoomName, toRoomName) {
+        /** Init Cache */
         if (this.routes[fromRoomName] && this.routes[fromRoomName][toRoomName]) return this.routes[fromRoomName][toRoomName];
         else if (this.routes[toRoomName] && this.routes[toRoomName][fromRoomName]) return this.routes[toRoomName][fromRoomName].slice().reverse();
         if (!this.routes[fromRoomName]) this.routes[fromRoomName] = {};
@@ -1428,7 +1610,7 @@ class Map {
      * @param {string} roomName
      * @param {string} targetRoomName
      * @param {"energy" | "mineral"} type
-     * @returns {number | null | boolean} Profit Per Tick | Whether there is mineral
+     * @returns {number | boolean | "unknown"} Profit Per Tick | Whether there is mineral
      */
     IsExploitRoomProfitable(roomName, targetRoomName, type) {
         /** Currently Unreachable */
@@ -1440,7 +1622,7 @@ class Map {
         // this.updateDistanceBetweenRooms(roomName);
         if (this.disFromRoom[roomName][targetRoomName].distance === Infinity) return 0;
         const distance = this.disFromRoom[roomName][targetRoomName].distance * 50;
-        /** Issue Scouting */
+        /** Issue Scouting to gather information */
         if (!Memory.rooms[targetRoomName]) {
             if (TaskConstructor.ScoutTask(targetRoomName) === false) return 0;
             return null;
@@ -1450,31 +1632,46 @@ class Map {
             const sourceAmount = Memory.rooms[targetRoomName].sourceAmount;
             /**
              * We assume half of the total roads are on the plain, and the other half are on the swamp.
-             * And the default setting for Harvester : {[WORK]:10, [CARRY]:2, [MOVE]:12} : 1700, Transferer : {[CARRY]:20, [MOVE]:20} : 2000, DefenderWorker : {[WORK]:20, [CARRY]:1, [MOVE]:10, [ATTACK]:16, [HEAL]:3}
+             * And the default setting for Harvester : {[WORK]:10, [CARRY]:2, [MOVE]:12} : 1700, Transferer : {[CARRY]:20, [MOVE]:20} : 2000
              */
             const costPerTick = Math.floor(distance / 2) * ROAD_DECAY_AMOUNT / ROAD_DECAY_TIME * (1 + 5) / REPAIR_POWER + sourceAmount * CONTAINER_DECAY / CONTAINER_DECAY_TIME / REPAIR_POWER + (1700 + 2000) / CREEP_LIFE_TIME + sourceAmount > 2 ? 1 : 0;
             const profitPerTick = _.sum(Memory.rooms[targetRoomName].sourceCapacities) / ENERGY_REGEN_TIME * (CREEP_LIFE_TIME - distance) / CREEP_LIFE_TIME;
             return profitPerTick - costPerTick;
         } else if (type === "mineral") {
+            /**
+             * DefenderWorker : {[WORK]:20, [CARRY]:1, [MOVE]:10, [ATTACK]:16, [HEAL]:3}
+             */
             if (Memory.rooms[targetRoomName].mineralType) return true;
             else return false;
         }
     }
     /**
-     * @param {number} num
+     * @param {number} amount
      */
-    ClaimRoom(num) {
+    ClaimRoom(amount) {
+        /**
+         * Update Information of Rooms
+         */
         const myRoomNames = Object.keys(Game.rooms).filter(roomName => isMyRoom(roomName));
         myRoomNames.forEach(roomName => this.updateAdjacentRooms(roomName, {fullDistrict : true}));
         myRoomNames.forEach(roomName => this.updateDistanceBetweenRooms(roomName));
         let isThereAnyInformationLacking = 0;
-        let candidates = Array.from(this.roomRecorded)
+        let candidates = Array.from(this.NormalRoomRecorded)
             .filter(roomName => !isMyRoom(roomName) && !this.IsUnreachable(roomName))
             .filter(roomName => {
+                /**
+                 * Has Information
+                 */
                 if (Memory.rooms[roomName]) {
+                    /**
+                     * Owned / Reserved By Others
+                     */
                     if (Memory.rooms[roomName].owner) return false;
                     else return true;
                 }
+                /**
+                 * Lack Information
+                 */
                 if (!Memory.rooms[roomName] && TaskConstructor.ScoutTask(roomName) !== false) {
                     isThereAnyInformationLacking++;
                     return false;
@@ -1482,22 +1679,24 @@ class Map {
                 return false;
             });
         if (isThereAnyInformationLacking > 0) {
-            global.Lucy.Timer.add(Game.time + isThereAnyInformationLacking * 50, this.ClaimRoom, this, [num], `Claim ${num} ${num === 1 ? "room" : "rooms"}`);
+            global.Lucy.Timer.add(Game.time + isThereAnyInformationLacking * 50, this.ClaimRoom, this, [amount], `Claim ${amount} ${amount === 1 ? "room" : "rooms"}`);
             return true;
         }
         candidates = candidates
-            .filter(roomName => Memory.rooms[roomName].sourceAmount >= 1 && Memory.rooms[roomName].sourceAmount <= 2)
             .sort((u, v) => {
                 if (Memory.rooms[v].sourceAmount !== Memory.rooms[u].sourceAmount) return Memory.rooms[v].sourceAmount - Memory.rooms[u].sourceAmount;
                 return Math.min(...myRoomNames.map(myRoomName => calcRoomDistance(myRoomName, u))) - Math.min(...myRoomNames.map(myRoomName => calcRoomDistance(myRoomName, v)));
             })
             .filter(roomName => planer.IsRoomFit(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM));
-        for (let i = 0, cnt = 0; cnt < num && i < candidates.length; ++i) if (TaskConstructor.ClaimTask(candidates[i]) === false) continue; else ++cnt;
+        for (let i = 0, cnt = 0; cnt < amount && i < candidates.length; ++i) if (TaskConstructor.ClaimTask(candidates[i]) === false) continue; else ++cnt;
         return true;
     }
     /**
      * In the mechanism of Remote Mining, Repairing and Building are based on visibility, which is ensured by Scout Task, and triggered by
      * the transition from invisibility to visibility, in which amount is recorded and restricted.
+     * @TODO
+     * The difficult part is the maintaining of neutral rooms, since other players could occupy them and establish a block.
+     * So this part is postponed until I have mature attacking code, so that my desired region will not be taken over by someone other.
      * @param {string} roomName
      */
     RemoteMine(roomName) {
@@ -1514,7 +1713,7 @@ class Map {
         else {
             this.updateAdjacentRooms(roomName, {fullDistrict : true});
             this.updateDistanceBetweenRooms(roomName);
-            const adjacentRoomNames = Array.from(this.roomRecorded).filter((roomName) => !isMyRoom(roomName));
+            const adjacentRoomNames = [].concat(Array.from(this.NormalRoomRecorded), Array.from(this.SKRoomRecorded), Array.from(this.PortalRoomRecorded)).filter((roomName) => !isMyRoom(roomName));
             let isThereAnyInformationLacking = 0;
             for (const targetRoomName of adjacentRoomNames) {
                 const ret = this.IsExploitRoomProfitable(roomName, targetRoomName, "energy");
@@ -1530,7 +1729,7 @@ class Map {
         else {
             this.updateAdjacentRooms(roomName, {fullDistrict : true});
             this.updateDistanceBetweenRooms(roomName);
-            const adjacentRoomNames = Array.from(this.roomRecorded).filter((roomName) => !isMyRoom(roomName));
+            const adjacentRoomNames = Array.from(this.SKRoomRecorded).filter((roomName) => !isMyRoom(roomName));
             let isThereAnyInformationLacking = 0;
             for (const targetRoomName of adjacentRoomNames) {
                 const ret = this.IsExploitRoomProfitable(roomName, targetRoomName, "mineral");
@@ -1597,45 +1796,6 @@ class Map {
          */
     }
     /**
-     * @param {Id<Creep | PowerCreep>} creep
-     * @param {RoomPosition} pos
-     * @returns {boolean}
-     */
-    RegisterPos(creepId, pos) {
-        if (!this.registeredPoses[pos.roomName]) this.registeredPoses[pos.roomName] = {};
-        if (this.registeredPoses[pos.roomName][this.roomPosition2String(pos)]) return false;
-        this.registeredPoses[pos.roomName][this.roomPosition2String(pos)] = creepId;
-        if (!this.creep2pos[creepId]) this.creep2pos[creepId] = [];
-        this.creep2pos[creepId].push(pos);
-        return true;
-    }
-    /**
-     * @param {Id<Creep | PowerCreep> | RoomPosition} creepIdorPos
-     */
-    ReleasePos(creepIdorPos) {
-        if (typeof creepIdorPos === 'string') {
-            for (const pos of (this.creep2pos[creepIdorPos] || [])) {
-                delete this.registeredPoses[pos.roomName][this.roomPosition2String(pos)];
-            }
-            delete this.creep2pos[creepIdorPos];
-        } else {
-            if (!this.registeredPoses[creepIdorPos.roomName] || !this.registeredPoses[creepIdorPos.roomName][this.roomPosition2String(creepIdorPos)]) return;
-            const creepId = this.registeredPoses[creepIdorPos.roomName][this.roomPosition2String(creepIdorPos)];
-            const posString = this.roomPosition2String(creepIdorPos);
-            this.creep2pos[creepId] = this.creep2pos[creepId].filter(p => this.roomPosition2String(p) !== posString);
-            delete this.registeredPoses[creepIdorPos.roomName][this.roomPosition2String(creepIdorPos)];
-        }
-    }
-    /**
-     * Returns Whether pos has been reserved.
-     * @param {Id<Creep | PowerCreep>} creepId
-     * @param {RoomPosition} pos
-     */
-    QueryPos(creepId, pos) {
-        if (!this.registeredPoses[pos.roomName] || !this.registeredPoses[pos.roomName][this.roomPosition2String(pos)] || this.registeredPoses[pos.roomName][this.roomPosition2String(pos)] === creepId) return false;
-        return true;
-    }
-    /**
      * Query returns an array of roomName sorted by distance.
      * @param {string} roomName
      */
@@ -1651,15 +1811,22 @@ class Map {
         if (!Memory.autoPlan) Memory.autoPlan = {};
         if (!Memory.autoPlan[roomName]) Memory.autoPlan[roomName] = {};
         /**
-         * 0. Decision Options & Constants
+         * 0. Decision Options & Auxiliary Function
          */
         let options = {
             controllerUpgrade : false,
             objectDestroy : false,
             structureConstruct : false
         };
-        const TIMEOUT = 250;
-        const OFFSET = 50;
+        /**
+         * @param {Response} response
+         */
+        const parseResponse = (response) => {
+            if (response.value === response.PLACE_HOLDER) return true;
+            if (response.value === response.WAIT_UNTIL_UPGRADE && options.controllerUpgrade) return true;
+            if (response.value === response.WAIT_UNTIL_TIMEOUT && Game.time >= response.timeout) return true;
+            return false;
+        };
         /**
          * 1. Prepare Configuration for Room : roomName
          */
@@ -1685,105 +1852,35 @@ class Map {
          * 3. Calling Planner
          */
         if (this.planCache[roomName].roomType === ROOM_TYPE_NORMAL_CONTROLLED_ROOM) {
-            /**
-             * @param {ComponentRet} componentRet
-             */
-            const parseRet = (componentRet) => {
-                if (!componentRet) return true;
-                if (componentRet.ret === undefined) return true;
-                if (componentRet.ret === false) return false;
-                if (componentRet.ret === true && options.controllerUpgrade) return true;
-                if (componentRet.ret === true && !options.controllerUpgrade) return false;
-                if (componentRet.ret === "need_to_call_again" && Game.time >= componentRet.recallTick) return true;
-                return false;
-            };
-            /**
-             * @param {ComponentRet} componentRet
-             */
-            const doneRet = (componentRet) => {
-                for (const key in componentRet) {
-                    if (componentRet[key]["ret"] === "need_to_call_again") componentRet[key]["recallTick"] = Game.time + getCacheExpiration(TIMEOUT, OFFSET);
-                }
-            };
-            const mergeRet = (storedFeedbacks, newFeedbacks) => {
-                for (const key in newFeedbacks) {
-                    if (!storedFeedbacks[key]) storedFeedbacks[key] = newFeedbacks[key];
-                    else if (storedFeedbacks[key] === false) storedFeedbacks[key] = newFeedbacks[key];
-                    else if (newFeedbacks[key] === "need_to_call_again") storedFeedbacks[key] = newFeedbacks[key];
-                }
-            };
-            /**
-             * @param { {pos : RoomPosition} } object
-             * @param {string} tag
-             */
-            const planForAroundLink = (object, tag) => {
-                /** @type {RoomPosition} */
-                const pos = object.pos;
-                /** @type {StructureRoad} */
-                const road = mapMonitor.FetchAroundStructure(roomName, pos.y, pos.x).filter(s => s.structureType === STRUCTURE_ROAD)[0];
-                if (!road) return {ret : "need_to_call_again"};
-                const vacantPos = mapMonitor.FetchAroundVacantPos(road.pos.roomName, road.pos.y, road.pos.x, [STRUCTURE_LINK, STRUCTURE_RAMPART]).filter(pos => !planer.roomOccupiedSpace.get(pos.roomName, pos.y, pos.x)).sort((posU, posV) => posU.getRangeTo(object) - posV.getRangeTo(object))[0];
-                if (!vacantPos) {
-                    console.log(`<p style="display:inline;color:red;">Error: </p>Unable to construct Link for ${object}`);
-                    return {ret : "need_to_call_again"};
-                } // else console.log(`${roomName}:${object}:link: ${vacantPos}`);
-                const link = mapMonitor.FetchStructure(roomName, vacantPos.y, vacantPos.x).concat(mapMonitor.FetchConstructionSites(roomName, vacantPos.y, vacantPos.x)).filter(s => s.structureType === STRUCTURE_LINK)[0];
-                const rampart = mapMonitor.FetchStructure(roomName, vacantPos.y, vacantPos.x).concat(mapMonitor.FetchConstructionSites(roomName, vacantPos.y, vacantPos.x)).filter(s => s.structureType === STRUCTURE_RAMPART)[0];
-                if (!link) {
-                    if (CONTROLLER_STRUCTURES[STRUCTURE_LINK][Game.rooms[roomName].controller.level] === mapMonitor.FetchCnt(roomName, STRUCTURE_LINK)["total"]) return {ret : true};
-                    Game.rooms[roomName].createConstructionSite(vacantPos.x, vacantPos.y, STRUCTURE_LINK);
-                    return {ret : "need_to_call_again"};
-                } else if (!isConstructionSite(link)) {
-                    link.memory.tag = tag;
-                    mapMonitor.registerStructureWithTag(link);
-                    if (Game.rooms[roomName].controller.level > 3 && !rampart) Game.rooms[roomName].createConstructionSite(vacantPos.x, vacantPos.y, STRUCTURE_RAMPART);
-                    else return {ret : true};
-                    return {ret : false};
-                } else return {ret : "need_to_call_again"};
-            };
-            /**
-             * @param { {pos : RoomPosition} } object
-             * @param {string} tag
-             */
-            const planForAroundOverlapContainer = (object, tag) => {
-                /** @type {RoomPosition} */
-                const pos = object.pos;
-                /** @type {StructureRoad} */
-                const road = mapMonitor.FetchAroundStructure(roomName, pos.y, pos.x).filter(s => s.structureType === STRUCTURE_ROAD)[0];
-                if (!road) return {ret : "need_to_call_again"};
-                const container = mapMonitor.FetchStructure(roomName, road.pos.y, road.pos.x).concat(mapMonitor.FetchConstructionSites(roomName, road.pos.y, road.pos.x)).filter(s => s.structureType === STRUCTURE_CONTAINER)[0];
-                const rampart = mapMonitor.FetchStructure(roomName, road.pos.y, road.pos.x).concat(mapMonitor.FetchConstructionSites(roomName, road.pos.y, road.pos.x)).filter(s => s.structureType === STRUCTURE_RAMPART)[0];
-                if (!container) {
-                    Game.rooms[roomName].createConstructionSite(road.pos.x, road.pos.y, STRUCTURE_CONTAINER);
-                    return {ret : "need_to_call_again"};
-                } else if (!isConstructionSite(container)) {
-                    container.memory.tag = tag;
-                    mapMonitor.registerStructureWithTag(container);
-                    if (Game.rooms[roomName].controller.level > 3 && !rampart) Game.rooms[roomName].createConstructionSite(road.pos.x, road.pos.y, STRUCTURE_RAMPART);
-                    else return {ret : true};
-                    if (!buildLink) return {ret : false};
-                } else return {ret : "need_to_call_again"};
-            };
             const level = this.planCache[roomName].controllerLevel;
             if (level >= 1) {
                 /* Plan For StructureController's Link */
-                if (!this.planCache[roomName].feedbacks["controllerLink"]) this.planCache[roomName].feedbacks["controllerLink"] = {};
-                if (parseRet(this.planCache[roomName].feedbacks["controllerLink"][Game.rooms[roomName].controller.id]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["controllerLink"][Game.rooms[roomName].controller.id] = planForAroundLink(Game.rooms[roomName].controller, global.Lucy.Rules.arrangements.UPGRADE_ONLY);
-                doneRet(this.planCache[roomName].feedbacks["controllerLink"]);
+                if (!this.planCache[roomName].feedbacks["controllerLink"]) this.planCache[roomName].feedbacks["controllerLink"] = new Response(Response.prototype.PLACE_HOLDER);
+                if (parseResponse(this.planCache[roomName].feedbacks["controllerLink"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["controllerLink"].Feed(planer.PlanForAroundLink(Game.rooms[roomName].controller, global.Lucy.Rules.arrangements.UPGRADE_ONLY));
                 /* Plan For Harvest Unit */
                 if (!this.planCache[roomName].feedbacks["harvestEnergy"]) this.planCache[roomName].feedbacks["harvestEnergy"] = {};
                 for (const source of Game.rooms[roomName].energies) {
-                    if (parseRet(this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "container"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "container"] = planForAroundOverlapContainer(source, "forSource");
-                    if (parseRet(this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "link"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "link"] = planForAroundLink(source, "forSource");
+                    /**
+                     * Container
+                     */
+                    if (!this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "container"]) this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "container"] = new Response(Response.prototype.PLACE_HOLDER);
+                    if (parseResponse(this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "container"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "container"].Feed(planer.PlanForAroundOverlapContainer(source, "forSource", true));
+                    /**
+                     * Link
+                     */
+                    if (!this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "link"]) this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "link"] = new Response(Response.prototype.PLACE_HOLDER);
+                    if (parseResponse(this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "link"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "link"].Feed(planer.PlanForAroundLink(source, "forSource"));
                 }
-                doneRet(this.planCache[roomName].feedbacks["harvestEnergy"]);
                 /* Plan For CentralSpawn Unit */
-                if (!this.planCache[roomName].feedbacks["centralSpawn"]) this.planCache[roomName].feedbacks["centralSpawn"] = {};
-                mergeRet(this.planCache[roomName].feedbacks["centralSpawn"], planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "centralSpawn", {
+                if (!this.planCache[roomName].feedbacks["centralSpawn"]) this.planCache[roomName].feedbacks["centralSpawn"] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
+                if (DEBUG) {
+                    console.log(roomName, JSON.stringify(this.planCache[roomName].feedbacks["centralSpawn"]));
+                }
+                this.planCache[roomName].feedbacks["centralSpawn"].Merge(planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "centralSpawn", {
                     display : true,
-                    tag : parseRet(this.planCache[roomName].feedbacks["centralSpawn"]["tag"]) || options.structureConstruct,
-                    build : parseRet(this.planCache[roomName].feedbacks["centralSpawn"]["build"]) || (options.objectDestroy),
-                    road : parseRet(this.planCache[roomName].feedbacks["centralSpawn"]["road"]) || (options.objectDestroy),
+                    tag : parseResponse(this.planCache[roomName].feedbacks["centralSpawn"].Pick("tag")) || options.structureConstruct,
+                    build : parseResponse(this.planCache[roomName].feedbacks["centralSpawn"].Pick("build")) || options.objectDestroy,
+                    road : parseResponse(this.planCache[roomName].feedbacks["centralSpawn"].Pick("road")) || options.objectDestroy,
                     num : 1,
                     linkedRoomPosition : [].concat(
                         Game.rooms[roomName]["energies"].map(s => s.pos),
@@ -1793,101 +1890,87 @@ class Map {
                     writeToMemory : true,
                     readFromMemory : true
                 }));
-                doneRet(this.planCache[roomName].feedbacks["centralSpawn"]);
-                // Use as Central Point in the room
-                if (!this.room2center[roomName]) {
-                    const yxyx = planer.FetchUnitPos(roomName, "centralSpawn")[0];
-                    const pos = new RoomPosition((yxyx[1] + yxyx[3]) / 2, (yxyx[0] + yxyx[2]) / 2, roomName);
-                    this.room2center[roomName] = pos;
-                }
             }
             if (level >= 2) {
                 
             }
             if (level >= 3) {
                 /* Plan For CentralTransfer Unit */
-                if (!this.planCache[roomName].feedbacks["centralTransfer"]) this.planCache[roomName].feedbacks["centralTransfer"] = {};
-                mergeRet(this.planCache[roomName].feedbacks["centralTransfer"], planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "centralTransfer", {
+                if (!this.planCache[roomName].feedbacks["centralTransfer"]) this.planCache[roomName].feedbacks["centralTransfer"] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
+                this.planCache[roomName].feedbacks["centralTransfer"].Merge(planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "centralTransfer", {
                     display : true,
-                    tag : parseRet(this.planCache[roomName].feedbacks["centralTransfer"]["tag"]) || options.structureConstruct,
-                    build : parseRet(this.planCache[roomName].feedbacks["centralTransfer"]["build"]) || (options.objectDestroy),
-                    road : parseRet(this.planCache[roomName].feedbacks["centralTransfer"]["road"]) || (options.objectDestroy),
+                    tag : parseResponse(this.planCache[roomName].feedbacks["centralTransfer"].Pick("tag")) || options.structureConstruct,
+                    build : parseResponse(this.planCache[roomName].feedbacks["centralTransfer"].Pick("build")) || options.objectDestroy,
+                    road : parseResponse(this.planCache[roomName].feedbacks["centralTransfer"].Pick("road")) || options.objectDestroy,
                     num : 1,
                     linkedUnits : ["centralSpawn"],
                     writeToMemory : true,
                     readFromMemory : true
                 }));
-                doneRet(this.planCache[roomName].feedbacks["centralTransfer"]);
                 /* Plan For Tower Unit */
-                if (!this.planCache[roomName].feedbacks["towers"]) this.planCache[roomName].feedbacks["towers"] = {};
-                mergeRet(this.planCache[roomName].feedbacks["towers"], planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "towers", {
+                if (!this.planCache[roomName].feedbacks["towers"]) this.planCache[roomName].feedbacks["towers"] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
+                this.planCache[roomName].feedbacks["towers"].Merge(planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "towers", {
                     display : true,
-                    tag : parseRet(this.planCache[roomName].feedbacks["towers"]["tag"]) || options.structureConstruct,
-                    build : parseRet(this.planCache[roomName].feedbacks["towers"]["build"]) || (options.objectDestroy),
-                    road : parseRet(this.planCache[roomName].feedbacks["towers"]["road"]) || (options.objectDestroy),
+                    tag : parseResponse(this.planCache[roomName].feedbacks["towers"].Pick("tag")) || options.structureConstruct,
+                    build : parseResponse(this.planCache[roomName].feedbacks["towers"].Pick("build")) || (options.objectDestroy),
+                    road : parseResponse(this.planCache[roomName].feedbacks["towers"].Pick("road")) || (options.objectDestroy),
                     num : 6,
                     writeToMemory : true,
                     readFromMemory : true
                 }));
-                doneRet(this.planCache[roomName].feedbacks["towers"]);
             }
             if (level >= 4) {
                 /* Preplan for Central Lab (Reserve Space) */
-                if (!this.planCache[roomName].feedbacks["labUnit"]) this.planCache[roomName].feedbacks["labUnit"] = {};
-                mergeRet(this.planCache[roomName].feedbacks["labUnit"], planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "labUnit", {
-                    tag : parseRet(this.planCache[roomName].feedbacks["labUnit"]["tag"]) || options.structureConstruct,
-                    build : parseRet(this.planCache[roomName].feedbacks["labUnit"]["build"]) || (options.objectDestroy),
-                    road : parseRet(this.planCache[roomName].feedbacks["labUnit"]["road"]) || (options.objectDestroy),
+                if (!this.planCache[roomName].feedbacks["labUnit"]) this.planCache[roomName].feedbacks["labUnit"] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
+                this.planCache[roomName].feedbacks["labUnit"].Merge(planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "labUnit", {
+                    tag : parseResponse(this.planCache[roomName].feedbacks["labUnit"].Pick("tag")) || options.structureConstruct,
+                    build : parseResponse(this.planCache[roomName].feedbacks["labUnit"].Pick("build")) || options.objectDestroy,
+                    road : parseResponse(this.planCache[roomName].feedbacks["labUnit"].Pick("road")) || options.objectDestroy,
                     num : 1,
                     linkedUnits : ["centralSpawn"],
                     writeToMemory : true,
                     readFromMemory : true
                 }));
-                doneRet(this.planCache[roomName].feedbacks["labUnit"]);
                 /* Plan for Extensions */
-                if (!this.planCache[roomName].feedbacks[`extensionUnit_${0}`]) this.planCache[roomName].feedbacks[`extensionUnit_${0}`] = {};
-                mergeRet(this.planCache[roomName].feedbacks[`extensionUnit_${0}`], planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "extensionUnit", {
-                    tag : parseRet(this.planCache[roomName].feedbacks[`extensionUnit_${0}`]["tag"]) || options.structureConstruct,
-                    build : parseRet(this.planCache[roomName].feedbacks[`extensionUnit_${0}`]["build"]) || (options.objectDestroy),
-                    road : parseRet(this.planCache[roomName].feedbacks[`extensionUnit_${0}`]["road"]) || (options.objectDestroy),
+                if (!this.planCache[roomName].feedbacks[`extensionUnit_${0}`]) this.planCache[roomName].feedbacks[`extensionUnit_${0}`] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
+                this.planCache[roomName].feedbacks[`extensionUnit_${0}`].Merge(planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "extensionUnit", {
+                    tag : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${0}`].Pick("tag")) || options.structureConstruct,
+                    build : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${0}`].Pick("build")) || options.objectDestroy,
+                    road : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${0}`].Pick("road")) || options.objectDestroy,
                     num : 1,
                     linkedUnits : ["centralTransfer"],
                     writeToMemory : true,
                     readFromMemory : true,
                     unitTypeAlias : `extensionUnit_${0}`
                 }));
-                doneRet(this.planCache[roomName].feedbacks[`extensionUnit_${0}`]);
             }
             if (level >= 5) {
                 /* Plan for Extensions */
-                if (!this.planCache[roomName].feedbacks[`extensionUnit_${1}`]) this.planCache[roomName].feedbacks[`extensionUnit_${1}`] = {};
-                mergeRet(this.planCache[roomName].feedbacks[`extensionUnit_${1}`], planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "extensionUnit", {
-                    tag : parseRet(this.planCache[roomName].feedbacks[`extensionUnit_${1}`]["tag"]) || options.structureConstruct,
-                    build : parseRet(this.planCache[roomName].feedbacks[`extensionUnit_${1}`]["build"]) || (options.objectDestroy),
-                    road : parseRet(this.planCache[roomName].feedbacks[`extensionUnit_${1}`]["road"]) || (options.objectDestroy),
+                if (!this.planCache[roomName].feedbacks[`extensionUnit_${1}`]) this.planCache[roomName].feedbacks[`extensionUnit_${1}`] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
+                this.planCache[roomName].feedbacks[`extensionUnit_${1}`].Merge(planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "extensionUnit", {
+                    tag : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${1}`].Pick("tag")) || options.structureConstruct,
+                    build : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${1}`].Pick("build")) || options.objectDestroy,
+                    road : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${1}`].Pick("road")) || options.objectDestroy,
                     num : 1,
                     linkedUnits : ["centralTransfer"],
                     writeToMemory : true,
                     readFromMemory : true,
                     unitTypeAlias : `extensionUnit_${1}`
                 }));
-                doneRet(this.planCache[roomName].feedbacks[`extensionUnit_${1}`]);
                 /* Plan for Extensions */
-                if (!this.planCache[roomName].feedbacks[`extensionUnit_${2}`]) this.planCache[roomName].feedbacks[`extensionUnit_${2}`] = {};
-                mergeRet(this.planCache[roomName].feedbacks[`extensionUnit_${2}`], planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "extensions", {
-                    tag : parseRet(this.planCache[roomName].feedbacks[`extensionUnit_${2}`]["tag"]) || options.structureConstruct,
-                    build : parseRet(this.planCache[roomName].feedbacks[`extensionUnit_${2}`]["build"]) || (options.objectDestroy),
-                    road : parseRet(this.planCache[roomName].feedbacks[`extensionUnit_${2}`]["road"]) || (options.objectDestroy),
+                if (!this.planCache[roomName].feedbacks[`extensionUnit_${2}`]) this.planCache[roomName].feedbacks[`extensionUnit_${2}`] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
+                this.planCache[roomName].feedbacks[`extensionUnit_${2}`].Merge(planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "extensions", {
+                    tag : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${2}`].Pick("tag")) || options.structureConstruct,
+                    build : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${2}`].Pick("build")) || options.objectDestroy,
+                    road : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${2}`].Pick("road")) || options.objectDestroy,
                     num : 12,
                     writeToMemory : true,
                     readFromMemory : true,
                     unitTypeAlias : `extensionUnit_${2}`
                 }));
-                doneRet(this.planCache[roomName].feedbacks[`extensionUnit_${2}`]);
                 /* Plan for Container of Mineral */
-                if (!this.planCache[roomName].feedbacks["harvestMineral"]) this.planCache[roomName].feedbacks["harvestMineral"] = {};
-                if (parseRet(this.planCache[roomName].feedbacks["harvestMineral"][Game.rooms[roomName].mineral.id]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["harvestMineral"][Game.rooms[roomName].mineral.id] = planForAroundOverlapContainer(Game.rooms[roomName].mineral, "forMineral");
-                doneRet(this.planCache[roomName].feedbacks["harvestMineral"]);
+                if (!this.planCache[roomName].feedbacks["harvestMineral"]) this.planCache[roomName].feedbacks["harvestMineral"] = new Response(Response.prototype.PLACE_HOLDER);
+                if (parseResponse(this.planCache[roomName].feedbacks["harvestMineral"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["harvestMineral"].Feed(planer.PlanForAroundOverlapContainer(Game.rooms[roomName].mineral, "forMineral", true));
             }
             if (level >= 6) {
                 /** @type {Mineral} */
@@ -1900,8 +1983,6 @@ class Map {
             if (level >= 8) {
                 
             }
-            // DEBUG
-            // console.log(JSON.stringify(planer.FetchRoomPlannedStructures(roomName, STRUCTURE_SPAWN)))
         }
     }
     constructor() {
@@ -1910,16 +1991,11 @@ class Map {
         /** @type { {[roomName : string] : number} } */
         this.sortedDistancesExpiration  = {};
         /**
-         * @typedef { {ret : boolean | "need_to_call_again", recallTick : number, null} } ComponentRet
-         * @type { {[roomName : string] : { roomType : string, controllerLevel : number, feedbacks : { [unitName : string] : {tag : ComponentRet, build : ComponentRet, road : ComponentRet}} }} }
+         * @type { {[roomName : string] : { roomType : string, controllerLevel : number, feedbacks : { [unitName : string] : {[module : string] : Response} | ResponsePatch} }} }
          */
         this.planCache                  = {};
         /** @type { {[roomName : string] : {controllerLevel : number, remoteRoomNum : number}} } */
         this.remoteMineCache            = {};
-        /** @type { {[roomName : string] : {[pos : string] : Id<Creep | PowerCreep>}} */
-        this.registeredPoses            = {};
-        /** @type { {[id : string] : Array<RoomPosition>} } */
-        this.creep2pos                  = {};
         /** @type { {[roomName : string] : Array<Array<number>>} } */
         this.room2distanceFromCenter    = {};
         /** @type { {[roomName : string] : RoomPosition} } */
@@ -1930,6 +2006,14 @@ class Map {
         this.roomVisited                = {};
         /** @type { Set<string> } */
         this.roomRecorded               = new Set();
+        /** @type { Set<string> } */
+        this.highwayRoomRecorded        = new Set();
+        /** @type { Set<string> } */
+        this.SKRoomRecorded             = new Set();
+        /** @type { Set<string> } */
+        this.PortalRoomRecorded         = new Set();
+        /** @type { Set<string> } */
+        this.NormalRoomRecorded         = new Set();
         /** @type { {[origin : string] : {[roomName : string] : {distance : number, fromRoomName : string}}} } */
         this.disFromRoom                = {};
         /** @type { {[origin : string] : number} } */
@@ -1947,9 +2031,9 @@ class Map {
 const _Map = new Map();
 
 profiler.registerClass(Unit, "Unit");
-profiler.registerObject(mapMonitor, "MapMonitor");
-profiler.registerObject(planer, "Planer");
-profiler.registerObject(_Map, "Map");
+profiler.registerClass(MapMonitor, "MapMonitor");
+profiler.registerClass(Planer, "Planer");
+profiler.registerClass(Map, "Map");
 
 /** @type {import("./lucy.app").AppLifecycleCallbacks} */
 const MapPlugin = {

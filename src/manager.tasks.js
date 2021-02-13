@@ -209,6 +209,13 @@ class TaskConstructor {
             if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", allowToHarvest : true, confinedInRoom : false});
             return resource;
         }.bind(constructionSitePos);
+        /**
+         * @param {number} amount
+         * @param {ResourceConstant} resourceType
+         */
+        const requestStoreResources = function(amount, resourceType) {
+            return global.ResourceManager.Query(this, resourceType, amount, {type : "store"});
+        }.bind(constructionSitePos);
         if (!requestResource(1)) {
             Lucy.Timer.add(Game.time + getCacheExpiration(NEXT_CONSTRUCTION_TIMEOUT, NEXT_CONSTRUCTION_OFFSET), this.BuildTask, this, [constructionSiteId, constructionSitePos], `Build ${constructionSiteId} of Room ${constructionSitePos.roomName} because of shortage of energy`);
             return;
@@ -220,7 +227,7 @@ class TaskConstructor {
                     /** Lacking Resources @TODO */
                     return "working";
                 },
-                run : Builders.BuildFetchResourceAndDoSomethingProject(RESOURCE_ENERGY, requestResource, (creep) => creep.store.getFreeCapacity(RESOURCE_ENERGY), {targetId :  constructionSiteId, targetPos : constructionSitePos}, 3, Creep.prototype.build)
+                run : Builders.BuildFetchResourceAndDoSomethingProject(RESOURCE_ENERGY, requestResource, requestStoreResources, (creep) => creep.store.getFreeCapacity(RESOURCE_ENERGY), {targetId :  constructionSiteId, targetPos : constructionSitePos}, 3, Creep.prototype.build)
             },
             taskData : {constructionSitePos : constructionSitePos}
         });
@@ -250,6 +257,13 @@ class TaskConstructor {
             if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", allowToHarvest : true, confinedInRoom : false});
             return resource;
         }.bind(structurePos);
+        /**
+         * @param {number} amount
+         * @param {ResourceConstant} resourceType
+         */
+        const requestStoreResources = function(amount, resourceType) {
+            return global.ResourceManager.Query(this, resourceType, amount, {type : "store"});
+        }.bind(structurePos);
         if (!requestResource(1)) {
             Lucy.Timer.add(Game.time + getCacheExpiration(NEXT_REPAIR_TIMEOUT, NEXT_REPAIR_OFFSET), this.RepairTask, this, [structureId, structurePos, hitsUpperBound], `Repair ${structureId} of Room ${structurePos.roomName} because of shortage of energy`);
             return;
@@ -269,7 +283,7 @@ class TaskConstructor {
                     /** Lacking Resources @TODO */
                     return "working";
                 },
-                run : Builders.BuildFetchResourceAndDoSomethingProject(RESOURCE_ENERGY, requestResource, (creep) => creep.store.getFreeCapacity(RESOURCE_ENERGY), {targetId : structureId, targetPos : structurePos}, 3, Creep.prototype.repair)
+                run : Builders.BuildFetchResourceAndDoSomethingProject(RESOURCE_ENERGY, requestResource, requestStoreResources, (creep) => creep.store.getFreeCapacity(RESOURCE_ENERGY), {targetId : structureId, targetPos : structurePos}, 3, Creep.prototype.repair)
             },
             taskData : {hitsUpperBound : hitsUpperBound, structurePos : structurePos}
         });
@@ -308,6 +322,13 @@ class TaskConstructor {
                 .set("worker", {key : "number", value : [1, maximumWorkerAmount]})
                 .set("worker", {key : "profit", value : profitFunc});
         }
+        /**
+         * @param {number} amount
+         * @param {ResourceConstant} resourceType
+         */
+        const requestStoreResources = function(amount, resourceType) {
+            return global.ResourceManager.Query(this, resourceType, amount, {type : "store"});
+        }.bind(structure.pos);
         this.Construct({taskName : `[${structure.room.name}:Filling${resourceType}]`, taskType : taskType}, {mountRoomName : structure.room.name, mountObj : structure}, roleDescriptor, {
             funcs: {
                 selfCheck : function() {
@@ -323,7 +344,7 @@ class TaskConstructor {
                     }
                     return "working";
                 },
-                run : Builders.BuildFetchResourceAndDoSomethingProject(resourceType, requestResource, (creep) => creep.store.getFreeCapacity(resourceType), structure, 1, Creep.prototype.transfer, [resourceType])
+                run : Builders.BuildFetchResourceAndDoSomethingProject(resourceType, requestResource, requestStoreResources, (creep) => creep.store.getFreeCapacity(resourceType), structure, 1, Creep.prototype.transfer, [resourceType])
             },
             taskData : {storeCheckFunc : storeCheckFunc, triggerFillingFunctionName : triggerFillingFunctionName, resourceType : resourceType, requestResource : requestResource},
             taskKey : `FILLING_${resourceType}`
@@ -382,9 +403,10 @@ class TaskConstructor {
     }
     /**
      * @param {string} targetRoom
+     * @param { {default? : boolean} } [options = {}]
      * @returns {boolean}
      */
-    ScoutTask(targetRoom) {
+    ScoutTask(targetRoom, options = {}) {
         const status = Game.map.getRoomStatus(targetRoom).status;
         if (status === "closed") {
             global.Map.SetAsUnreachable(targetRoom);
@@ -410,7 +432,7 @@ class TaskConstructor {
             .set("worker", {key : "workingTicks", value : () => 0})
             .set("worker", {key : "spawnConstraint", value : {tag : "scoutPatch", mountRoomSpawnOnly : true}})
             .set("worker", {key : "number", value : [1,1]});
-        this.Construct({taskName : `[Scout:${roomName}->${targetRoom}]`, taskType : "Scout"}, {mountRoomName : roomName, mountObj : {id : null}}, roleDescriptor, {
+        this.Construct({taskName : `[Scout:${roomName}->${targetRoom}]`, taskType : options.default? "default" : "Scout"}, {mountRoomName : roomName, mountObj : {id : null}}, roleDescriptor, {
             funcs : {
                 selfCheck : function() {
                     if (this.taskData[ERR_NO_PATH]) {
@@ -600,10 +622,17 @@ class TaskManager {
     Run() {
         for (const roomName in this.room2tag2tasks) {
             for (const tag in this.room2tag2tasks[roomName]) {
+                // const tagStartTime = Game.cpu.getUsed();
+                // const singleTime = [];
                 // this.updateTasks is cancelled here.
                 // this.updateTasks(roomName, tag);
                 /* `waiting` task still could Run. */
-                for (const task of this.room2tag2tasks[roomName][tag]) task.Run();
+                for (const task of this.room2tag2tasks[roomName][tag]) {
+                    // const startTime = Game.cpu.getUsed();
+                    task.Run();
+                    // if (Game.cpu.getUsed() - startTime > 0) singleTime.push({name : task.name, tick : Game.cpu.getUsed() - startTime});
+                }
+                // console.log(`${roomName}:${tag}:${Game.cpu.getUsed() - tagStartTime}:${JSON.stringify(singleTime)}`);
             }
         }
     }
@@ -621,7 +650,7 @@ class TaskManager {
     }
 };
 const _taskManager = new TaskManager();
-profiler.registerObject(_taskManager, 'TaskManager');
+profiler.registerClass(TaskManager, 'TaskManager');
 const _taskConstructor = new TaskConstructor();
 /** @type {import("./lucy.app").AppLifecycleCallbacks} */
 const TaskManagerPlugin = {

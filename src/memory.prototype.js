@@ -3,8 +3,6 @@
  * Modified Version from @author warinternal
  * @source https://github.com/screepers/screeps-snippets/blob/master/src/misc/JavaScript/OwnedStructure%20Memory.js
  */
-/** @type {Array<import("./lucy.app").AnyClass, import("./lucy.app").AnyClass>} */
-const mountList = [];
 const memObjKeyPair = [
     [OwnedStructure     , "structures"],
     [Source             , "sources"],
@@ -65,9 +63,9 @@ const GCPlugin = {
         }
         if ((Game.time + random(0, 10, false)) % Lucy.Rules.memoryRecycleInterval.deposit === 0) {
             for (var id in Memory.deposits) {
-                if (Game.time - Memory.deposits[id][createdTick] < Lucy.Rules.memoryRecycleInterval.deposit) continue;
+                if (Game.time - Memory.deposits[id][CREATED_TICK] < Lucy.Rules.memoryRecycleInterval.deposit) continue;
                 /** Compatible with the refreshness character of Deposit */
-                if (Game.getObjectById(id)) Memory.deposits[id][createdTick] = Game.time;
+                if (Game.getObjectById(id)) Memory.deposits[id][CREATED_TICK] = Game.time;
                 else {
                     /* Clean Remained Data in Task */
                     Game.cleanTaskById(id);
@@ -77,7 +75,7 @@ const GCPlugin = {
         }
         if ((Game.time + random(0, 10, false)) % Lucy.Rules.memoryRecycleInterval.powerbank === 0) {
             for (var id in Memory.powerbanks) {
-                if (Game.time - Memory.powerbanks[id][createdTick] < Lucy.Rules.memoryRecycleInterval.powerbank) continue;
+                if (Game.time - Memory.powerbanks[id][CREATED_TICK] < Lucy.Rules.memoryRecycleInterval.powerbank) continue;
                 /** Compatible with the vanishing machanism of PowerBank */
                 delete Memory.powerbanks[id];
                 /* Clean Remained Data in Task */

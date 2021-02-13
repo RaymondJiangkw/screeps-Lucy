@@ -419,7 +419,11 @@ class LogPool {
     /** @returns {import("./lucy.app").AppLifecycleCallbacks} */
     get Plugin() {
         return {
-            tickStart : () => {
+            tickEnd : () => {
+                /**
+                 * This should be put after AutoPlan, because of its dependence on tag.
+                 * Latency of 1 tick is allowed.
+                 */
                 let event = undefined;
                 while (event = this.Pool.pop()) {
                     /* Trigger ConstructionSites */
@@ -441,8 +445,6 @@ class LogPool {
                         });
                     }
                 }
-            },
-            tickEnd : () => {
                 let hotEvent = null;
                 while ((hotEvent = this.HotPoolTop)) {
                     // console.log(hotEvent.Type, hotEvent.Status, hotEvent.Obj);

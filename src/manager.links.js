@@ -85,7 +85,7 @@ function FetchTag(type) {
     else if (type === "spawn") return global.Lucy.Rules.arrangements.SPAWN_ONLY;
 }
 const _linkManager = new LinkManager();
-profiler.registerObject(_linkManager, "LinkManager");
+profiler.registerClass(LinkManager, "LinkManager");
 /** @type {import("./lucy.app").AppLifecycleCallbacks} */
 const LinkManagerPlugin = {
     init : () => global.LinkManager = _linkManager,

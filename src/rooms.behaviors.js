@@ -569,6 +569,8 @@ class MyRoom extends Room {
         if (!this.memory.sourcePoses) this.memory.sourcePoses = this.find(FIND_SOURCES).map(s => s.pos);
         if (!this.memory.sourceCapacities) this.memory.sourceCapacities = this.find(FIND_SOURCES).map(s => s.energyCapacity > SOURCE_ENERGY_CAPACITY ? s.energyCapacity : SOURCE_ENERGY_CAPACITY);
         if (!this.memory.mineralType) this.memory.mineralType = this.mineral ? this.mineral.mineralType : null;
+        /** Add to global.Map */
+        global.Map.updateAdjacentRooms(this.name);
     }
     NeutralTrigger() {
         this["roads"].forEach(r => r.triggerRepairing());
@@ -576,7 +578,7 @@ class MyRoom extends Room {
         this.find(FIND_CONSTRUCTION_SITES).forEach(c => c.triggerBuilding());
     }
     CheckSpawnIndependent() {
-        if (this.controller.level >= 4 && this.spawns.length > 0 && global.MapMonitorManager.FetchStructureWithTag(this.name, "forSource", STRUCTURE_CONTAINER).length > 0) this.memory.rejectHelp = true;
+        if (this.controller.level >= 3 && this.spawns.length > 0 && global.MapMonitorManager.FetchStructureWithTag(this.name, "forSource", STRUCTURE_CONTAINER).length > 0) this.memory.rejectHelp = true;
     }
 }
 function mount() {
@@ -624,7 +626,8 @@ const RoomPlugin = {
             if (isMyRoom(Game.rooms[roomName])) {
                 Game.rooms[roomName].init();
                 global.Map.AutoPlan(roomName);
-                global.Map.RemoteMine(roomName);
+                /** @TODO */
+                // global.Map.RemoteMine(roomName);
             } else {
                 /** Trigger Tasks in Neutral Room */
                 if (Game.rooms[roomName].becomeVisible && Game.rooms[roomName].isResponsible) Game.rooms[roomName].NeutralTrigger();

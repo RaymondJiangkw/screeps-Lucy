@@ -1,6 +1,12 @@
 /**
  * To start using Traveler, require it in main.js:
  * Example: var Traveler = require('Traveler.js');
+ * 
+ * @typedef {{path: RoomPosition[], ops: number, cost: number, incomplete: boolean}} PathfinderReturn
+ * @typedef {{nextPos?: RoomPosition, pathfinderReturn?: PathfinderReturn, state?: TravelState, path?: string}} TravelToReturnData
+ * @typedef {{ignoreRoads?: boolean,ignoreCreeps?: boolean,ignoreStructures?: boolean,preferHighway?: boolean,highwayBias?: number,allowHostile?: boolean,allowSK?: boolean,range?: number,obstacles?: {pos: RoomPosition}[],roomCallback?: (roomName: string, matrix: CostMatrix) => CostMatrix | boolean,routeCallback?: (roomName: string) => number,returnData?: TravelToReturnData,restrictDistance?: number,useFindRoute?: boolean,maxOps?: number,movingTarget?: boolean,freshMatrix?: boolean,offRoad?: boolean,stuckValue?: number,maxRooms?: number,repath?: number,route?: {[roomName: string]: boolean},ensurePath?: boolean}} TravelToOptions
+ * @typedef {{x: number, y: number}} Coord
+ * @typedef {pos : RoomPosition} HasPos
  */
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
@@ -207,7 +213,7 @@ class Traveler {
      * find a path from origin to destination
      * @param origin
      * @param destination
-     * @param options
+     * @param {TravelToOptions} options
      * @returns {PathfinderReturn}
      */
     static findTravelPath(origin, destination, options = {}) {
@@ -587,3 +593,5 @@ Creep.prototype.travelTo = function (destination, options) {
 PowerCreep.prototype.travelTo = function (destination, options) {
     return Traveler.travelTo(this, destination, options);
 };
+
+module.exports = Traveler;

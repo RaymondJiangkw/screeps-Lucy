@@ -201,7 +201,8 @@ module.exports = {
      * @returns {Boolean}
      */
     isHarvestable : function(obj) {
-        if (obj.energyCapacity) return true; // Source
+        if (obj.structureType) return false; // Link still has energyCapacity
+        else if (obj.energyCapacity) return true; // Source
         else if (obj.mineralType) return true; // Mineral
         else if (obj.depositType) return true; // Deposit
         else return false;
@@ -467,11 +468,19 @@ module.exports = {
     },
     /**
      * @param {string} roomName
-     * @returns {"sideway" | "central" | "normal"}
+     * @returns {"highway" | "SK" | "portal" | "normal"}
      */
     decideRoomStatus(roomName) {
-        const x_y = roomNameToXY(roomName);
-        if ((x_y[0] >= 0 ? x_y[0] % 10 === 0 : -(x_y[0] + 1) % 10 === 0) || (x_y[1] >= 0 ? x_y[1] % 10 === 0 : -(x_y[1] + 1) % 10 === 0)) return "sideway";
+        parsed = /^[WE]([0-9]+)[NS]([0-9]+)$/.exec(roomName);
+        if (parsed[1] % 10 === 0 || parsed[2] % 10 === 0) return "highway";
+        let fMod = parsed[1] % 10;
+        let sMod = parsed[2] % 10;
+        let isSK = !(fMod === 5 && sMod === 5) &&
+            ((fMod >= 4) && (fMod <= 6)) &&
+            ((sMod >= 4) && (sMod <= 6));
+        if (isSK) return "SK";
+        if (fMod === 5 && sMod === 5) return "portal";
+        return "normal";
     },
     /**
      * @param {string} message
@@ -481,5 +490,28 @@ module.exports = {
         Game.notify(message);
     },
     PriorityQueue : PriorityQueue,
-    username : username
+    username : username,
+    StructureConstants : {
+        [STRUCTURE_EXTENSION]       : STRUCTURE_EXTENSION,
+        [STRUCTURE_RAMPART]         : STRUCTURE_RAMPART,
+        [STRUCTURE_ROAD]            : STRUCTURE_ROAD,
+        [STRUCTURE_SPAWN]           : STRUCTURE_SPAWN,
+        [STRUCTURE_LINK]            : STRUCTURE_LINK,
+        [STRUCTURE_WALL]            : STRUCTURE_WALL,
+        [STRUCTURE_KEEPER_LAIR]     : STRUCTURE_KEEPER_LAIR,
+        [STRUCTURE_CONTROLLER]      : STRUCTURE_CONTROLLER,
+        [STRUCTURE_STORAGE]         : STRUCTURE_STORAGE,
+        [STRUCTURE_TOWER]           : STRUCTURE_TOWER,
+        [STRUCTURE_OBSERVER]        : STRUCTURE_OBSERVER,
+        [STRUCTURE_POWER_BANK]      : STRUCTURE_POWER_BANK,
+        [STRUCTURE_POWER_SPAWN]     : STRUCTURE_POWER_SPAWN,
+        [STRUCTURE_EXTRACTOR]       : STRUCTURE_EXTRACTOR,
+        [STRUCTURE_LAB]             : STRUCTURE_LAB,
+        [STRUCTURE_TERMINAL]        : STRUCTURE_TERMINAL,
+        [STRUCTURE_CONTAINER]       : STRUCTURE_CONTAINER,
+        [STRUCTURE_NUKER]           : STRUCTURE_NUKER,
+        [STRUCTURE_FACTORY]         : STRUCTURE_FACTORY,
+        [STRUCTURE_INVADER_CORE]    : STRUCTURE_INVADER_CORE,
+        [STRUCTURE_PORTAL]          : STRUCTURE_PORTAL
+    }
 };

@@ -381,7 +381,10 @@ function giveControllerBehaviors() {
          * @type {(amount : number) => Source | StructureContainer | StructureStorage | StructureLink}
          */
         const requestResource = function (amount) {
-            let resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", key : Lucy.Rules.arrangements.UPGRADE_ONLY, allowToHarvest : false, confinedInRoom : true});
+            /**
+             * Since Link receives energy whenever it is exhausted, thus, even when energy in link is not enough for a creep, it is still worth being withdrawn first.
+             */
+            let resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", key : Lucy.Rules.arrangements.UPGRADE_ONLY, allowToHarvest : false, confinedInRoom : true, ensureAmount : false});
             if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", allowToHarvest : true, confinedInRoom : false});
             return resource;
         }.bind(this);
@@ -390,6 +393,13 @@ function giveControllerBehaviors() {
             Lucy.Timer.add(nextTaskStartedTick, this.triggerUpgrading, this.id, [], `Upgrading Controller of Room ${this.room.name} because of shortage of energy`);
             return;
         }
+        /**
+         * @param {number} amount
+         * @param {ResourceConstant} resourceType
+         */
+        const requestStoreResources = function(amount, resourceType) {
+            return global.ResourceManager.Query(this, resourceType, amount, {type : "store"});
+        }.bind(this);
         /* Use Data to Determine Body */
         const energyConsumptionPerUnitPerTick = 1;
         new Task(`[${this.room.name}:ControllerUpgrade]`, this.pos.roomName, this, new TaskDescriptor("default", {
@@ -429,7 +439,7 @@ function giveControllerBehaviors() {
                 }
                 return "working";
             },
-            run : Builders.BuildFetchResourceAndDoSomethingProject(RESOURCE_ENERGY, requestResource, (creep) => creep.store.getFreeCapacity(RESOURCE_ENERGY), this, 3, Creep.prototype.upgradeController)
+            run : Builders.BuildFetchResourceAndDoSomethingProject(RESOURCE_ENERGY, requestResource, requestStoreResources, (creep) => creep.store.getFreeCapacity(RESOURCE_ENERGY), this, 3, Creep.prototype.upgradeController)
         }, {requestResource : requestResource, startedTick : Game.time, lastingTicks : upgradePeriodTicks});
     }
 }
@@ -524,15 +534,19 @@ function giveContainerBehaviors() {
                 /** @type {StructureContainer} */
                 const container = Game.getObjectById(this.taskData.containerId);
                 if (!container) return "dead";
+                /**
+                 * For Sources, since its regeneration is relatively quick.
+                 * It is plausible to keep task run.
+                 */
                 /** @type {Source} */
-                const source = this.mountObj;
+                /*const source = this.mountObj;
                 if (isSource(source)) {
                     if (source.energy === 0) {
                         Lucy.Timer.add(Game.time + source.ticksToRegeneration, container.triggerHarvesting, container.id, [], `Harvesting in room ${source.room.name} for ${source}`);
                         console.log(`<p style="color:gray;display:inline;">[Log]</p> "Harvest ${source}" task in ${source.room.name} finished. New one is scheduled at ${Game.time + source.ticksToRegeneration}.`);
                         return "dead";
                     }
-                }
+                }*/
                 /** @type {Mineral} */
                 const mineral = this.mountObj;
                 if (isMineral(mineral)) {
@@ -666,7 +680,7 @@ function giveStorageBehaviors() {
             let resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", confinedInRoom : true, allowToHarvest : false, allowStructureTypes : [STRUCTURE_CONTAINER]});
             return resource;
         }.bind(this);
-        TaskConstructor.RequestTask(this, RESOURCE_ENERGY, "triggerFillingEnergy", CONTAINER_CAPACITY, "default", Infinity, requestResource, requestResource, () => 0, function (object) {
+        TaskConstructor.RequestTask(this, RESOURCE_ENERGY, "triggerFillingEnergy", CONTAINER_CAPACITY, "default", 1, requestResource, requestResource, () => 0, function (object) {
             if (this.EmployeeAmount === 0) return getPrice(this.taskData.resourceType) * object.store.getCapacity();
             else return -Infinity;
         }, (storage, resourceType) => storage.store.getUsedCapacity(resourceType) / storage.store.getCapacity() >= global.Lucy.Rules.storage[resourceType] || storage.store.getFreeCapacity() <= global.Lucy.Rules.storage["collectSpareCapacity"]);
@@ -707,9 +721,9 @@ function giveRampartBehaviors() {
             if (!rampart) {
                 const { EventObjectDestroy } = require('./lucy.log');
                 global.Lucy.Logs.Push(new EventObjectDestroy(pos, STRUCTURE_RAMPART, "Structure"));
-            } else Lucy.Timer.add(Game.time + rampart.ticksToDecay + 1, DecayDetection, undefined, [rampartId, pos], `Rampart Decay Detection for ${rampart}`);
+            } else Lucy.Timer.add(Game.time + Math.ceil(rampart.hits / RAMPART_DECAY_AMOUNT) * RAMPART_DECAY_TIME, DecayDetection, undefined, [rampartId, pos], `Rampart Decay Detection for ${rampart}`);
         };
-        Lucy.Timer.add(Game.time + this.ticksToDecay + 1, DecayDetection, undefined, [this.id, this.pos], `Rampart Decay Detection for ${this}`);
+        Lucy.Timer.add(Game.time + Math.ceil(this.hits / RAMPART_DECAY_AMOUNT) * RAMPART_DECAY_TIME, DecayDetection, undefined, [this.id, this.pos], `Rampart Decay Detection for ${this}`);
     };
     /**
      * Strengthen Rampart does not belong to `repair` task, however.
@@ -735,6 +749,13 @@ function giveRampartBehaviors() {
             Lucy.Timer.add(NEXT_START_TICK, this.triggerRepairing, this.id, [], `Repairing for ${this} because of shortage of energy`);
             return;
         }
+        /**
+         * @param {number} amount
+         * @param {ResourceConstant} resourceType
+         */
+        const requestStoreResources = function(amount, resourceType) {
+            return global.ResourceManager.Query(this, resourceType, amount, {type : "store"});
+        }.bind(this);
         /* Use Data to Determine Body */
         const availableEnergy = global.ResourceManager.Sum(this.pos.roomName, RESOURCE_ENERGY, {type : "retrieve", allowToHarvest : false, key : "default"});
         const energyConsumptionPerUnitPerTick = 1;
@@ -768,7 +789,7 @@ function giveRampartBehaviors() {
                 /** Lacking Resources */
                 return "working";
             },
-            run : Builders.BuildFetchResourceAndDoSomethingProject(RESOURCE_ENERGY, requestResource, (creep) => creep.store.getFreeCapacity(RESOURCE_ENERGY), this, 3, Creep.prototype.repair)
+            run : Builders.BuildFetchResourceAndDoSomethingProject(RESOURCE_ENERGY, requestResource, requestStoreResources, (creep) => creep.store.getFreeCapacity(RESOURCE_ENERGY), this, 3, Creep.prototype.repair)
         });
     };
 }

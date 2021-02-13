@@ -87,16 +87,18 @@ class Project {
             this.pointers[object.id] = {layer : 0, signal : OK};
             this.layers[0][OK].Feed(object, this.attachedData[object.id] || {});
         }
-        // console.log(`<p style="display:inline;color:yellow;">Start Pos</p> for ${object} : ${this.pointers[object.id].layer}->${this.pointers[object.id].signal}`);
+        // console.log(`<p style="display:inline;color:yellow;">Start Pos</p> ${task.name} for ${object} : ${this.pointers[object.id].layer}->${this.pointers[object.id].signal}`);
+        // let startTime = Game.cpu.getUsed();
         /**
          * @type {null | Signal}
          */
         let ret = this.layers[this.pointers[object.id].layer][this.pointers[object.id].signal].Run(object, task);
-        if (!ret) {
-            // console.log(`${object} : ${this.pointers[object.id].layer}->${this.pointers[object.id].signal} : ${JSON.stringify(ret)}`);
-        }
+        // if (!ret) {
+            // console.log(`${object} : ${this.pointers[object.id].layer}->${this.pointers[object.id].signal} : ${JSON.stringify(ret)} : ${(Game.cpu.getUsed() - startTime).toFixed(3)}`);
+        // }
         while (ret) {
-            // console.log(`${object} : ${this.pointers[object.id].layer}->${this.pointers[object.id].signal} : ${JSON.stringify(ret)}`);
+            //console.log(`${object} : ${this.pointers[object.id].layer}->${this.pointers[object.id].signal} : ${JSON.stringify(ret)} : ${(Game.cpu.getUsed() - startTime).toFixed(3)}`);
+            // startTime = Game.cpu.getUsed();
             /* Cycle Condition */
             if (this.pointers[object.id].layer === this.layers.length - 1 && this.lastLayer2FirstLayerSignals.indexOf(ret.signal) !== -1) {
                 this.pointers[object.id].layer = 0;
@@ -198,6 +200,7 @@ function ConstructNullComponent() {
     return component;
 }
 const ERR_CONTAIN_IRRELATED_RESOURCES = 1;
+const ARRAY_NOT_EMPTY = 2;
 /**
  * @param {Array<ResourceConstant} allowedResourceTypes
  */
@@ -313,6 +316,28 @@ function ConstructFetchResourceComponent(fetchFunc, amountFunc, resourceType) {
     return component;
 }
 /**
+ * @param {(amount : number, resourceType : ResourceConstant) => StructureContainer | StructureStorage | StructureTerminal | StructureFactory} fetchFunc
+ * @param {(object : import("./task.prototype").GameObject, resourceType : ResourceConstant) => number} amountFunc
+ * @param {ResourceConstant} [resourceType] Optional, unless fixed.
+ */
+function ConstructFetchStoreComponent(fetchFunc, amountFunc, resourceType) {
+    const component = new Component(function(object, task) {
+        const attachedData = this.attachedData[object.id] || {};
+        const amount = amountFunc(object, resourceType || attachedData.resourceType);
+        const target = fetchFunc(amount, resourceType || attachedData.resourceType);
+        if (!target) return ConstructSignal(ERR_NOT_FOUND, attachedData);
+        else {
+            attachedData.targetId = target.id;
+            attachedData.amount = amount;
+            attachedData.resourceType = resourceType || attachedData.resourceType;
+            attachedData.targetPos = target.pos;
+            return ConstructSignal(OK, attachedData);
+        }
+    });
+    profiler.registerObject(component, `[Component FetchStore]`);
+    return component;
+}
+/**
  * @param {ResourceConstant} [resourceType]
  */
 function ConstructWithdrawHarvestResourceComponent(resourceType) {
@@ -323,7 +348,7 @@ function ConstructWithdrawHarvestResourceComponent(resourceType) {
         if (!target) return ConstructSignal(ERR_INVALID_ARGS, attachedData);
         if (!object.store) return ConstructSignal(ERR_INVALID_ARGS, attachedData);
         const checkForFreeStore = require('./util').checkForFreeStore;
-        if (checkForFreeStore(object) === 0) return ConstructSignal(OK, attachedData);
+        // if (checkForFreeStore(object) === 0) return ConstructSignal(OK, attachedData);
         if (checkForStore(target, attachedData.resourceType || resourceType) === 0) return ConstructSignal(ERR_NOT_ENOUGH_RESOURCES, attachedData);
         if (isHarvestable(target)) {
             object.harvest(target);
@@ -387,6 +412,36 @@ function ConstructStaticTargetComponent(targetId, key = "targetId") {
     return ConstructStaticDataComponent(targetId, key);
 }
 /**
+ * @param {string} key
+ */
+function ConstructArrayLengthCheckComponent(key) {
+    const component = new Component(function(object, task) {
+        const attachedData = this.attachedData[object.id] || {};
+        if (!attachedData[key] || !Array.isArray(attachedData[key])) return ConstructSignal(ERR_INVALID_ARGS, attachedData);
+        if (attachedData[key].length === 0) return ConstructSignal(OK, attachedData);
+        else return ConstructSignal(ARRAY_NOT_EMPTY, attachedData);
+    });
+    profiler.registerObject(component, `[Component ArrayLengthCheck]`);
+    return component;
+}
+/**
+ * @param {string} key
+ * @param {string} targetKey
+ */
+function ConstructArrayPopComponent(key, targetKey) {
+    const component = new Component(function(object, task) {
+        const attachedData = this.attachedData[object.id] || {};
+        if (!attachedData[key] || !Array.isArray(attachedData[key]) || attachedData[key].length === 0) return ConstructSignal(ERR_INVALID_ARGS, attachedData);
+        else {
+            attachedData[targetKey] = attachedData[key].pop();
+            attachedData["params"] = [attachedData[targetKey]];
+            return ConstructSignal(OK, attachedData);
+        }
+    });
+    profiler.registerObject(component, `[Component ArrayPop]`);
+    return component;
+}
+/**
  * @param {Function} func
  * @param {string} [targetKey = "targetId"]
  * @param {string} [paramKey = "params"]
@@ -406,10 +461,30 @@ function ConstructDoSomethingComponent(func, targetKey = "targetId", paramKey = 
 /**
  * Create a Project to deposit irrelevant resources.
  * Project assumes attachedData contains { containedResourceTypes }.
- * @param {(amount : number, resourceType : ResourceConstant) => StructureContainer | StructureStorage | StructureLink} fetchFunc
+ * Expect @property { ResourceConstant[] } containedResourceTypes in attachedData
+ * @param {(amount : number, resourceType : ResourceConstant) => StructureContainer | StructureStorage | StructureTerminal | StructureFactory} fetchFunc
  */
 function BuildDepositIrrelevantResourcesProject(fetchFunc) {
-
+    const project = new Project()
+                        .InsertLayer({
+                            [OK] : new Project()
+                                        .InsertLayer({[OK] : ConstructArrayLengthCheckComponent("containedResourceTypes")})
+                                        .InsertLayer({[ARRAY_NOT_EMPTY] : ConstructArrayPopComponent("containedResourceTypes", "resourceType")})
+                                        .InsertLayer({[OK] : ConstructFetchStoreComponent(fetchFunc, (object, resourceType) => object.store[resourceType])})
+                                        .InsertLayer({[OK] : BuildGoToDoSomethingProject(1, Creep.prototype.transfer)})
+                                        .Cyclize(OK)
+                        })
+                        .InsertLayer({
+                            [OK] : ConstructEmptyComponent(OK),
+                            [ERR_NOT_FOUND] : new Project()
+                                                    .InsertLayer({[OK] : ConstructStoreFullCheckComponent()})
+                                                    .InsertLayer({
+                                                        [OK] : ConstructEmptyComponent(ERR_FULL),
+                                                        [ERR_NOT_ENOUGH_RESOURCES] : ConstructEmptyComponent(OK)
+                                                    })
+                        });
+    profiler.registerObject(project, `[Project DepositIrrelevantResources]`);
+    return project;
 }
 /**
  * @param {number} [dist = 1]
@@ -426,15 +501,20 @@ function BuildGoToDoSomethingProject(dist, func) {
 /**
  * @param { ResourceConstant } resourceType
  * @param {(amount : number, resourceType : ResourceConstant) => Source | StructureContainer | StructureStorage | StructureLink} fetchFunc
+ * @param {(amount : number, resourceType : ResourceConstant) => StructureContainer | StructureStorage | StructureTerminal | StructureFactory} storeFetchFunc
  * @param {(object : import("./task.prototype").GameObject) => number } amountFunc
  * @param {import("./task.prototype").GameObject | { targetId : Id<any>, targetPos : RoomPosition }} target
  * @param {number} [dist = 1] Distance between object and target
  * @param {Function} func
  * @param {any[]} [params = []]
  */
-function BuildFetchResourceAndDoSomethingProject(resourceType, fetchFunc, amountFunc, target, dist = 1, func, params = []) {
+function BuildFetchResourceAndDoSomethingProject(resourceType, fetchFunc, storeFetchFunc, amountFunc, target, dist = 1, func, params = []) {
     const project = new Project()
                         .InsertLayer({[OK] : ConstructStoreCheckComponent([resourceType])})
+                        .InsertLayer({
+                            [OK] : ConstructEmptyComponent(OK),
+                            [ERR_CONTAIN_IRRELATED_RESOURCES] : BuildDepositIrrelevantResourcesProject(storeFetchFunc)
+                        })
                         .InsertLayer({[OK] : ConstructStoreEmptyCheckComponent(resourceType)})
                         .InsertLayer({
                             [ERR_FULL] : ConstructEmptyComponent(OK),

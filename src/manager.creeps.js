@@ -173,7 +173,7 @@ class CreepSpawnManager {
     }
 };
 const _creepSpawnManager = new CreepSpawnManager();
-profiler.registerObject(_creepSpawnManager, "CreepSpawnManager");
+profiler.registerClass(CreepSpawnManager, "CreepSpawnManager");
 /** @type {import("./lucy.app").AppLifecycleCallbacks} */
 const CreepSpawnManagerPlugin = {
     init : () => global.CreepSpawnManager = _creepSpawnManager,

@@ -405,6 +405,7 @@ class Task {
             calcCommutingTicks: () => Infinity
         });
         if (typeof funcs.run === "function") funcs.run = profiler.registerFN(funcs.run, name);
+        this.name = name;
         /**
          * @private
          * Double-Bind

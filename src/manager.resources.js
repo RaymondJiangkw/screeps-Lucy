@@ -238,11 +238,11 @@ class ResourceManager {
      * @param {import("./task.prototype").GameObject | RoomPosition} subject
      * @param {ResourceConstant} resourceType
      * @param {number} amount Retrieving Amount | Storing Amount
-     * @param { { key? : string, confinedInRoom? : boolean, allowStore? : boolean, allowToHarvest? : boolean, type : "retrieve" | "store", excludeDefault? : boolean, allowStructureTypes? : Array<StructureConstant> } } [options = { key : "default", confinedInRoom : false, allowStore : true, allowToHarvest : true }] "default" has access to all registered resources, but those with specific tag will be penaltized. `allowStore` and `allowToHarvest` are useful while `type` === "retrieve". 0 length of allowStructureTypes indicate that all are allowed.
+     * @param { { key? : string, confinedInRoom? : boolean, allowStore? : boolean, allowToHarvest? : boolean, type : "retrieve" | "store", excludeDefault? : boolean, allowStructureTypes? : Array<StructureConstant>, ensureAmount? : boolean } } [options = { key : "default", confinedInRoom : false, allowStore : true, allowToHarvest : true, ensureAmount : true }] "default" has access to all registered resources, but those with specific tag will be penaltized. `allowStore` and `allowToHarvest` are useful while `type` === "retrieve". 0 length of allowStructureTypes indicate that all are allowed.
      * @returns {import("./task.prototype").GameObject | null}
      */
     Query(subject, resourceType, amount, options) {
-        _.defaults(options, {key : "default", confinedInRoom : false, allowStore : true, allowToHarvest : true, excludeDefault : false, allowStructureTypes : []});
+        _.defaults(options, {key : "default", confinedInRoom : false, allowStore : true, allowToHarvest : true, excludeDefault : false, allowStructureTypes : [], ensureAmount : true});
         /**
          * Query will first check out whether `subject` has physical location.
          * If so, it will go through several standards orderly to return the first matched:
@@ -277,7 +277,7 @@ class ResourceManager {
             const calcKeyPenalty = function(des) {
                 if (options.key === "default" && des.Key !== "default") {
                     /* Calc the distance again */
-                    return calcInRoomDistance(des.Obj.pos, pos) * 2 * getPrice("cpu") / 5;
+                    return Infinity; // calcInRoomDistance(des.Obj.pos, pos) * 2 * getPrice("cpu") / 5;
                 } else return 0;
             };
             for (const room of adjacentRooms) {
@@ -293,14 +293,14 @@ class ResourceManager {
                     .filter(a => !a.Obj.structureType || options.allowStructureTypes.length === 0 || options.allowStructureTypes.indexOf(a.Obj.structureType) !== -1)
                     .filter(a => (a.Key === "default" && !options.excludeDefault) || a.Key === options.key)
                     .filter(a => (options.allowStore && a.Obj.store !== undefined) || (options.allowToHarvest && isHarvestable(a.Obj))) // I suppose there is nothing which is harvestable and also has `store`
-                    .sort((a,b) => calcInRoomDistance(a.Obj.pos, pos) * 2 * getPrice("cpu") / 5 + (amount - a.Amount) * getPrice(resourceType) / 1000 + calcKeyPenalty(a) - calcInRoomDistance(b.Obj.pos, pos) * 2 * getPrice("cpu") / 5 - (amount - b.Amount) * getPrice(resourceType) / 1000 - calcKeyPenalty(b));
+                    .sort((a,b) => a.Obj.pos.getRangeTo(pos) * 2 * getPrice("cpu") / 5 + (amount - a.Amount) * getPrice(resourceType) / 1000 + calcKeyPenalty(a) - b.Obj.pos.getRangeTo(pos) * 2 * getPrice("cpu") / 5 - (amount - b.Amount) * getPrice(resourceType) / 1000 - calcKeyPenalty(b));
                 else if (options.type === 'store') totalAvailableResourceObjects = (this.room2StoringResourceTypes[room][resourceType] || [])
                     .filter(a => a.Obj.id !== id && a.FreeAmount > 0)
                     .filter(a => !a.Obj.structureType || options.allowStructureTypes.length === 0 || options.allowStructureTypes.indexOf(a.Obj.structureType) !== -1)
                     .filter(a => (a.Key === "default" && !options.excludeDefault) || a.Key === options.key)
-                    .sort((a,b) => calcInRoomDistance(a.Obj.pos, pos) * 2 * getPrice("cpu") / 5 + (amount - a.FreeAmount) * getPrice(resourceType) / 1000 + calcKeyPenalty(a) - calcInRoomDistance(b.Obj.pos, pos) * 2 * getPrice("cpu") / 5 - (amount - b.FreeAmount) * getPrice(resourceType) / 1000 - calcKeyPenalty(b));
+                    .sort((a,b) => a.Obj.pos.getRangeTo(pos) * 2 * getPrice("cpu") / 5 + (amount - a.FreeAmount) * getPrice(resourceType) / 1000 + calcKeyPenalty(a) - b.Obj.pos.getRangeTo(pos) * 2 * getPrice("cpu") / 5 - (amount - b.FreeAmount) * getPrice(resourceType) / 1000 - calcKeyPenalty(b));
                 if (totalAvailableResourceObjects.length === 0) continue;
-                const adequateResourceObjects = _.filter(totalAvailableResourceObjects, d => (options.type === "retrieve" ? d.Amount : d.FreeAmount) >= amount);
+                const adequateResourceObjects = options.ensureAmount? _.filter(totalAvailableResourceObjects, d => (options.type === "retrieve" ? d.Amount : d.FreeAmount) >= amount) : [];
                 chosen = (adequateResourceObjects[0] && adequateResourceObjects[0].Obj) || (totalAvailableResourceObjects[0] && totalAvailableResourceObjects[0].Obj);
                 break;
             }
@@ -357,7 +357,7 @@ class ResourceManager {
     }
 };
 const _resourceManager = new ResourceManager();
-profiler.registerObject(_resourceManager, "ResourceManager");
+profiler.registerClass(ResourceManager, "ResourceManager");
 /** @type {import("./lucy.app").AppLifecycleCallbacks} */
 const ResourceManagerPlugin = {
     init : () => global.ResourceManager = _resourceManager,
