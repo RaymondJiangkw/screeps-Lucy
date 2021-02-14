@@ -268,10 +268,11 @@ class Traveler {
                 if (options.obstacles) {
                     matrix = matrix.clone();
                     for (let obstacle of options.obstacles) {
-                        if (obstacle.pos.roomName !== roomName) {
+                        if (obstacle.pos) obstacle = obstacle.pos;
+                        if (obstacle.roomName !== roomName) {
                             continue;
                         }
-                        matrix.set(obstacle.pos.x, obstacle.pos.y, 0xff);
+                        matrix.set(obstacle.x, obstacle.y, 0xff);
                     }
                 }
             }

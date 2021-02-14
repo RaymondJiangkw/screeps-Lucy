@@ -15,14 +15,14 @@ function giveContainerBehaviors() {
         /* Register */
         let storingResourceTypes = [];
         // console.log(JSON.stringify(this.memory));
-        if (this.memory.tag === global.Lucy.Rules.arrangements.SPAWN_ONLY) storingResourceTypes = [RESOURCE_ENERGY];
-        else if (this.memory.tag === "forSource") storingResourceTypes = [RESOURCE_ENERGY];
-        else if (this.memory.tag === "forMineral") storingResourceTypes = [this.room.mineral.mineralType];
-        else if (this.memory.tag === "labs") storingResourceTypes = Object.keys(REACTION_TIME);
-        else console.log(`<p style="display:inline;color:red;">Error:</p> Unable to recognize container ${this} whose tag is ${this.memory.tag}`);
+        if (Game.getTagById(this.id) === global.Lucy.Rules.arrangements.SPAWN_ONLY) storingResourceTypes = [RESOURCE_ENERGY];
+        else if (Game.getTagById(this.id) === "forSource") storingResourceTypes = [RESOURCE_ENERGY];
+        else if (Game.getTagById(this.id) === "forMineral") storingResourceTypes = [this.room.mineral.mineralType];
+        else if (Game.getTagById(this.id) === "labs") storingResourceTypes = Object.keys(REACTION_TIME);
+        else console.log(`<p style="display:inline;color:red;">Error:</p> Unable to recognize container ${this} whose tag is ${Game.getTagById(this.id)}`);
         if (storingResourceTypes.length > 0) {
             for (const storingResourceType of storingResourceTypes) {
-                global.ResourceManager.Register(new ResourceDescriptor(this, RESOURCE_POSSESSING_TYPES.STORING, storingResourceType, this.memory.tag === global.Lucy.Rules.arrangements.SPAWN_ONLY? global.Lucy.Rules.arrangements.SPAWN_ONLY : "default", function(container) {
+                global.ResourceManager.Register(new ResourceDescriptor(this, RESOURCE_POSSESSING_TYPES.STORING, storingResourceType, Game.getTagById(this.id) === global.Lucy.Rules.arrangements.SPAWN_ONLY? global.Lucy.Rules.arrangements.SPAWN_ONLY : "default", function(container) {
                     return container.store[this.resourceType];
                 }));
             }
@@ -30,7 +30,7 @@ function giveContainerBehaviors() {
         /* Register for Storing Additional Resources */
         // NOTICE : `labs` tagged containers are not used for actively storing additional resources. Their input is solely determined by `unboost`.
         // "default" enables containers to be found by searching structures for storing energy.
-        if (this.memory.tag === global.Lucy.Rules.arrangements.SPAWN_ONLY) global.ResourceManager.Register(new StoringDescriptor(this, RESOURCE_ENERGY, "default", function (container) {
+        if (Game.getTagById(this.id) === global.Lucy.Rules.arrangements.SPAWN_ONLY) global.ResourceManager.Register(new StoringDescriptor(this, RESOURCE_ENERGY, "default", function (container) {
             return container.store.getFreeCapacity(RESOURCE_ENERGY);
         }));
     }
@@ -65,7 +65,7 @@ function giveTerminalBehaviors() {
 }
 function giveLinkBehaviors() {
     StructureLink.prototype.register = function() {
-        if (this.memory.tag === global.Lucy.Rules.arrangements.UPGRADE_ONLY) {
+        if (Game.getTagById(this.id) === global.Lucy.Rules.arrangements.UPGRADE_ONLY) {
             global.ResourceManager.Register(new ResourceDescriptor(this, RESOURCE_POSSESSING_TYPES.STORING, RESOURCE_ENERGY, Lucy.Rules.arrangements.UPGRADE_ONLY, function (link) {
                 return link.store[RESOURCE_ENERGY];
             }));

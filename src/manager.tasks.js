@@ -598,15 +598,16 @@ class TaskManager {
              * @type { import("./task.prototype").Task | null}
              */
             let chosen = null;
-            for (const roomName of adjacentRooms) {
+            for (const room of adjacentRooms) {
+                if (room !== roomName && Memory.rooms[room] && Memory.rooms[room].rejectHelp) continue;
                 /**
                  * @type {Array<import("./task.prototype").Task>}
                  */
                 let totalTasks = [];
-                for (const tag of this.fetchTags(roomName)) {
-                    this.updateTasks(roomName, tag);
+                for (const tag of this.fetchTags(room)) {
+                    this.updateTasks(room, tag);
                     /* Saturated Tasks are excluded, since there could be much more important tasks in other rooms */
-                    if (tag === DEFAULT || !this.IsSaturated(roomName, tag)) totalTasks = totalTasks.concat(this.fetchTasks(roomName, tag).select(o => (-(o.commutingTicks + o.workingTicks) * getPrice("cpu") + o.moneyPerTurn), t => t.Identity(subject)["info"]) || []);
+                    if (tag === DEFAULT || !this.IsSaturated(room, tag)) totalTasks = totalTasks.concat(this.fetchTasks(room, tag).select(o => (-(o.commutingTicks + o.workingTicks) * getPrice("cpu") + o.moneyPerTurn), t => t.Identity(subject)["info"]) || []);
                 }
                 if (totalTasks.length === 0) continue;
                 // console.log(`${subject} -> ${totalTasks.map(t => `${t.mountObj}-${-(t.Identity(subject)["info"].commutingTicks + t.Identity(subject)["info"].workingTicks) * getPrice("cpu") + t.Identity(subject)["info"].moneyPerTurn}`)}`);
@@ -621,19 +622,20 @@ class TaskManager {
      */
     Run() {
         for (const roomName in this.room2tag2tasks) {
+            const _cpuUsed = Game.cpu.getUsed();
+            // console.log(`[${roomName}]`);
             for (const tag in this.room2tag2tasks[roomName]) {
-                // const tagStartTime = Game.cpu.getUsed();
-                // const singleTime = [];
+                // console.log(`\t-[${tag}][${this.room2tag2tasks[roomName][tag].length}]`);
                 // this.updateTasks is cancelled here.
                 // this.updateTasks(roomName, tag);
                 /* `waiting` task still could Run. */
                 for (const task of this.room2tag2tasks[roomName][tag]) {
-                    // const startTime = Game.cpu.getUsed();
+                    // const _cpuUsed = Game.cpu.getUsed();
                     task.Run();
-                    // if (Game.cpu.getUsed() - startTime > 0) singleTime.push({name : task.name, tick : Game.cpu.getUsed() - startTime});
+                    // console.log(`\t\t-${task.name}[${task.EmployeeAmount}] : ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`);
                 }
-                // console.log(`${roomName}:${tag}:${Game.cpu.getUsed() - tagStartTime}:${JSON.stringify(singleTime)}`);
             }
+            // console.log(`Total: ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`);
         }
     }
     constructor() {
@@ -656,6 +658,7 @@ const _taskConstructor = new TaskConstructor();
 const TaskManagerPlugin = {
     init: () => global.TaskManager = _taskManager,
     tickStart : () => {
+        const _cpuUsed = Game.cpu.getUsed();
         /* Creep */
         for (const creepName in Game.creeps) {
             const creep = Game.creeps[creepName];
@@ -668,6 +671,7 @@ const TaskManagerPlugin = {
                 }
             }
         }
+        // console.log(`Creep's Tasks -> ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`);
         global.TaskManager.Run();
     }
 };

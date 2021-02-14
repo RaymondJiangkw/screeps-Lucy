@@ -126,11 +126,11 @@ function mount() {
             this._hasTransferred = true;
             target._hasBeenTransferred = true;
             /** Link of CentralSpawnUnit */
-            if (target.memory.tag === global.Lucy.Rules.arrangements.SPAWN_ONLY) {
+            if (Game.getTagById(target.id) === global.Lucy.Rules.arrangements.SPAWN_ONLY) {
                 global.Lucy.Timer.add(Game.time + 1, function(roomName) {
                     Game.rooms[roomName].centralSpawn.SetSignal("all", "fromLink", true);
                 }, undefined, [target.room.name], `Filling Energy of Container in CentralSpawn of ${target.room.name} via Link`);
-            } else if (target.memory.tag === global.Lucy.Rules.arrangements.TRANSFER_ONLY) {
+            } else if (Game.getTagById(target.id) === global.Lucy.Rules.arrangements.TRANSFER_ONLY) {
                 global.Lucy.Timer.add(Game.time + 1, function(roomName, amount) {
                     /** @type {Room} */
                     const room = Game.rooms[roomName];
@@ -148,6 +148,8 @@ function mount() {
 }
 global.Lucy.App.mount(Flag, MyFlag);
 global.Lucy.App.mount(mount);
+/** @type { {[id : string] : string} } */
+const id2tag = {};
 /** @type {import("./lucy.app").AppLifecycleCallbacks} */
 const NativeEncapsulationPlugin = {
     beforeTickStart : () => {
@@ -155,6 +157,19 @@ const NativeEncapsulationPlugin = {
         Game.getObjectById = function(id) {
             if (typeof id === "string" && id.substring(0, FLAG_ID_INDICATOR.length) === FLAG_ID_INDICATOR) return Game.flags[id.substring(FLAG_ID_INDICATOR.length)];
             else return getObjectById(id);
+        };
+        /**
+         * @param {Id} id
+         */
+        Game.getTagById = function(id) {
+            return id2tag[id] || null;
+        };
+        /**
+         * @param {Id} id
+         * @param {string} tag
+         */
+        Game.setTagById = function(id, tag) {
+            id2tag[id] = tag;
         };
     }
 };

@@ -621,7 +621,13 @@ global.Lucy.App.mount(Room, MyRoom);
 global.Lucy.App.mount(mount);
 /** @type {import("./lucy.app").AppLifecycleCallbacks} */
 const RoomPlugin = {
+    reset : () => {
+        for (const roomName in Game.rooms) {
+            if (isMyRoom(Game.rooms[roomName])) global.Map.AutoPlan(roomName);
+        }
+    },
     tickStart : () => {
+        const _cpuUsed = Game.cpu.getUsed();
         for (const roomName in Game.rooms) {
             if (isMyRoom(Game.rooms[roomName])) {
                 Game.rooms[roomName].init();
@@ -634,6 +640,8 @@ const RoomPlugin = {
                 Game.rooms[roomName].Detect();
             }
         }
+        global.Map.LinkMyRooms();
+        // console.log(`Room -> ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`);
     }
 };
 global.Lucy.App.on(RoomPlugin);

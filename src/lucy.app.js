@@ -49,12 +49,12 @@ class App {
          * @private
          */
         this._catcher = next => {
-            // try {
+            try {
                 next();
-            // } catch (e) {
-            //    console.log(`<span style="color:#ef9a9a">${e}</span>`);
-            //    Game.notify(e);
-            //}
+            } catch (e) {
+                console.log(`<span style="color:#ef9a9a">${e.stack}</span>`);
+                Game.notify(e.stack);
+            }
         };
         /**
          * 执行挂载的函数列表
@@ -183,7 +183,7 @@ class App {
         // 执行全局变量初始化
         this.execLifecycleCallback("init");
         this.execLifecycleCallback("reset");
-        global._mountComplete = true;
+        global._mountComplete = Game.time;
         console.log(`<p style="display:inline;color:red;">[mount]</p> Remount successfully.`);
         // 检查是否是第一次全局重置
         if (!Memory[this.name].notOnBorn) {

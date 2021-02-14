@@ -3,6 +3,7 @@
 - Automatic Plan
     - Unit-based, which allows for flexibility.
     - Run at every tick for some cases, while employing caching to speed up.
+    - Use minCut written by @saruss to construct ramparts to protect important units.
 - Automatic Claim
     - Triggered whenever `GCL` is upgraded.
     - Filter out rooms unfit for the `Automatic Plan` pattern.
@@ -18,7 +19,7 @@
     - Task, implementing `GroupPatch Constraint`.
     - Resource, comprised of `retrieve` and `store`, implementing `Resource Reserve`.
     - Link, implementing `Source Destination Mechanisms` and `Trigger-Driven Response`.
-- Structure Memory
+- *Structure Memory* (removed)
     - Periodical or Computation-oriented Recycle.
 - Fast Energy-Filling
     - Imitate the layout of `tigga`.

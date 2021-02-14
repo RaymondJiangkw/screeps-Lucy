@@ -20,6 +20,7 @@ class Timer extends Array {
      * Iterate over functions scheduled at current tick.
      */
     done() {
+        const _cpuUsed = Game.cpu.getUsed();
         if (!this[Game.time]) return;
         for (const info of this[Game.time]) {
             const func = info.func;
@@ -31,6 +32,7 @@ class Timer extends Array {
             func.apply(_this, info.params);
         }
         delete this[Game.time];
+        // console.log(`Timer -> ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`);
     }
 }
 

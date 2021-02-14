@@ -17,17 +17,8 @@ const accounts      = {};
 /** 
  * Class Representation for Account
  * After global reset, all information about transaction or borrowing is lost (for the efficiency reason).
- * Thus, it is only necessary to store data of `cash` in object's memory.
  */
 class Account {
-    /**
-     * This function synchronizes the real-time data of `money` with stored data in memory.
-     * @private
-     */
-    syncMemory() {
-        this.mountObj.memory.cash = this.cash;
-        this.mountObj.memory.borrowedMoney = this.borrowedMoney;
-    }
     /**
      * payDebt pays the borrowed debt by appropriate portion within the capability.
      * @private
@@ -48,7 +39,6 @@ class Account {
         if (type === "cash") this.cash += amount;
         else if (type === "borrowed") this.borrowedMoney += amount;
         this.payDebt();
-        this.syncMemory();
         /**
          * @type {import('./lucy.log').LogPool}
          */
@@ -90,7 +80,6 @@ class Account {
             }
             outMoneyType = "combined";
         }
-        this.syncMemory();
         /**
          * @type {import('./lucy.log').LogPool}
          */
@@ -194,12 +183,12 @@ class Account {
          * @type {number}
          * @private
          */
-        this.cash = this.mountObj.memory.cash || 0;
+        this.cash = 0;
         /**
          * @type {number}
          * @private
          */
-        this.borrowedMoney = this.mountObj.memory.borrowedMoney || 0;
+        this.borrowedMoney = 0;
         /**
          * @type { { "asBuyer": {[id : string]: Array<Transaction>}, "asSeller": {[id : string] : Array<Transaction} } }
          * @private
@@ -209,7 +198,6 @@ class Account {
             "asBuyer": {},
             "asSeller": {}
         };
-        this.syncMemory();
     }
 }
 const TRANSACTION_STATE = Object.freeze({
@@ -346,13 +334,6 @@ class Transaction {
  */
 class Bank {
     /**
-     * This function synchronizes the real-time data of `accountBooks` with stored data in memory.
-     * @private
-     */
-    syncMemory() {
-        Memory.Bank.accountBooks = this.accountBooks;
-    }
-    /**
      * Borrow implements "borrowing money from Bank".
      * If its borrowed money exceeds maximum limit, it will return false.
      * @param {import('./task.prototype').GameObject} obj
@@ -361,13 +342,6 @@ class Bank {
      */
     Borrow(obj, num) {
         /* Currently, without limitation. */
-        return true;
-        /* Spawn / Controller possess the privilege of borrowing money without limitation. */
-        if (isSpawn(obj) || isController(obj)) return true;
-        if (!this.accountBooks[obj.id]) this.accountBooks[obj.id] = 0;
-        if (this.accountBooks[obj.id] + num > global.Lucy.Rules.currencyConfigure.maximumBorrowedMoney) return false;
-        this.accountBooks[obj.id] += num;
-        this.syncMemory();
         return true;
     }
     /**
@@ -381,7 +355,6 @@ class Bank {
         if (num === 0) return true;
         if (!obj.account.Out(this, num)) return false;
         this.accountBooks[obj.id] -= num;
-        this.syncMemory();
         return true;
     }
     /**
@@ -412,7 +385,6 @@ function mount() {
         configurable : false
     });
 }
-if (!Memory.Bank) Memory.Bank = {};
 global.Bank = new Bank();
 global.Lucy.App.mount(mount);
 module.exports = {

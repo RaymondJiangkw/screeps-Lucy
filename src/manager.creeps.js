@@ -178,6 +178,7 @@ profiler.registerClass(CreepSpawnManager, "CreepSpawnManager");
 const CreepSpawnManagerPlugin = {
     init : () => global.CreepSpawnManager = _creepSpawnManager,
     tickEnd : () => {
+        const _cpuUsed = Game.cpu.getUsed();
         for (const roomName in Game.rooms) {
             const room = Game.rooms[roomName];
             if (!isMyRoom(room)) continue;
@@ -208,6 +209,7 @@ const CreepSpawnManagerPlugin = {
                 }
             );
         }
+        // console.log(`Spawn -> ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`);
     }
 };
 global.Lucy.App.on(CreepSpawnManagerPlugin);

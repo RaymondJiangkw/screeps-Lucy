@@ -14,6 +14,7 @@ const TaskConstructor       =   require('./manager.tasks').TaskConstructor;
 const StructureConstants    =   require("./util").StructureConstants;
 const Traveler = require("./Traveler");
 const profiler = require('./screeps-profiler');
+const util_mincut = require("./minCutWallRampartsPlacement");
 
 const DEBUG = false;
 
@@ -275,6 +276,14 @@ class MapMonitor {
         return false;
     }
     /**
+     * @param {number} y
+     * @param {number} x
+     * @returns {boolean}
+     */
+    isMargin(y, x) {
+        return y === 0 || x === 0 || y === 49 || x === 49;
+    }
+    /**
      * Update Structure Cache whenever
      *  - ConstructionSite completes or cancels.
      *  - Structure is built or destroyed.
@@ -424,10 +433,12 @@ class MapMonitor {
     }
     /**
      * Register Structure into MapMonitor with its tag, so that it could be found with specification of tag.
-     * @param {Structure & {memory : {tag : string}}} structure
+     * @param {Structure} structure
+     * @param {string} tag
      */
-    registerStructure(structure) {
-        _.set(this.room2tag2structureType2structureIds, [structure.pos.roomName, structure.memory.tag, structure.structureType, structure.id], true);
+    registerStructure(structure, tag) {
+        Game.setTagById(structure.id, tag);
+        _.set(this.room2tag2structureType2structureIds, [structure.pos.roomName, tag, structure.structureType, structure.id], true);
     }
     /**
      * @template {ResourceConstant} T
@@ -475,7 +486,7 @@ class MapMonitor {
             this.updateStructureCache();
             const structures = (this.structures[roomName]? this.structures[roomName][y][x] : []);
             const constructionSites = (this.constructionSites[roomName]? this.constructionSites[roomName][y][x] : []);
-            return this[prefix] = [].concat(structures, constructionSites).map(Game.getObjectById);
+            return this[prefix] = [].concat(structures, constructionSites).map(Game.getObjectById).filter(s => s);
         } else return this[prefix];
     }
     /**
@@ -490,7 +501,7 @@ class MapMonitor {
         if (!this[prefix + "tick"] || this[prefix + "tick"] < Game.time) {
             this[prefix + "tick"] = Game.time;
             this.updateStructureCache();
-            return this[prefix] = (this.structures[roomName]? this.structures[roomName][y][x] : []).map(Game.getObjectById);
+            return this[prefix] = (this.structures[roomName]? this.structures[roomName][y][x] : []).map(Game.getObjectById).filter(s => s);
         } else return this[prefix];
     }
     /**
@@ -505,7 +516,7 @@ class MapMonitor {
         if (!this[prefix + "tick"] || this[prefix + "tick"] < Game.time) {
             this[prefix + "tick"] = Game.time;
             this.updateStructureCache();
-            return this[prefix] = (this.constructionSites[roomName]? this.constructionSites[roomName][y][x] : []).map(Game.getObjectById);
+            return this[prefix] = (this.constructionSites[roomName]? this.constructionSites[roomName][y][x] : []).map(Game.getObjectById).filter(s => s);
         } else return this[prefix];
     }
     /**
@@ -593,9 +604,6 @@ class Response {
     Feed(value) {
         if (value instanceof Response) value = value.value;
         if (value === this.PLACE_HOLDER) return this;
-        if (DEBUG) {
-            if (value === undefined) throw 1;
-        }
         if (this.value === this.PLACE_HOLDER || this.value === this.FINISH) this.value = value;
         else if (value === this.WAIT_UNTIL_TIMEOUT) this.value = value;
         if (this.value === this.WAIT_UNTIL_TIMEOUT) this.timeout = Game.time + getCacheExpiration(this.TIMEOUT_MEAN, this.TIMEOUT_VARIANCE);
@@ -964,10 +972,7 @@ class Planer {
     TagUnit(roomName, unit, y, x) {
         for (let j = y; j < y + unit.dy; ++j) {
             for (let i = x; i < x + unit.dx; ++i) {
-                mapMonitor.FetchStructure(roomName, j, i).forEach(s => {
-                    s.memory.tag = unit.Tag;
-                    mapMonitor.registerStructure(s);
-                });
+                mapMonitor.FetchStructure(roomName, j, i).forEach(s => mapMonitor.registerStructure(s, unit.Tag));
             }
         }
         return new Response(Response.prototype.FINISH);
@@ -1016,14 +1021,13 @@ class Planer {
      * @returns { {tag : Response, build : Response, road : Response } }
      */
     Plan(roomName, roomType, unitType, options) {
+        const _cpuUsed = Game.cpu.getUsed();
         _.defaults(options, {display : true, tag : false, build : false, road : false, writeToMemory : false, readFromMemory : false, num : 1, linkedRoomPosition : [], linkedUnits : [], unitTypeAlias : undefined});
-        if (DEBUG) {
-            console.log(roomName, unitType, `tag : ${options.tag} build : ${options.build} road : ${options.road}`);
-        }
+        if (Memory._disable) options.display = false;
         const unit = this.units[roomType][unitType];
         /** Switch to unitTypeAlias if possible */
         unitType = options.unitTypeAlias || unitType;
-        const ret = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
+        const ret = new ResponsePatch(Response.prototype.FINISH, "tag", "build", "road");
         /** Trigger Planning */
         if (!this.FetchUnitPos(roomName, unitType)) {
             /** Memory Caching */
@@ -1059,7 +1063,7 @@ class Planer {
             }
         }
         if (DEBUG) {
-            console.log(`Return: ${JSON.stringify(ret)}`);
+            console.log(`[${roomName}]:${unitType}(road: ${options.road}, build : ${options.build}, tag : ${options.tag}) consumes ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)} with returned code (road : ${ret.road.value} build : ${ret.build.value} tag : ${ret.tag.value})`);
         }
         return ret;
     }
@@ -1098,8 +1102,7 @@ class Planer {
             }
             return new Response(Response.prototype.WAIT_UNTIL_TIMEOUT);
         } else if (!isConstructionSite(link)) { // Structure
-            link.memory.tag = tag;
-            mapMonitor.registerStructure(link);
+            mapMonitor.registerStructure(link, tag);
             /**
              * Link finishes.
              * Rampart
@@ -1140,8 +1143,7 @@ class Planer {
             }
             return new Response(Response.prototype.WAIT_UNTIL_TIMEOUT);
         } else if (!isConstructionSite(container)) { // Structure
-            container.memory.tag = tag;
-            mapMonitor.registerStructure(container);
+            mapMonitor.registerStructure(container, tag);
             /**
              * Container finishes.
              * Rampart
@@ -1158,12 +1160,70 @@ class Planer {
     }
     /**
      * @private
+     * @param {string} roomName
+     * @param {{x : number, y : number}[]} path
+     * @param {StructureConstant} structureType
+     * @param { {} } [options]
+     * @returns {Response}
+     */
+    constructAlongPath(roomName, path, structureType, options = {}) {
+        const ret = new Response(Response.prototype.FINISH);
+        for (const pos of path) {
+            if (mapMonitor.Fetch(roomName, pos.y, pos.x).filter(s => s.structureType === structureType).length === 0) {
+                const retCode = Game.rooms[roomName].createConstructionSite(pos.x, pos.y, structureType);
+                if (retCode !== OK) {
+                    console.log(`<p style="display:inline;color:red;">Error:</p> Construct ${structureType} at ${roomName} (${pos.x}, ${pos.y}) fails with code ${retCode}`);
+                    ret.Feed(Response.prototype.WAIT_UNTIL_TIMEOUT);
+                    continue;
+                }
+            }
+        }
+        return ret;
+    }
+    /**
+     * @private
+     * Wrap-function for min-cut to compute protected ramparts.
+     * @param {string} roomName
+     * @param {string[]} unitTypes
+     */
+    fetchProtectedRamparts(roomName, unitTypes) {
+        if (this.room2protectedRamparts[roomName]) return this.room2protectedRamparts[roomName];
+        /** @type {{x1 : number, y1 : number, x2 : number, y2 :number}[]} */
+        const rect_array = [];
+        unitTypes.forEach(unitType => this.FetchUnitPos(roomName, unitType).forEach(([y1, x1, y2, x2]) => rect_array.push({x1, y1, x2, y2})));
+        return this.room2protectedRamparts[roomName] = util_mincut.GetCutTiles(roomName, rect_array, {x1 : 0, y1 : 0, x2 : 49, y2 : 49});
+    }
+    /**
+     * @param {string} roomName
+     * @param {string[]} unitTypes
+     * @param { {display ? : boolean, build ? : boolean, writeToMemory? : boolean, readFromMemory? : boolean} } [options]
+     * @returns {Response}
+     */
+    PlanForProtectedRamparts(roomName, unitTypes, options = {}) {
+        const key = "protectedRamparts";
+        _.defaults(options, {display : true, build : false, readFromMemory : true, writeToMemory : true});
+        if (Memory._disable) options.display = false;
+        let rampartPos = [];
+        if (options.readFromMemory && Memory.autoPlan[roomName][key]) rampartPos = Memory.autoPlan[roomName][key];
+        else {
+            rampartPos = this.fetchProtectedRamparts(roomName, unitTypes);
+            if (options.writeToMemory) Memory.autoPlan[roomName][key] = rampartPos;
+        }
+        if (options.display) {
+            const visual = new RoomVisual(roomName);
+            rampartPos.forEach(({x, y}) => visual.circle(x, y, {radius: 0.5, fill:'#75e863',opacity: 0.3}));
+        }
+        if (options.build) return this.constructAlongPath(roomName, rampartPos, STRUCTURE_RAMPART);
+        else return new Response(Response.prototype.FINISH);
+    }
+    /**
+     * @private
      * @param {RoomPosition} posU
      * @param {RoomPosition} posV
-     * @param { {range? : number, maxRooms? : number} } [options]
+     * @param { {range? : number, maxRooms? : number, ignoreErr? : boolean} } [options]
      */
     updateRoadBetweenPositions(posU, posV, options = {}) {
-        _.defaults(options, {range : 0});
+        _.defaults(options, {range : 0, ignoreErr : false});
         const key = `${posU}->${posV}`;
         /**
          * Decide whether road is built in rooms or between rooms.
@@ -1182,8 +1242,8 @@ class Planer {
             path.unshift({x : posU.x, y : posU.y});
             this.roads[key] = path.map(v => new RoomPosition(v.x, v.y, posU.roomName));
         } else {
-            const path = Traveler.findTravelPath(posU, posV, {range : options.range, ignoreCreeps : true, maxOps : 20000, maxRooms : options.maxRooms, obstacles : [].concat(...Object.values(this.room2avoidPoses))});
-            if (path.incomplete) {
+            const path = Traveler.findTravelPath(posU, posV, {range : options.range, ignoreCreeps : true, maxOps : 20000, maxRooms : options.maxRooms});
+            if (!options.ignoreErr && path.incomplete) {
                 console.log(`<p style="display:inline;color:red;">Error:</p> Path from ${posU} to ${posV} is incomplete.`);
             }
             this.roads[key] = path.path;
@@ -1192,7 +1252,7 @@ class Planer {
     /**
      * @param {RoomPosition} posU
      * @param {RoomPosition} posV
-     * @param { {range? : number, maxRooms? : number} } [options]
+     * @param { {range? : number, maxRooms? : number, ignoreErr? : boolean} } [options]
      */
     FetchRoad(posU, posV, options = {}) {
         const key = `${posU}->${posV}`;
@@ -1254,6 +1314,27 @@ class Planer {
         }
     }
     /**
+     * If `roomName` is provided, its `center` will be used as origin.
+     * @param {string | RoomPosition} roomName_or_posU
+     * @param {string | RoomPosition} roomName_or_posV
+     * @param { {display? : boolean, road? : boolean} } [options]
+     * @returns {Response}
+     */
+    Link(roomName_or_posU, roomName_or_posV, options = {}) {
+        _.defaults(options, {display : true, road : false});
+        if (Memory._disable) options.display = false;
+        const posU = roomName_or_posU instanceof RoomPosition ? roomName_or_posU : _Map.getCenter(roomName_or_posU);
+        const posV = roomName_or_posV instanceof RoomPosition ? roomName_or_posV : _Map.getCenter(roomName_or_posV);
+        if (!posU || !posV) {
+            console.log(`<p style="display:inline;color:red;">Error:</p> Unable to link ${roomName_or_posU} to ${roomName_or_posV}`);
+            return new Response(Response.prototype.WAIT_UNTIL_TIMEOUT);
+        }
+        const path = this.FetchRoad(posU, posV, {range : 0, ignoreErr : true});
+        if (options.display) this.displayRoad(path);
+        if (options.road) return this.linkRoad(path);
+        else return new Response(Response.prototype.FINISH);
+    }
+    /**
      * @private
      * @param {Array<RoomPosition>} path
      * @param { {excludeHeadTail? : boolean} } [options]
@@ -1261,7 +1342,7 @@ class Planer {
      */
     linkRoad(path, options = {}) {
         _.defaults(options, {excludeHeadTail : true});
-        const ret = new Response(Response.prototype.PLACE_HOLDER);
+        const ret = new Response(Response.prototype.FINISH);
         const headRoomName = path[0].roomName, tailRoomName = path[path.length - 1].roomName;
         /** @type { {[roomName : string] : Array<RoomPosition>} } */
         const pathByRoom = _.groupBy(path, "roomName");
@@ -1275,7 +1356,7 @@ class Planer {
             const iEnd = options.excludeHeadTail && roomName === tailRoomName ? pathByRoom[roomName].length - 1 : pathByRoom[roomName].length;
             for (let i = iStart ; i < iEnd; ++i) {
                 const step = pathByRoom[roomName][i];
-                if (mapMonitor.Fetch(step.roomName, step.y, step.x).filter(s => s.structureType === STRUCTURE_ROAD).length === 0) {
+                if (!mapMonitor.isMargin(step.y, step.x) && !this.getPositionOccupied(step.roomName, step.y, step.x) && mapMonitor.Fetch(step.roomName, step.y, step.x).filter(s => s.structureType === STRUCTURE_ROAD).length === 0) {
                     const retCode = Game.rooms[roomName].createConstructionSite(step.x, step.y, STRUCTURE_ROAD);
                     if (retCode !== OK) {
                         console.log(`<p style="display:inline;color:red;">Error:</p> Construct Road at ${roomName} (${step.x}, ${step.y}) fails with code ${retCode}`);
@@ -1302,6 +1383,8 @@ class Planer {
         this.roomType2fittedRoomNames = {};
         /** @type { {[posUandposV : string] : Array<RoomPosition>} } */
         this.roads = {};
+        /** @type { {[roomName : string] : {x : number, y : number}[]} } */
+        this.room2protectedRamparts = {};
     }
 };
 /**
@@ -1396,14 +1479,12 @@ class Map {
         }
     }
     /**
-     * @private
      * @param {RoomPosition} pos
      */
     setCenter(pos) {
         this.room2center[pos.roomName] = pos;
     }
     /**
-     * @private
      * @param {string} roomName
      * @returns {RoomPosition | null}
      */
@@ -1807,13 +1888,14 @@ class Map {
      * @param {string} roomName
      */
     AutoPlan(roomName) {
+        const _cpuUsed = Game.cpu.getUsed();
         /** Initialize some Variables */
         if (!Memory.autoPlan) Memory.autoPlan = {};
         if (!Memory.autoPlan[roomName]) Memory.autoPlan[roomName] = {};
         /**
          * 0. Decision Options & Auxiliary Function
          */
-        let options = {
+        const options = {
             controllerUpgrade : false,
             objectDestroy : false,
             structureConstruct : false
@@ -1848,6 +1930,9 @@ class Map {
         // NOTICE: remove Of ConstructionSite is not counted by EVENT_OBJECT_DESTROYED.
         if (Game.rooms[roomName].getEventLog().filter(e => e.event === EVENT_OBJECT_DESTROYED && e.data.type !== "creep").length > 0 || global.signals.IsConstructionSiteCancel[roomName] || global.signals.IsStructureDestroy[roomName]) options.objectDestroy = true;
         if (global.signals.IsNewStructure[roomName]) options.structureConstruct = true;
+        if (DEBUG) {
+            console.log(`AutoPlan(${roomName})->Init consumes ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}.`);
+        }
         /**
          * 3. Calling Planner
          */
@@ -1971,6 +2056,12 @@ class Map {
                 /* Plan for Container of Mineral */
                 if (!this.planCache[roomName].feedbacks["harvestMineral"]) this.planCache[roomName].feedbacks["harvestMineral"] = new Response(Response.prototype.PLACE_HOLDER);
                 if (parseResponse(this.planCache[roomName].feedbacks["harvestMineral"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["harvestMineral"].Feed(planer.PlanForAroundOverlapContainer(Game.rooms[roomName].mineral, "forMineral", true));
+                /* Plan for Protected Ramparts */
+                if (!this.planCache[roomName].feedbacks["protectedRamparts"]) this.planCache[roomName].feedbacks["protectedRamparts"] = new Response(Response.prototype.PLACE_HOLDER);
+                this.planCache[roomName].feedbacks["protectedRamparts"].Feed(planer.PlanForProtectedRamparts(roomName, ["centralSpawn", "centralTransfer", "towers", "labUnit", `extensionUnit_${0}`, `extensionUnit_${1}`, `extensionUnit_${2}`], {
+                    display : true,
+                    build : parseResponse(this.planCache[roomName].feedbacks["protectedRamparts"]) || options.objectDestroy
+                }));
             }
             if (level >= 6) {
                 /** @type {Mineral} */
@@ -1983,6 +2074,39 @@ class Map {
             if (level >= 8) {
                 
             }
+            if (DEBUG) {
+                console.log(`AutoPlan(${roomName})->Total consumes ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}.`);
+            }
+        }
+    }
+    LinkMyRooms() {
+        /**
+         * Constants & Variables
+         */
+        const MAXIMUM_DISTANCE = 1;
+        const myRooms = Object.values(Game.rooms).filter(room => isMyRoom(room));
+        /**
+         * @param {Response} response
+         */
+        const parseResponse = (response) => {
+            if (response.value === response.PLACE_HOLDER) return true;
+            if (response.value === response.WAIT_UNTIL_TIMEOUT && Game.time >= response.timeout) return true;
+            return false;
+        };
+        /**
+         * 1. Update Cache
+         */
+        if (this.controlledRoomLinkCache.amount !== myRooms.length) {
+            this.controlledRoomLinkCache.amount = myRooms.length;
+            this.controlledRoomLinkCache.links = [];
+            for (let i = 0; i < myRooms.length; ++i) for (let j = i + 1; j < myRooms.length; ++j) if (this.CalcRoomDistance(myRooms[i].name, myRooms[j].name) <= MAXIMUM_DISTANCE) this.controlledRoomLinkCache.links.push({rooms : [myRooms[i].name, myRooms[j].name], feedback : new Response(Response.prototype.PLACE_HOLDER)});
+        }
+        for (const {rooms, feedback} of this.controlledRoomLinkCache.links) {
+            const objectDestroy = (roomName) => Game.rooms[roomName].getEventLog().filter(e => e.event === EVENT_OBJECT_DESTROYED && e.data.type !== "creep").length > 0 || global.signals.IsConstructionSiteCancel[roomName] || global.signals.IsStructureDestroy[roomName];
+            feedback.Feed(planer.Link(rooms[0], rooms[1], {
+                display : true,
+                road : parseResponse(feedback) || objectDestroy(rooms[0]) || objectDestroy(rooms[1])
+            }));
         }
     }
     constructor() {
@@ -1994,6 +2118,8 @@ class Map {
          * @type { {[roomName : string] : { roomType : string, controllerLevel : number, feedbacks : { [unitName : string] : {[module : string] : Response} | ResponsePatch} }} }
          */
         this.planCache                  = {};
+        /** @type { {amount : number, links: Array<{rooms : [string, string], feedback : Response}>} } */
+        this.controlledRoomLinkCache    = {amount : 0, links : []};
         /** @type { {[roomName : string] : {controllerLevel : number, remoteRoomNum : number}} } */
         this.remoteMineCache            = {};
         /** @type { {[roomName : string] : Array<Array<number>>} } */

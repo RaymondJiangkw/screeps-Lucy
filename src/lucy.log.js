@@ -420,6 +420,7 @@ class LogPool {
     get Plugin() {
         return {
             tickEnd : () => {
+                const _cpuUsed = Game.cpu.getUsed();
                 /**
                  * This should be put after AutoPlan, because of its dependence on tag.
                  * Latency of 1 tick is allowed.
@@ -460,6 +461,7 @@ class LogPool {
                 }
                 // This step is compulsory ! Since the indicator needs to be updated.
                 this.Done();
+                // console.log(`Log -> ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`);
             }
         };
     }

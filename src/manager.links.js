@@ -20,8 +20,8 @@ class LinkManager {
     /** @param {StructureLink} link */
     Register(link) {
         if (!this.room2tags2links[link.room.name]) this.room2tags2links[link.room.name] = {};
-        if (!this.room2tags2links[link.room.name][link.memory.tag]) this.room2tags2links[link.room.name][link.memory.tag] = [];
-        this.room2tags2links[link.room.name][link.memory.tag].push(link.id);
+        if (!this.room2tags2links[link.room.name][Game.getTagById(link.id)]) this.room2tags2links[link.room.name][Game.getTagById(link.id)] = [];
+        this.room2tags2links[link.room.name][Game.getTagById(link.id)].push(link.id);
     }
     /**
      * Perhaps there exists a much more elegant way.
@@ -89,6 +89,10 @@ profiler.registerClass(LinkManager, "LinkManager");
 /** @type {import("./lucy.app").AppLifecycleCallbacks} */
 const LinkManagerPlugin = {
     init : () => global.LinkManager = _linkManager,
-    tickStart : () => global.LinkManager.Run()
+    tickStart : () => {
+        const _cpuUsed = Game.cpu.getUsed();
+        global.LinkManager.Run();
+        // console.log(`Link -> ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`);
+    }
 };
 global.Lucy.App.on(LinkManagerPlugin);

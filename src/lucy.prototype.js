@@ -27,7 +27,7 @@ require('./prototype.Room.structures');
 require('./prototype.Room.resources');
 /** Mount Extended Native Type */
 require("./util");
-/** Mount Extended Memory */
+/** Mount Garbage Memory Collection */
 require("./memory.prototype");
 /** Timer Done after Garbage memory Collection, since there could be updates of information */
 Lucy.App.on({tickStart : () => Lucy.Timer.done()});

@@ -52,7 +52,7 @@ function giveSpawnBehaviors() {
          * Special Speed-Up Filling for near-spawn structures.
          */
         const issueNearSpawnEnergyFilling = function() {
-            const nearSpawnExtensions = _.filter(this.room.extensions, e => e.memory.tag === global.Lucy.Rules.arrangements.SPAWN_ONLY);
+            const nearSpawnExtensions = _.filter(this.room.extensions, e => Game.getTagById(e.id) === global.Lucy.Rules.arrangements.SPAWN_ONLY);
             const nearSpawnLackingEnergy = _.sum(nearSpawnExtensions.map(e => e.store.getCapacity(RESOURCE_ENERGY) - e.store.getUsedCapacity(RESOURCE_ENERGY))) + _.sum(this.room.spawns.map(s => s.store.getCapacity(RESOURCE_ENERGY) - s.store.getUsedCapacity(RESOURCE_ENERGY)));
             if (!nearSpawnLackingEnergy) return;
             /* Query `resource` in order to decide which task to issue */
@@ -109,7 +109,7 @@ function giveSpawnBehaviors() {
                     selfCheck : function() {
                         const _selfCheck = function() {
                             if (!this.mountObj || !Game.getObjectById(this.taskData.targetId)) return "dead";
-                            const nearSpawnExtensions = _.filter(this.mountObj.room.extensions, e => e.memory.tag === global.Lucy.Rules.arrangements.SPAWN_ONLY);
+                            const nearSpawnExtensions = _.filter(this.mountObj.room.extensions, e => Game.getTagById(e.id) === global.Lucy.Rules.arrangements.SPAWN_ONLY);
                             const nearSpawnLackingEnergy = _.sum(nearSpawnExtensions.map(e => e.store.getCapacity(RESOURCE_ENERGY) - e.store.getUsedCapacity(RESOURCE_ENERGY))) + _.sum(this.mountObj.room.spawns.map(s => s.store.getCapacity(RESOURCE_ENERGY) - s.store.getUsedCapacity(RESOURCE_ENERGY)));
                             /* Assume Resources are exhausted while the task is not completed. */
                             if (nearSpawnLackingEnergy > 0 && checkForStore(Game.getObjectById(this.taskData.targetId), RESOURCE_ENERGY) === 0) {
@@ -198,7 +198,7 @@ function giveSpawnBehaviors() {
                 if (!this.room.centralTransfer.GetFetchStructure(RESOURCE_ENERGY)) includeTransferExtension = true;
                 else this.room.centralTransfer.PushOrder({from : "any", to : STRUCTURE_EXTENSION, resourceType : RESOURCE_ENERGY, amount : this.room.centralTransfer.Extension.store.getFreeCapacity(RESOURCE_ENERGY)});
             }
-            const farFromSpawnExtensions = _.filter(this.room.extensions, e => e.memory.tag !== global.Lucy.Rules.arrangements.SPAWN_ONLY && (e.memory.tag !== global.Lucy.Rules.arrangements.TRANSFER_ONLY || (e.memory.tag === global.Lucy.Rules.arrangements.TRANSFER_ONLY && includeTransferExtension)));
+            const farFromSpawnExtensions = _.filter(this.room.extensions, e => Game.getTagById(e.id) !== global.Lucy.Rules.arrangements.SPAWN_ONLY && (Game.getTagById(e.id) !== global.Lucy.Rules.arrangements.TRANSFER_ONLY || (Game.getTagById(e.id) === global.Lucy.Rules.arrangements.TRANSFER_ONLY && includeTransferExtension)));
             const farFromSpawnExtensionsLackingEnergy = _.sum(farFromSpawnExtensions.map(e => e.store.getCapacity(RESOURCE_ENERGY) - e.store.getUsedCapacity(RESOURCE_ENERGY)));
             if (!farFromSpawnExtensionsLackingEnergy) return;
             /**
@@ -252,7 +252,7 @@ function giveSpawnBehaviors() {
                 selfCheck : function() {
                     const _selfCheck = function() {
                         if (!this.mountObj || !Game.getObjectById(this.taskData.targetId)) return "dead";
-                        const farFromSpawnExtensions = _.filter(this.mountObj.room.extensions, e => e.memory.tag !== global.Lucy.Rules.arrangements.SPAWN_ONLY && (e.memory.tag !== global.Lucy.Rules.arrangements.TRANSFER_ONLY || (e.memory.tag === global.Lucy.Rules.arrangements.TRANSFER_ONLY && this.taskData.includeTransferExtension)));
+                        const farFromSpawnExtensions = _.filter(this.mountObj.room.extensions, e => Game.getTagById(e.id) !== global.Lucy.Rules.arrangements.SPAWN_ONLY && (Game.getTagById(e.id) !== global.Lucy.Rules.arrangements.TRANSFER_ONLY || (Game.getTagById(e.id) === global.Lucy.Rules.arrangements.TRANSFER_ONLY && this.taskData.includeTransferExtension)));
                         const farFromSpawnExtensionsLackingEnergy = _.sum(farFromSpawnExtensions.map(e => e.store.getCapacity(RESOURCE_ENERGY) - e.store.getUsedCapacity(RESOURCE_ENERGY)));
                         if (farFromSpawnExtensionsLackingEnergy > 0 && checkForStore(Game.getObjectById(this.taskData.targetId), RESOURCE_ENERGY) === 0) {
                             Lucy.Timer.add(Game.time + getCacheExpiration(nextFillingTIMEOUT, nextFillingOFFSET), issueFarFromSpawnEnergyFilling, this.mountObj.id, [], "Filling Energies for far-from-spawn Structures");
@@ -337,7 +337,7 @@ function giveSpawnBehaviors() {
             .concat(this.room.spawns)
             .concat(
                 this.room.extensions
-                    .sort((a, b) => (a.memory.tag === global.Lucy.Rules.arrangements.SPAWN_ONLY ? 0 : 1) - (b.memory.tag === global.Lucy.Rules.arrangements.SPAWN_ONLY ? 0 : 1))
+                    .sort((a, b) => (Game.getTagById(a.id) === global.Lucy.Rules.arrangements.SPAWN_ONLY ? 0 : 1) - (Game.getTagById(b.id) === global.Lucy.Rules.arrangements.SPAWN_ONLY ? 0 : 1))
             );
         
         const ret = spawnCreep.call(this, body, name, opts);
@@ -405,7 +405,7 @@ function giveControllerBehaviors() {
         new Task(`[${this.room.name}:ControllerUpgrade]`, this.pos.roomName, this, new TaskDescriptor("default", {
             worker : {
                 minimumNumber : 1,
-                maximumNumber : global.MapMonitorManager.FetchVacantSpaceCnt(this.pos.roomName, Math.max(this.pos.y - 1, 1), Math.max(this.pos.x - 1, 1), Math.min(this.pos.y + 1, 48), Math.min(this.pos.x + 1, 48)), // Infinity is not suitable here. Given that `repair` creeps can take this task too, when all `repair` creeps are taking this task and another `repair` task issued, spawn needs to spawn another creep to fill in the gap, leading to over-spawning.
+                maximumNumber : 1, // Infinity is not suitable here. Given that `repair` creeps can take this task too, when all `repair` creeps are taking this task and another `repair` task issued, spawn needs to spawn another creep to fill in the gap, leading to over-spawning.
                 estimateProfitPerTurn :
                     function (object) {
                         /* At least one creep should upgrade Controller in order to avoid downgrading. */
@@ -496,14 +496,14 @@ function giveContainerBehaviors() {
      */
     StructureContainer.prototype.triggerHarvesting = function() {
         let target = null;
-        if (this.memory.tag === "forSource") {
+        if (Game.getTagById(this.id) === "forSource") {
             target = this.room.energies.filter(e => e.pos.getRangeTo(this.pos) === 1)[0] || null;
-        } else if (this.memory.tag === "forMineral") {
+        } else if (Game.getTagById(this.id) === "forMineral") {
             if (!this.room[STRUCTURE_EXTRACTOR]) return;
             target = this.room.mineral;
         } else return;
         if (!target) {
-            console.log(`<p style="display:inline;color:red;">Error:</p> Can't find matched target for container ${this} whose tag is ${this.memory.tag}`);
+            console.log(`<p style="display:inline;color:red;">Error:</p> Can't find matched target for container ${this} whose tag is ${Game.getTagById(this.id)}`);
             return;
         }
         /**
@@ -514,7 +514,7 @@ function giveContainerBehaviors() {
          */
         const workBodyParts = isMineral(target) ? 5 : (evaluateSource(target) / 300 / 2);
         /* No Transaction should be dealt here */
-        new Task(`[${this.room.name}:${this.memory.tag}Harvest]`, this.room.name, target, new TaskDescriptor("default", {
+        new Task(`[${this.room.name}:${Game.getTagById(this.id)}Harvest]`, this.room.name, target, new TaskDescriptor("default", {
             worker : {
                 minimumNumber : 1,
                 maximumNumber : 1,
@@ -574,10 +574,10 @@ function giveContainerBehaviors() {
                     if (container.store.getFreeCapacity(RESOURCE_ENERGY) > 0 || worker.store.getFreeCapacity(RESOURCE_ENERGY) > 0) worker.harvest(target);
                     return [];
                 }
-        }, { containerId : this.id, targetId : target.id, tag : this.memory.tag });
+        }, { containerId : this.id, targetId : target.id, tag : Game.getTagById(this.id) });
     };
     StructureContainer.prototype.triggerFillingEnergy = function() {
-        if (this.memory.tag !== "forSpawn") return;
+        if (Game.getTagById(this.id) !== "forSpawn") return;
         /**
          * Temporary Fast-Energy-Filling will be disabled, if Link System works.
          */
@@ -592,7 +592,7 @@ function giveContainerBehaviors() {
             if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", confinedInRoom : true, allowToHarvest : true});
             return resource;
         }.bind(this);
-        TaskConstructor.RequestTask(this, RESOURCE_ENERGY, "triggerFillingEnergy", this.store.getFreeCapacity(), "default", Infinity, requestResource, requestResource, (room) => global.ResourceManager.Sum(room.name, RESOURCE_ENERGY, {type : "retrieve", allowToHarvest : false}), function (object) {
+        TaskConstructor.RequestTask(this, RESOURCE_ENERGY, "triggerFillingEnergy", this.store.getFreeCapacity(), "default", 1, requestResource, requestResource, (room) => global.ResourceManager.Sum(room.name, RESOURCE_ENERGY, {type : "retrieve", allowToHarvest : false}), function (object) {
             if (this.EmployeeAmount === 0) return 2 * getPrice("energy") * object.store.getCapacity();
             else return -Infinity;
         }, (container) => container.store.getFreeCapacity(RESOURCE_ENERGY) < CARRY_CAPACITY * 3);
@@ -689,9 +689,9 @@ function giveStorageBehaviors() {
 function giveLinkBehaviors() {
     StructureLink.prototype.trigger = function() {
         if (this.store.getFreeCapacity(RESOURCE_ENERGY) < CARRY_CAPACITY) {
-            if (this.memory.tag === global.Lucy.Rules.arrangements.SPAWN_ONLY) {
+            if (Game.getTagById(this.id) === global.Lucy.Rules.arrangements.SPAWN_ONLY) {
                 this.room.centralSpawn.SetSignal("all", "fromLink", true);
-            } else if (this.memory.tag === global.Lucy.Rules.arrangements.TRANSFER_ONLY) {
+            } else if (Game.getTagById(this.id) === global.Lucy.Rules.arrangements.TRANSFER_ONLY) {
                 /** @type {import('./rooms.behaviors').CentralTransferUnit} */
                 const centralTransfer = this.room.centralTransfer;
                 let to = null;
