@@ -1,16 +1,10 @@
+/**
+ * @typedef { {reservedAmount : number} } SellingEntry
+ * @typedef { {[resourceType : string] : SellingEntry} } SellingList
+ */
 module.exports = {
-    memoryRecycleInterval: {
-        structure: 10000,
-        powerbank: 5000,
-        deposit: 50000,
-        constructionSite : 1000,
-        commonStructures : 10000
-    },
     transactionConfigure: {
         fineRate: 0.3
-    },
-    currencyConfigure: {
-        maximumBorrowedMoney: 1000
     },
     price: {
         "default" : 1,
@@ -20,7 +14,8 @@ module.exports = {
          * Calculated by refering to the relationship built through creep's harvest method.
          * For a single WORK body, a 0.2 ms cost will earn 2 units of energy without any boost.
          */
-        "cpu" : 10
+        "cpu" : 10,
+        "credit" : 1
     },
     /* It is recorded under structure's memory : "tag" */
     arrangements : {
@@ -42,6 +37,18 @@ module.exports = {
     },
     terminal : {
         [RESOURCE_ENERGY] : 0.5,
-        "collectSpareCapacity" : TERMINAL_CAPACITY / 10
+        "collectSpareCapacity" : TERMINAL_CAPACITY / 10,
+        "startEnergy" : 1000,
+        "minimumBuyingAmount" : 1000,
+        "sellingLists" : {
+            [RESOURCE_ENERGY] : {reservedAmount : 12000},
+            [RESOURCE_HYDROGEN] : {reservedAmount : 12000},
+            [RESOURCE_OXYGEN] : {reservedAmount : 12000},
+            [RESOURCE_KEANIUM] : {reservedAmount : 12000},
+            [RESOURCE_UTRIUM] : {reservedAmount : 12000},
+            [RESOURCE_LEMERGIUM] : {reservedAmount : 12000},
+            [RESOURCE_ZYNTHIUM] : {reservedAmount : 12000},
+            [RESOURCE_CATALYST] : {reservedAmount : 12000}
+        }
     }
 };

@@ -297,11 +297,12 @@ class TaskConstructor {
      * @param {number} maximumWorkerAmount
      * @param {(amount : number) => Source | StructureContainer | StructureStorage | StructureLink} requestResource
      * @param {(amount : number) => StructureContainer | StructureStorage | StructureLink} strictRequestResource
+     * @param {(object : import("./task.prototype").GameObject) => number} amountFunc
      * @param {(room : Room) => number} availableEnergy
      * @param {(object : import("./task.prototype").GameObject) => number} profitFunc
      * @param {(structure : Structure, resourceType : ResourceConstant) => boolean} storeCheckFunc
      */
-    RequestTask(structure, resourceType, triggerFillingFunctionName, fillAmount, taskType, maximumWorkerAmount, requestResource, strictRequestResource, availableEnergy, profitFunc, storeCheckFunc) {
+    RequestTask(structure, resourceType, triggerFillingFunctionName, fillAmount, taskType, maximumWorkerAmount, requestResource, strictRequestResource, amountFunc, availableEnergy, profitFunc, storeCheckFunc) {
         const NEXT_FILLING_TIMEOUT = 50;
         const NEXT_FILLING_OFFSET  = 5;
         const roleDescriptor = new RoleConstructor();
@@ -344,13 +345,202 @@ class TaskConstructor {
                     }
                     return "working";
                 },
-                run : Builders.BuildFetchResourceAndDoSomethingProject(resourceType, requestResource, requestStoreResources, (creep) => creep.store.getFreeCapacity(resourceType), structure, 1, Creep.prototype.transfer, [resourceType])
+                run : Builders.BuildFetchResourceAndDoSomethingProject(resourceType, requestResource, requestStoreResources, amountFunc, structure, 1, Creep.prototype.transfer, [resourceType])
             },
             taskData : {storeCheckFunc : storeCheckFunc, triggerFillingFunctionName : triggerFillingFunctionName, resourceType : resourceType, requestResource : requestResource},
             taskKey : `FILLING_${resourceType}`
         });
     }
-    TransferTask() {}
+    /**
+     * @danger When it comes to the case that `options.merge` becomes an important choice, subtle issues could occur when
+     * transfering happens inside the `CentralTransferUnit`. Despite its relatively quick speed of transfering, some edge
+     * cases including `transferer` not available and blocking of `transfer` queue could result in undesired duplications
+     * when `merge` is designed to be avoided. This can be solved in some ways by "take over the task without delay".
+     * @param {{fromId : Id, fromPos : RoomPosition}} param0
+     * @param {{toId : Id, toPos : RoomPosition}} param1
+     * @param {{list : {[resourceType in ResourceConstant]? : number}, transactions : {[resourceType in ResourceConstant]? : import("./money.prototype").Transaction[]}}} param2
+     * @param {{merge? : boolean}} [options]
+     */
+    TransferTask({fromId, fromPos}, {toId, toPos}, {list, transactions = {}}, options = {}) {
+        _.defaults(options, {merge : true});
+        // At the same time, only one transfer task between `from` and `to` is allowed to exist, which is used to control amount.
+        // Additional request will be added.
+        if (global.TaskManager.Fetch(toId, `${fromId}->${toId}`).length > 0) {
+            let func = Math.max;
+            if (options.merge) func = (a, b) => a + b;
+            /** @type {import("./task.prototype").Task} */
+            const task = global.TaskManager.Fetch(to.id, `${fromId}->${toId}`)[0];
+            /** Merge List */
+            for (const resourceType in list) {
+                if (!task.taskData.list[resourceType]) task.taskData.list[resourceType] = 0;
+                task.taskData.list[resourceType] = func(list[resourceType], task.taskData.list[resourceType]);
+            }
+            /** Merge Transactions */
+            for (const resourceType in transactions) {
+                if (!task.taskData.transactions[resourceType]) task.taskData.transactions[resourceType] = transactions[resourceType];
+                else {
+                    if (options.merge) task.taskData.transactions[resourceType] = task.taskData.transactions[resourceType].concat(transactions[resourceType]);
+                    else {
+                        task.taskData.transactions[resourceType].forEach(t => t.Done());
+                        task.taskData.transactions[resourceType] = transactions[resourceType];
+                    }
+                }
+            }
+            return true;
+        }
+        const transferRun = function() {
+            /** @type {Creep} */
+            const worker = Object.keys(this.employee2role).map(Game.getObjectById)[0];
+            if (!worker) return [];
+            /** @type {{[resourceType in ResourceConstant]? : number}} */
+            const list = this.taskData.list;
+            /** @type {{[resourceType in ResourceConstant]? : import("./money.prototype").Transaction[]}} */
+            const transactions = this.taskData.transactions;
+            if (!worker.memory.flags) worker.memory.flags = {};
+            /**
+             * Ensure irrelevant resources are "dropped".
+             */
+            if (!worker.memory.flags.init) {
+                if (worker.store.getUsedCapacity() === 0) worker.memory.flags.init = true;
+                else if (worker.storeResources() === "fail") worker.memory.flags.init = true;
+            }
+            if (!worker.memory.flags.init) return [];
+            /**
+             * Status Switching
+             */
+            if (!worker.memory.flags.working && (worker.store.getFreeCapacity() === 0 || Object.keys(list).length === 0)) worker.memory.flags.working = true;
+            if (worker.memory.flags.working && worker.store.getUsedCapacity() === 0) {
+                worker.memory.flags.working = false;
+                /**
+                 * Finish Task
+                 */
+                if (Object.keys(list).length === 0) {
+                    this.taskData[OK] = true;
+                    return [worker];
+                }
+            }
+            if (!worker.memory.flags.working) {
+                /** @type {RoomPosition} */
+                const fromPos = this.taskData.fromPos;
+                /** @type {Id<Structure & {store : Store<StoreDefinitionUnlimited, true>}>} */
+                const fromId = this.taskData.fromId;
+                if (worker.pos.roomName !== fromPos.roomName || worker.pos.getRangeTo(fromPos) !== 1) worker.travelTo(fromPos);
+                else {
+                    const from = Game.getObjectById(fromId);
+                    for (const resourceType in list) {
+                        /**
+                         * Special Case : exhausted
+                         */
+                        if (from.store[resourceType] === 0) {
+                            delete list[resourceType];
+                            if (transactions[resourceType]) {
+                                transactions[resourceType].forEach(t => t.Done());
+                                delete transactions[resourceType];
+                            }
+                            continue;
+                        }
+                        const amount = Math.min(list[resourceType], from.store[resourceType], worker.store.getFreeCapacity());
+                        list[resourceType] -= amount;
+                        if (list[resourceType] <= 0) {
+                            delete list[resourceType];
+                            if (transactions[resourceType]) {
+                                transactions[resourceType].forEach(t => t.Done());
+                                delete transactions[resourceType];
+                            }
+                        }
+                        if (amount > 0) {
+                            worker.withdraw(from, resourceType, amount);
+                            break;
+                        }
+                    }
+                }
+            }
+            if (worker.memory.flags.working) {
+                /** @type {RoomPosition} */
+                const toPos = this.taskData.toPos;
+                /** @type {Id<Structure & {store : Store<StoreDefinitionUnlimited, true>}>} */
+                const toId = this.taskData.toId;
+                if (worker.pos.roomName !== toPos.roomName || worker.pos.getRangeTo(toPos) !== 1) worker.travelTo(toPos);
+                else {
+                    const to = Game.getObjectById(toId);
+                    /**
+                     * Special Case : Full
+                     */
+                    if (to.store.getFreeCapacity() === 0) {
+                        worker.memory.flags.working = false;
+                        return [worker];
+                    }
+                    for (const resourceType in worker.store) {
+                        worker.transfer(to, resourceType);
+                        break;
+                    }
+                }
+            }
+            return [];
+        };
+        if (fromPos.roomName === toPos.roomName) {
+            // Transfer in the same room
+            const roomName = fromPos.roomName;
+            if (isMyRoom(roomName)) {
+                console.log(`Transfer ${roomName} from ${fromPos} to ${toPos} (${JSON.stringify(list)})`);
+                // Controlled Room
+                /** @type {import("./rooms.behaviors").CentralTransferUnit} */
+                const centralTransfer = Game.rooms[roomName].centralTransfer;
+                const from = Game.getObjectById(fromId), to = Game.getObjectById(toId);
+                if (!centralTransfer || !centralTransfer.IsBelongTo(from) || !centralTransfer.IsBelongTo(to)) {
+                    const totalTransferAmount = Math.min(_.sum(Object.values(list)), CONTAINER_CAPACITY / 2);
+                    const roleDescriptor = new RoleConstructor();
+                    roleDescriptor.Register("worker", "creep", {type : "transferer", transferAmount : totalTransferAmount});
+                    roleDescriptor
+                        .set("worker", {key : "number", value : [1, 1]})
+                        .set("worker", {key : "profit", value : (object) => Math.max(...Object.keys(list).map(getPrice)) * object.store.getCapacity()});
+                    this.Construct({taskName : `[Transfer:${fromId},${fromPos}->${toId},${toPos}]`, taskType : "Transfer"}, {mountRoomName : roomName, mountObj : to}, roleDescriptor, {
+                        funcs : {
+                            selfCheck : function() {
+                                /**
+                                 * Since `from` and `to` are in the room, which is controlled and, thus, always visible, pure check of `Game.getObjectById` is enough.
+                                 */
+                                if (this.taskData[OK] || !Game.getObjectById(this.taskData.fromId) || !Game.getObjectById(this.taskData.toId)) return "dead";
+                                return "working";
+                            },
+                            run : transferRun
+                        },
+                        taskData : {[OK] : false, fromId, fromPos, toId, toPos, list, transactions},
+                        taskKey : `${fromId}->${toId}`
+                    });
+                } else {
+                    // Transfer in the CentralTransferUnit, which means that it could be solved by pushing order.
+                    Object.entries(list).forEach(([resourceType, amount]) => centralTransfer.PushOrder({from : from.structureType, to : to.structureType, resourceType, amount, callback : () => {transactions[resourceType].forEach(t => t.Done());}}));
+                    return true;
+                }
+            } else {
+                /**
+                 * @TODO
+                 * I think this branch does not exist in practice.
+                 */
+            }
+        } else {
+            // Transfer in the different room
+            const totalTransferAmount = Math.min(_.sum(Object.values(list)));
+            const roleDescriptor = new RoleConstructor();
+            roleDescriptor.Register("worker", "creep", {type : "transferer", transferAmount : totalTransferAmount});
+            roleDescriptor
+                .set("worker", {key : "number", value : [1, 1]})
+                .set("worker", {key : "profit", value : (object) => Math.max(...Object.keys(list).map(getPrice)) * object.store.getCapacity()});
+            this.Construct({taskName : `[Transfer:${fromId},${fromPos}->${toId},${toPos}]`, taskType : "CrossTransfer"}, {mountRoomName : toPos.roomName, mountObj : {id : null, pos : toPos}}, roleDescriptor, {
+                funcs : {
+                    selfCheck : function() {
+                        if (this.taskData[OK] || (Game.rooms[this.taskData.fromPos.roomName] && !Game.getObjectById(this.taskData.fromId)) || (Game.rooms[this.taskData.toPos.roomName] && !Game.getObjectById(this.taskData.toId))) return "dead";
+                        return "working";
+                    },
+                    run : transferRun,
+                },
+                taskData : {[OK] : false, fromId, fromPos, toId, toPos, list, transactions},
+                taskKey : `${fromId}->${toId}`
+            });
+        }
+        return true;
+    }
     /**
      * Claim Task does not take the responsibility of checking the reachability of targetRoom.
      * @param {string} targetRoom

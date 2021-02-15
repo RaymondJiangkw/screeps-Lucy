@@ -446,9 +446,6 @@ class Task {
          * Record all involved transactions
          */
         this.transactions = {};
-        /**
-         * @private
-         */
         this.taskData = data;
         /**
          * @type { () => "working" | "dead" }

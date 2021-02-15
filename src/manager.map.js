@@ -7,11 +7,14 @@ const isConstructionSite    =   require('./util').isConstructionSite;
 const calcInRoomDistance    =   require('./util').calcInRoomDistance;
 const calcRoomDistance      =   require('./util').calcRoomDistance;
 const decideRoomStatus      =   require('./util').decideRoomStatus;
-const PriorityQueue         =   require('./util').PriorityQueue;
-const username              =   require('./util').username;
 const isMyRoom              =   require('./util').isMyRoom;
-const TaskConstructor       =   require('./manager.tasks').TaskConstructor;
+const PriorityQueue         =   require('./util').PriorityQueue;
+const Response              =   require("./util").Response;
+const ResponsePatch         =   require("./util").ResponsePatch;
+const username              =   require('./util').username;
 const StructureConstants    =   require("./util").StructureConstants;
+const TaskConstructor       =   require('./manager.tasks').TaskConstructor;
+
 const Traveler = require("./Traveler");
 const profiler = require('./screeps-profiler');
 const util_mincut = require("./minCutWallRampartsPlacement");
@@ -597,62 +600,6 @@ MapMonitor.prototype.dlen = 8;
 
 const mapMonitor = new MapMonitor();
 
-class Response {
-    /**
-     * @param {0 | 1 | 2 | 3 | Response} value
-     */
-    Feed(value) {
-        if (value instanceof Response) value = value.value;
-        if (value === this.PLACE_HOLDER) return this;
-        if (this.value === this.PLACE_HOLDER || this.value === this.FINISH) this.value = value;
-        else if (value === this.WAIT_UNTIL_TIMEOUT) this.value = value;
-        if (this.value === this.WAIT_UNTIL_TIMEOUT) this.timeout = Game.time + getCacheExpiration(this.TIMEOUT_MEAN, this.TIMEOUT_VARIANCE);
-        return this;
-    }
-    /**
-     * @param {0 | 1 | 2 | 3 | Response} value
-     */
-    constructor(value) {
-        if (value instanceof Response) value = value.value;
-        this.value = value;
-        this.timeout = null;
-        if (this.value === this.WAIT_UNTIL_TIMEOUT) this.timeout = Game.time + getCacheExpiration(this.TIMEOUT_MEAN, this.TIMEOUT_VARIANCE);
-    }
-}
-Response.prototype.TIMEOUT_MEAN = 500;
-Response.prototype.TIMEOUT_VARIANCE = 100;
-
-Response.prototype.FINISH = 0;
-Response.prototype.WAIT_UNTIL_UPGRADE = 1;
-Response.prototype.WAIT_UNTIL_TIMEOUT = 2;
-Response.prototype.PLACE_HOLDER = 3;
-
-class ResponsePatch {
-    /**
-     * @param {ResponsePatch} patch
-     */
-    Merge(patch) {
-        Object.keys(patch).filter(key => !key.startsWith("_")).forEach(key => this.Pick(key).Feed(patch.Pick(key)));
-    }
-    /**
-     * @param {string} patchKey
-     * @returns {Response}
-     */
-    Pick(patchKey) {
-        if (this[patchKey]) return this[patchKey];
-        else console.log(`<p style="display:inline;color:red;">Error:</p> ${patchKey} not found.`);
-    }
-    /**
-     * @param {0 | 1 | 2 | 3 | Response} value
-     * @danger if `value` is passed as an instance of Response, once original instance changes, default value of all following newly-created Response will change too.
-     * @param {...string} keys
-     */
-    constructor(value, ...keys) {
-        /** @private */
-        this._value = value;
-        keys.forEach(key => this[key] = new Response(this._value));
-    }
-}
 const RAMPART_BUILD_CONTROLLER_LEVEL = 4;
 
 class Planer {
@@ -805,7 +752,10 @@ class Planer {
                 const desiredStructureTypes = unit.Fetch(j, i);
                 const difference = _.difference(existStructureTypes, desiredStructureTypes);
                 if (difference > 0) return -1;
-                ret += existStructureTypes.length;
+                /**
+                 * STRUCTURE_ROAD is not counted.
+                 */
+                ret += existStructureTypes.filter(v => v !== STRUCTURE_ROAD).length;
             }
         }
         return ret;

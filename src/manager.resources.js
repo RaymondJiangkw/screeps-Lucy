@@ -238,11 +238,11 @@ class ResourceManager {
      * @param {import("./task.prototype").GameObject | RoomPosition} subject
      * @param {ResourceConstant} resourceType
      * @param {number} amount Retrieving Amount | Storing Amount
-     * @param { { key? : string, confinedInRoom? : boolean, allowStore? : boolean, allowToHarvest? : boolean, type : "retrieve" | "store", excludeDefault? : boolean, allowStructureTypes? : Array<StructureConstant>, ensureAmount? : boolean } } [options = { key : "default", confinedInRoom : false, allowStore : true, allowToHarvest : true, ensureAmount : true }] "default" has access to all registered resources, but those with specific tag will be penaltized. `allowStore` and `allowToHarvest` are useful while `type` === "retrieve". 0 length of allowStructureTypes indicate that all are allowed.
+     * @param { { key? : string, confinedInRoom? : boolean, allowStore? : boolean, allowToHarvest? : boolean, type : "retrieve" | "store", excludeDefault? : boolean, allowStructureTypes? : Array<StructureConstant>, ensureAmount? : boolean, avoidRequest? : boolean } } [options = { key : "default", confinedInRoom : false, allowStore : true, allowToHarvest : true, ensureAmount : true }] "default" has access to all registered resources, but those with specific tag will be penaltized. `allowStore` and `allowToHarvest` are useful while `type` === "retrieve". 0 length of allowStructureTypes indicate that all are allowed.
      * @returns {import("./task.prototype").GameObject | null}
      */
     Query(subject, resourceType, amount, options) {
-        _.defaults(options, {key : "default", confinedInRoom : false, allowStore : true, allowToHarvest : true, excludeDefault : false, allowStructureTypes : [], ensureAmount : true});
+        _.defaults(options, {key : "default", confinedInRoom : false, allowStore : true, allowToHarvest : true, excludeDefault : false, allowStructureTypes : [], ensureAmount : true, avoidRequest : false});
         /**
          * Query will first check out whether `subject` has physical location.
          * If so, it will go through several standards orderly to return the first matched:
@@ -257,6 +257,11 @@ class ResourceManager {
             const pos = subject instanceof RoomPosition ? subject : subject.pos;
             const id = subject instanceof RoomPosition ? null : subject.id;
             const roomName = pos.roomName;
+            /**
+             * Only if the distance between rooms satisfies a requirement, resources in another room is attainable from
+             * base room, since long distance is not preferred.
+             */
+            const ALLOWED_DISTANCE = 1;
             this.updateRoomCache(roomName, resourceType);
             /**
              * @type {Array<string>}
@@ -283,7 +288,7 @@ class ResourceManager {
             for (const room of adjacentRooms) {
                 if (options.type === "retrieve" && (!this.room2resourceTypes[room] || !this.room2resourceTypes[room][resourceType])) continue;
                 if (options.type === 'store' && (!this.room2StoringResourceTypes[room] || !this.room2StoringResourceTypes[room][resourceType])) continue;
-                if (options.confinedInRoom && room !== roomName) continue;
+                if ((options.confinedInRoom && room !== roomName) || Game.map.getRoomLinearDistance(room, roomName) > ALLOWED_DISTANCE) continue;
                 /**
                  * @type {Array<ResourceDescriptor> | Array<StoringDescriptor>}
                  */
@@ -304,20 +309,21 @@ class ResourceManager {
                 chosen = (adequateResourceObjects[0] && adequateResourceObjects[0].Obj) || (totalAvailableResourceObjects[0] && totalAvailableResourceObjects[0].Obj);
                 break;
             }
+            if (!chosen && options.type === "retrieve" && !options.avoidRequest && options.allowStore && !options.excludeDefault && (options.allowStructureTypes.length === 0 || options.allowStructureTypes.indexOf(STRUCTURE_TERMINAL) !== -1)) {
+                /**
+                 * In this case, some resources are wanted but in the state of shortage.
+                 */
+                global.TerminalManager.Request(roomName, resourceType, amount);
+            }
             // console.log(`Query Resource ret ${chosen} with params ${subject} ${resourceType} ${amount} ${JSON.stringify(options)}`);
             return chosen;
         }
     }
     Display() {
         for (const roomName in this.room2resourceTypes) {
-            for (const resourceType in this.room2resourceTypes[roomName]) {
-                for (const descriptor of this.room2resourceTypes[roomName][resourceType]) {
-                    if (descriptor.Obj.structureType === STRUCTURE_STORAGE || descriptor.Obj.structureType === STRUCTURE_TERMINAL) continue;
-                    /**
-                     * @TODO
-                     */
-                    new RoomVisual(descriptor.Obj.pos.roomName).text(descriptor.Amount, descriptor.Obj.pos, {color : "yellow"});
-                }
+            const resourceType = RESOURCE_ENERGY;
+            for (const descriptor of this.room2resourceTypes[roomName][resourceType]) {
+                new RoomVisual(descriptor.Obj.pos.roomName).text(descriptor.Amount, descriptor.Obj.pos, {color : "yellow"});
             }
         }
     }

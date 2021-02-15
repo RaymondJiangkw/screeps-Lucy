@@ -592,7 +592,7 @@ function giveContainerBehaviors() {
             if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", confinedInRoom : true, allowToHarvest : true});
             return resource;
         }.bind(this);
-        TaskConstructor.RequestTask(this, RESOURCE_ENERGY, "triggerFillingEnergy", this.store.getFreeCapacity(), "default", 1, requestResource, requestResource, (room) => global.ResourceManager.Sum(room.name, RESOURCE_ENERGY, {type : "retrieve", allowToHarvest : false}), function (object) {
+        TaskConstructor.RequestTask(this, RESOURCE_ENERGY, "triggerFillingEnergy", this.store.getFreeCapacity(), "default", 1, requestResource, requestResource, (creep) => Math.min(creep.store.getFreeCapacity(RESOURCE_ENERGY), this.store.getFreeCapacity()), (room) => global.ResourceManager.Sum(room.name, RESOURCE_ENERGY, {type : "retrieve", allowToHarvest : false}), function (object) {
             if (this.EmployeeAmount === 0) return 2 * getPrice("energy") * object.store.getCapacity();
             else return -Infinity;
         }, (container) => container.store.getFreeCapacity(RESOURCE_ENERGY) < CARRY_CAPACITY * 3);
@@ -628,7 +628,7 @@ function giveTowerBehaviors() {
             if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", confinedInRoom : false, allowToHarvest : false});
             return resource;
         }.bind(this);
-        TaskConstructor.RequestTask(this, RESOURCE_ENERGY, "triggerFillingEnergy", this.store.getFreeCapacity(RESOURCE_ENERGY), "Defense", 1, requestResource, strictRequestResource, (room) => global.ResourceManager.Sum(room.name, RESOURCE_ENERGY, {type : "retrieve", allowToHarvest : false}), (object) => object.store.getCapacity() * getPrice("energy") * 1.5, (tower) => tower.store.getFreeCapacity(RESOURCE_ENERGY) <= 10);
+        TaskConstructor.RequestTask(this, RESOURCE_ENERGY, "triggerFillingEnergy", this.store.getFreeCapacity(RESOURCE_ENERGY), "Defense", 1, requestResource, strictRequestResource, (creep) => Math.min(creep.store.getFreeCapacity(RESOURCE_ENERGY), this.store.getFreeCapacity(RESOURCE_ENERGY)), (room) => global.ResourceManager.Sum(room.name, RESOURCE_ENERGY, {type : "retrieve", allowToHarvest : false}), (object) => object.store.getCapacity() * getPrice("energy") * 1.5, (tower) => tower.store.getFreeCapacity(RESOURCE_ENERGY) <= 10);
     }
 }
 function giveStorageBehaviors() {
@@ -657,7 +657,7 @@ function giveStorageBehaviors() {
             let resource = global.ResourceManager.Query(this, mineralType, amount, {type : "retrieve", confinedInRoom : true, allowToHarvest : false, allowStructureTypes : [STRUCTURE_CONTAINER]});
             return resource;
         }.bind(this);
-        TaskConstructor.RequestTask(this, mineralType, "triggerFillingMineral", CONTAINER_CAPACITY / 2, "default", 1, requestResource, requestResource, () => 0, function (object) { 
+        TaskConstructor.RequestTask(this, mineralType, "triggerFillingMineral", CONTAINER_CAPACITY / 2, "default", 1, requestResource, requestResource, (creep) => Math.min(creep.store.getFreeCapacity(mineralType), this.store.getFreeCapacity(mineralType)), () => 0, function (object) { 
         return getPrice(this.taskData.resourceType) * object.store.getCapacity();}, (storage, resourceType) => storage.store.getUsedCapacity(resourceType) / storage.store.getCapacity() >= global.Lucy.Rules.storage[resourceType] || storage.store.getFreeCapacity() <= global.Lucy.Rules.storage["collectSpareCapacity"]);
     };
     /** Collect Energy Harvested (Stop while linking system work) */
@@ -680,7 +680,7 @@ function giveStorageBehaviors() {
             let resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", confinedInRoom : true, allowToHarvest : false, allowStructureTypes : [STRUCTURE_CONTAINER]});
             return resource;
         }.bind(this);
-        TaskConstructor.RequestTask(this, RESOURCE_ENERGY, "triggerFillingEnergy", CONTAINER_CAPACITY, "default", 1, requestResource, requestResource, () => 0, function (object) {
+        TaskConstructor.RequestTask(this, RESOURCE_ENERGY, "triggerFillingEnergy", CONTAINER_CAPACITY, "default", 1, requestResource, requestResource, (creep) => Math.min(creep.store.getFreeCapacity(RESOURCE_ENERGY), this.store.getFreeCapacity(RESOURCE_ENERGY)), () => 0, function (object) {
             if (this.EmployeeAmount === 0) return getPrice(this.taskData.resourceType) * object.store.getCapacity();
             else return -Infinity;
         }, (storage, resourceType) => storage.store.getUsedCapacity(resourceType) / storage.store.getCapacity() >= global.Lucy.Rules.storage[resourceType] || storage.store.getFreeCapacity() <= global.Lucy.Rules.storage["collectSpareCapacity"]);

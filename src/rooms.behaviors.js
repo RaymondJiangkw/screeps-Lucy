@@ -565,10 +565,14 @@ class MyRoom extends Room {
         /** Avoid Room */
         if (this.find(FIND_HOSTILE_STRUCTURES, {filter : {structureType : STRUCTURE_TOWER}}).length > 0) this.memory.avoid = true;
         else delete this.memory.avoid;
+        /** Detect Sources */
         if (!this.memory.sourceAmount) this.memory.sourceAmount = this.find(FIND_SOURCES).length;
         if (!this.memory.sourcePoses) this.memory.sourcePoses = this.find(FIND_SOURCES).map(s => s.pos);
         if (!this.memory.sourceCapacities) this.memory.sourceCapacities = this.find(FIND_SOURCES).map(s => s.energyCapacity > SOURCE_ENERGY_CAPACITY ? s.energyCapacity : SOURCE_ENERGY_CAPACITY);
+        /** Detect Mineral */
         if (!this.memory.mineralType) this.memory.mineralType = this.mineral ? this.mineral.mineralType : null;
+        /** Detect Portals */
+        this.memory.portals = this.find(FIND_STRUCTURES, {filter : {structureType : STRUCTURE_PORTAL}}).map(portal => {return {destination : portal.destination, ticksToDecay : portal.ticksToDecay};});
         /** Add to global.Map */
         global.Map.updateAdjacentRooms(this.name);
     }

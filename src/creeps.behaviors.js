@@ -32,5 +32,39 @@ class MyCreep extends Creep {
         }
         if (this.transfer(Game.getObjectById(this.memory._lastStoringTargetId), this.memory._lastStoringResourceType) === ERR_NOT_IN_RANGE) this.travelTo(Game.getObjectById(this.memory._lastStoringTargetId));
     }
+    /**
+     * @returns {true | void | "fail"}
+     */
+    storeResources() {
+        if (this.store.getUsedCapacity() === 0) {
+            this.memory.storingResources = undefined;
+            return true;
+        }
+        if (!this.memory.storingResources) this.memory.storingResources = Object.keys(this.store);
+        while (this.memory.storingResources.length > 0) {
+            /** @type {ResourceConstant} */
+            const resourceType = this.memory.storingResources[0];
+            if (this.store[resourceType] === 0) {
+                this.memory.storingResources.shift();
+                continue;
+            }
+            const target = global.ResourceManager.Query(this, resourceType, this.store[resourceType], {type : "store"});
+            if (!target) {
+                this.memory.storingResources.shift();
+                continue;
+            }
+            if (this.transfer(target, resourceType) === ERR_NOT_IN_RANGE) {
+                this.travelTo(target);
+                return;
+            } else break;
+        }
+        if (this.memory.storingResources.length === 0) {
+            /**
+             * Clean up memory and Return instant Signal
+             */
+            this.memory.storingResources = undefined;
+            return "fail";
+        }
+    }
 }
 global.Lucy.App.mount(Creep, MyCreep);

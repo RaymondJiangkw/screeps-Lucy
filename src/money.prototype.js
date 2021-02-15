@@ -229,15 +229,15 @@ class Transaction {
         /**
          * Fast Resource Transfer among CentralTransferUnit
          */
-        if (this.Buyer.pos && this.Seller.pos && this.Buyer.pos.roomName === this.Seller.pos.roomName && Game.rooms[this.Buyer.pos.roomName].centralTransfer) {
-            const room = Game.rooms[this.Buyer.pos.roomName];
-            /** @type {import('./rooms.behaviors').CentralTransferUnit} */
-            const centralTransferUnit = room.centralTransfer;
-            if (centralTransferUnit.IsBelongTo(this.Buyer) && centralTransferUnit.IsBelongTo(this.Seller)) {
-                centralTransferUnit.PushOrder({from : this.Seller.structureType, to : this.Buyer.structureType, resourceType : this.description.info.resourceType, amount : this.description.info.amount, callback : function() { this.Done(); }.bind(this)});
-                return "no_specific_transfer_involved";
-            }
-        }
+        // if (this.Buyer.pos && this.Seller.pos && this.Buyer.pos.roomName === this.Seller.pos.roomName && Game.rooms[this.Buyer.pos.roomName].centralTransfer) {
+        //     const room = Game.rooms[this.Buyer.pos.roomName];
+        //     /** @type {import('./rooms.behaviors').CentralTransferUnit} */
+        //     const centralTransferUnit = room.centralTransfer;
+        //     if (centralTransferUnit.IsBelongTo(this.Buyer) && centralTransferUnit.IsBelongTo(this.Seller)) {
+        //         centralTransferUnit.PushOrder({from : this.Seller.structureType, to : this.Buyer.structureType, resourceType : this.description.info.resourceType, amount : this.description.info.amount, callback : function() { this.Done(); }.bind(this)});
+        //         return "no_specific_transfer_involved";
+        //     }
+        // }
         return true;
     }
     /**

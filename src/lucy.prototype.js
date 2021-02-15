@@ -53,3 +53,5 @@ Lucy.App.on(Lucy.Logs.Plugin);
 require("./manager.links");
 require("./manager.tasks");
 require("./manager.creeps");
+require("./manager.terminals");
+require("./manager.labs");

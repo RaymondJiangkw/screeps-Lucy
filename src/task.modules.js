@@ -94,10 +94,10 @@ class Project {
          */
         let ret = this.layers[this.pointers[object.id].layer][this.pointers[object.id].signal].Run(object, task);
         // if (!ret) {
-            // console.log(`${object} : ${this.pointers[object.id].layer}->${this.pointers[object.id].signal} : ${JSON.stringify(ret)} : ${(Game.cpu.getUsed() - startTime).toFixed(3)}`);
+        //    console.log(`${object} : ${this.pointers[object.id].layer}->${this.pointers[object.id].signal} : ${JSON.stringify(ret)} : ${(Game.cpu.getUsed() - startTime).toFixed(3)}`);
         // }
         while (ret) {
-            //console.log(`${object} : ${this.pointers[object.id].layer}->${this.pointers[object.id].signal} : ${JSON.stringify(ret)} : ${(Game.cpu.getUsed() - startTime).toFixed(3)}`);
+            // console.log(`${object} : ${this.pointers[object.id].layer}->${this.pointers[object.id].signal} : ${JSON.stringify(ret)} : ${(Game.cpu.getUsed() - startTime).toFixed(3)}`);
             // startTime = Game.cpu.getUsed();
             /* Cycle Condition */
             if (this.pointers[object.id].layer === this.layers.length - 1 && this.lastLayer2FirstLayerSignals.indexOf(ret.signal) !== -1) {

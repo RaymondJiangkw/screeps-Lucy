@@ -132,6 +132,62 @@ class MyArray extends Array {
     }
 }
 global.Lucy.App.mount(Array, MyArray);
+class Response {
+    /**
+     * @param {0 | 1 | 2 | 3 | Response} value
+     */
+    Feed(value) {
+        if (value instanceof Response) value = value.value;
+        if (value === this.PLACE_HOLDER) return this;
+        if (this.value === this.PLACE_HOLDER || this.value === this.FINISH) this.value = value;
+        else if (value === this.WAIT_UNTIL_TIMEOUT) this.value = value;
+        if (this.value === this.WAIT_UNTIL_TIMEOUT) this.timeout = Game.time + getCacheExpiration(this.TIMEOUT_MEAN, this.TIMEOUT_VARIANCE);
+        return this;
+    }
+    /**
+     * @param {0 | 1 | 2 | 3 | Response} value
+     */
+    constructor(value) {
+        if (value instanceof Response) value = value.value;
+        this.value = value;
+        this.timeout = null;
+        if (this.value === this.WAIT_UNTIL_TIMEOUT) this.timeout = Game.time + getCacheExpiration(this.TIMEOUT_MEAN, this.TIMEOUT_VARIANCE);
+    }
+}
+Response.prototype.TIMEOUT_MEAN = 500;
+Response.prototype.TIMEOUT_VARIANCE = 100;
+
+Response.prototype.FINISH = 0;
+Response.prototype.WAIT_UNTIL_UPGRADE = 1;
+Response.prototype.WAIT_UNTIL_TIMEOUT = 2;
+Response.prototype.PLACE_HOLDER = 3;
+
+class ResponsePatch {
+    /**
+     * @param {ResponsePatch} patch
+     */
+    Merge(patch) {
+        Object.keys(patch).filter(key => !key.startsWith("_")).forEach(key => this.Pick(key).Feed(patch.Pick(key)));
+    }
+    /**
+     * @param {string} patchKey
+     * @returns {Response}
+     */
+    Pick(patchKey) {
+        if (this[patchKey]) return this[patchKey];
+        else console.log(`<p style="display:inline;color:red;">Error:</p> ${patchKey} not found.`);
+    }
+    /**
+     * @param {0 | 1 | 2 | 3 | Response} value
+     * @danger if `value` is passed as an instance of Response, once original instance changes, default value of all following newly-created Response will change too.
+     * @param {...string} keys
+     */
+    constructor(value, ...keys) {
+        /** @private */
+        this._value = value;
+        keys.forEach(key => this[key] = new Response(this._value));
+    }
+}
 module.exports = {
     /**
      * isStructure distinguish `ConstructionSite` from `Structure`.
@@ -241,7 +297,7 @@ module.exports = {
     },
     /**
      * getPrice play a crucial role in operating money system.
-     * @param { ResourceConstant | "cpu" } resource
+     * @param { ResourceConstant | "cpu" | "credit" } resource
      */
     getPrice : function(resource) {
         return global.Lucy.Rules.price[resource] ? global.Lucy.Rules.price[resource] : global.Lucy.Rules.price["default"];
@@ -513,5 +569,7 @@ module.exports = {
         [STRUCTURE_FACTORY]         : STRUCTURE_FACTORY,
         [STRUCTURE_INVADER_CORE]    : STRUCTURE_INVADER_CORE,
         [STRUCTURE_PORTAL]          : STRUCTURE_PORTAL
-    }
+    },
+    Response : Response,
+    ResponsePatch : ResponsePatch
 };

@@ -61,6 +61,8 @@ function giveTerminalBehaviors() {
                 return terminal.store[this.resourceType];
             }));
         }
+        /** Register */
+        global.TerminalManager.Register(this);
     };
 }
 function giveLinkBehaviors() {
