@@ -17,7 +17,7 @@ const buyOrders = {};
 /** @type { {[id : string] : {[resourceType in ResourceConstant]? : number}} } */
 const sellOrders = {};
 
-const DEBUG = true;
+const DEBUG = false;
 
 class MyTerminal extends StructureTerminal {
     /**
@@ -309,6 +309,10 @@ class TerminalManager {
     Run() {
         this.Query().forEach(t => t.Run());
     }
+    /**
+     * @TODO
+     * Could be triggered when the free capacity of storage or terminal is in the shortage.
+     */
     Earn() {
         this.Query().forEach(t => t.Earn());
     }

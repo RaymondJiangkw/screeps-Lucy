@@ -81,7 +81,20 @@ function giveSourceBehaviors() {
             // const vacantSpace = global.MapMonitorManager.FetchVacantSpaceCnt(source.pos.roomName, Math.max(source.pos.y - 1, 1), Math.max(source.pos.x - 1, 1), Math.min(source.pos.y + 1, 48), Math.min(source.pos.x + 1, 48)) - 1;
             return source.energy;
         }));
-    }
+    };
+}
+function giveLabBehaviors() {
+    StructureLab.prototype.register = function() {
+        global.LabManager.Update(this.room.name);
+        /** @type {Array<MineralCompoundConstant | MineralConstant>} */
+        const mineralTypes = [].concat(Object.keys(REACTION_TIME), Object.keys(MINERAL_MIN_AMOUNT));
+        for (const mineralType of mineralTypes) {
+            global.ResourceManager.Register(new ResourceDescriptor(this, RESOURCE_POSSESSING_TYPES.STORING, mineralType, "labs", function(lab) {
+                if (lab.mineralType === this.resourceType) return lab.store[this.resourceType];
+                else return 0;
+            }));
+        }
+    };
 }
 function mount() {
     giveContainerBehaviors();
@@ -89,6 +102,7 @@ function mount() {
     giveLinkBehaviors();
     giveSourceBehaviors();
     giveTerminalBehaviors();
+    giveLabBehaviors();
 }
 global.Lucy.App.mount(mount);
 /** @type {import("./lucy.app").AppLifecycleCallbacks} */
@@ -107,6 +121,7 @@ const RoomResetTriggerPlugin = {
                 if (room.storage) room.storage.register();
                 if (room.terminal) room.terminal.register();
                 room["links"].forEach(l => l.register());
+                room["labs"].forEach(l => l.register());
             }
         }
     }

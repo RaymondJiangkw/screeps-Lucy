@@ -11,7 +11,10 @@
 - *Automatic Remote Mining (Source and Mineral)* (Under Development ⛏️)
 - Automatic Market
     - Buying and Sending based on demand.
-    - Selling is based on demand of credits and relies on settings.
+    - Selling is triggered automatically and based on demand of credits and relies on settings.
+- Automatic Lab
+    - Choose the produced resource based on some principles and possessed resources.
+    - Trigger `buying`, if some ingredients are needed automatically.
 - Task System
     - Allow for Function or in-built `Task Module` to create high-performance, clear and easy-to-program `run` function.
     - Event-Trigger, which is used to avoid attempt of issuing all possible tasks at every tick.

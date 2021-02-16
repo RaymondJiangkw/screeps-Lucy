@@ -359,10 +359,11 @@ class TaskConstructor {
      * @param {{fromId : Id, fromPos : RoomPosition}} param0
      * @param {{toId : Id, toPos : RoomPosition}} param1
      * @param {{list : {[resourceType in ResourceConstant]? : number}, transactions : {[resourceType in ResourceConstant]? : import("./money.prototype").Transaction[]}}} param2
-     * @param {{merge? : boolean}} [options]
+     * @param {{merge? : boolean, callback? : Function}} [options] `callback` is disabled in the case of transfering among the CentralTransferUnit because of the existence of transfering queue, which makes life easier and is much more advanced than `callback`.
      */
     TransferTask({fromId, fromPos}, {toId, toPos}, {list, transactions = {}}, options = {}) {
         _.defaults(options, {merge : true});
+        console.log(`[Transfer] ${fromId} ${fromPos} => ${toId} ${toPos} : ${JSON.stringify(list)} `);
         // At the same time, only one transfer task between `from` and `to` is allowed to exist, which is used to control amount.
         // Additional request will be added.
         if (global.TaskManager.Fetch(toId, `${fromId}->${toId}`).length > 0) {
@@ -500,12 +501,16 @@ class TaskConstructor {
                                 /**
                                  * Since `from` and `to` are in the room, which is controlled and, thus, always visible, pure check of `Game.getObjectById` is enough.
                                  */
-                                if (this.taskData[OK] || !Game.getObjectById(this.taskData.fromId) || !Game.getObjectById(this.taskData.toId)) return "dead";
+                                if (this.taskData[OK]) {
+                                    if (this.taskData.callback) this.taskData.callback();
+                                    return "dead";
+                                }
+                                if (!Game.getObjectById(this.taskData.fromId) || !Game.getObjectById(this.taskData.toId)) return "dead";
                                 return "working";
                             },
                             run : transferRun
                         },
-                        taskData : {[OK] : false, fromId, fromPos, toId, toPos, list, transactions},
+                        taskData : {[OK] : false, fromId, fromPos, toId, toPos, list, transactions, callback : options.callback},
                         taskKey : `${fromId}->${toId}`
                     });
                 } else {
@@ -530,12 +535,16 @@ class TaskConstructor {
             this.Construct({taskName : `[Transfer:${fromId},${fromPos}->${toId},${toPos}]`, taskType : "CrossTransfer"}, {mountRoomName : toPos.roomName, mountObj : {id : null, pos : toPos}}, roleDescriptor, {
                 funcs : {
                     selfCheck : function() {
-                        if (this.taskData[OK] || (Game.rooms[this.taskData.fromPos.roomName] && !Game.getObjectById(this.taskData.fromId)) || (Game.rooms[this.taskData.toPos.roomName] && !Game.getObjectById(this.taskData.toId))) return "dead";
+                        if (this.taskData[OK]) {
+                            if (this.taskData.callback) this.taskData.callback();
+                            return "dead";
+                        }
+                        if ((Game.rooms[this.taskData.fromPos.roomName] && !Game.getObjectById(this.taskData.fromId)) || (Game.rooms[this.taskData.toPos.roomName] && !Game.getObjectById(this.taskData.toId))) return "dead";
                         return "working";
                     },
                     run : transferRun,
                 },
-                taskData : {[OK] : false, fromId, fromPos, toId, toPos, list, transactions},
+                taskData : {[OK] : false, fromId, fromPos, toId, toPos, list, transactions, callback : options.callback},
                 taskKey : `${fromId}->${toId}`
             });
         }
