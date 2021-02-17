@@ -417,6 +417,7 @@ class TaskConstructor {
                  */
                 if (Object.keys(list).length === 0) {
                     this.taskData[OK] = true;
+                    console.log(`Transfer Task ${this.taskData.fromPos}=>${this.taskData.toPos} finish.`);
                     return [worker];
                 }
             }
@@ -502,6 +503,7 @@ class TaskConstructor {
                                  * Since `from` and `to` are in the room, which is controlled and, thus, always visible, pure check of `Game.getObjectById` is enough.
                                  */
                                 if (this.taskData[OK]) {
+                                    console.log(`Calling callback => ${this.taskData.callback}`);
                                     if (this.taskData.callback) this.taskData.callback();
                                     return "dead";
                                 }
@@ -536,6 +538,7 @@ class TaskConstructor {
                 funcs : {
                     selfCheck : function() {
                         if (this.taskData[OK]) {
+                            console.log(`Calling callback => ${this.taskData.callback}`);
                             if (this.taskData.callback) this.taskData.callback();
                             return "dead";
                         }
@@ -606,6 +609,7 @@ class TaskConstructor {
      * @returns {boolean}
      */
     ScoutTask(targetRoom, options = {}) {
+        if (global.TaskManager.Fetch("default", `SCOUT_${targetRoom}`).length > 0) return true;
         const status = Game.map.getRoomStatus(targetRoom).status;
         if (status === "closed") {
             global.Map.SetAsUnreachable(targetRoom);
@@ -613,10 +617,9 @@ class TaskConstructor {
         }
         /** Could be detected by Observer */
         if (Object.keys(Game.rooms).filter((roomName) => Game.map.getRoomLinearDistance(roomName, targetRoom) <= OBSERVER_RANGE && Game.rooms[roomName][STRUCTURE_OBSERVER]).length > 0) return true;
-        if (global.TaskManager.Fetch("default", `SCOUT_${targetRoom}`).length > 0) return true;
         const NEXT_SCOUT_TIMEOUT = CONTROLLER_RESERVE_MAX;
         const NEXT_SCOUT_OFFSET  = Math.floor(CONTROLLER_RESERVE_MAX / 10);
-        const roomName = Object.keys(Game.rooms).filter(roomName => Game.map.getRoomStatus(roomName).status === status && isMyRoom(roomName)).sort((u, v) => calcRoomDistance(u, targetRoom) - calcRoomDistance(v, targetRoom))[0];
+        const roomName = Object.keys(Game.rooms).filter(roomName => Game.map.getRoomStatus(roomName).status === status && isMyRoom(roomName)).sort((u, v) => Game.map.getRoomLinearDistance(u, targetRoom) - Game.map.getRoomLinearDistance(v, targetRoom))[0];
         if (!roomName) {
             global.Map.SetAsUnreachable(targetRoom, Object.keys(Game.rooms)[0]);
             return false;
@@ -710,6 +713,7 @@ class TaskManager {
             } else {
                 if (!this.id2key2tasks["default"]) this.id2key2tasks["default"] = {};
                 if (!this.id2key2tasks["default"][task.Descriptor.Key]) this.id2key2tasks["default"][task.Descriptor.Key] = [];
+                // console.log(`Register default ${task.Descriptor.Key}`);
                 this.id2key2tasks["default"][task.Descriptor.Key].push(task);
             }
         }

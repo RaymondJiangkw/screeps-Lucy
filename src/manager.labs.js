@@ -116,10 +116,23 @@ class LabUnit {
     /**
      * @private
      * @param {StructureLab} lab
-     * @param {MineralCompoundConstant | MineralConstant | null} mineralType
+     * @param {MineralCompoundConstant | MineralConstant | RESOURCE_ENERGY | null} mineralType
      * @returns {boolean}
      */
     fill(lab, mineralType) {
+        // Special Case : RESOURCE_ENERGY
+        if (mineralType === RESOURCE_ENERGY) {
+            if (lab.store.getFreeCapacity(RESOURCE_ENERGY) === 0) return true;
+            const fetchStructure = global.ResourceManager.Query(lab, RESOURCE_ENERGY, lab.store.getFreeCapacity(RESOURCE_ENERGY), {type : "retrieve", confinedInRoom : true});
+            if (!fetchStructure) {
+                console.log(`<p style="display:inline;color:red;">Error:</p> Cannot find a fetching structure for ${lab} (RESOURCE_ENERGY)`);
+                return false;
+            }
+            const transaction = new Transaction(lab, fetchStructure, getPrice(RESOURCE_ENERGY) * Math.min(checkForStore(fetchStructure, RESOURCE_ENERGY), lab.store.getFreeCapacity(RESOURCE_ENERGY)), {type : "resource", info : {resourceType : RESOURCE_ENERGY, amount : Math.min(checkForStore(fetchStructure, RESOURCE_ENERGY), lab.store.getFreeCapacity(RESOURCE_ENERGY))}});
+            transaction.Confirm();
+            TaskConstructor.TransferTask({fromId : fetchStructure.id, fromPos : fetchStructure.pos}, {toId : lab.id, toPos : lab.pos}, {list : {[RESOURCE_ENERGY] : lab.store.getFreeCapacity(RESOURCE_ENERGY)}, transactions : {[RESOURCE_ENERGY] : [transaction]}}, {merge : false});
+            return true;
+        }
         /**
          * `disabled` means that this lab is under transition. It should not to be disturbed.
          */
@@ -130,27 +143,27 @@ class LabUnit {
         if (mineralType === null && !lab.mineralType) return true;
         else if (lab.mineralType === mineralType) return true;
 
-        const outFunc = (storeStructure, callback) => {
+        const outFunc = (storeStructureId, callback) => {
             return function () {
-                if (!storeStructure) {
+                if (!storeStructureId || !Game.getObjectById(storeStructureId)) {
                     if (callback) callback();
                     return false;
                 }
-                const transaction = new Transaction(storeStructure, lab, getPrice(lab.mineralType) * lab.store[lab.mineralType], {type : "resource", info : {resourceType : lab.mineralType, amount : Math.min(checkForFreeStore(storeStructure, lab.mineralType), lab.store[lab.mineralType])}});
+                const transaction = new Transaction(Game.getObjectById(storeStructureId), lab, getPrice(lab.mineralType) * lab.store[lab.mineralType], {type : "resource", info : {resourceType : lab.mineralType, amount : Math.min(checkForFreeStore(Game.getObjectById(storeStructureId), lab.mineralType), lab.store[lab.mineralType])}});
                 transaction.Confirm();
-                TaskConstructor.TransferTask({fromId : lab.id, fromPos : lab.pos}, {toId : storeStructure.id, toPos : storeStructure.pos}, {list : {[lab.mineralType] : Math.min(checkForFreeStore(storeStructure, lab.mineralType), lab.store[lab.mineralType])}, transactions : {[lab.mineralType] : [transaction]}}, {callback : callback});
+                TaskConstructor.TransferTask({fromId : lab.id, fromPos : lab.pos}, {toId : storeStructureId, toPos : Game.getObjectById(storeStructureId).pos}, {list : {[lab.mineralType] : Math.min(checkForFreeStore(Game.getObjectById(storeStructureId), lab.mineralType), lab.store[lab.mineralType])}, transactions : {[lab.mineralType] : [transaction]}}, {callback : callback});
                 return true;
             };
         };
-        const inFunc = (fetchStructure, callback) => {
+        const inFunc = (fetchStructureId, callback) => {
             return function () {
-                if (!fetchStructure) {
+                if (!fetchStructure || !Game.getObjectById(fetchStructureId)) {
                     if (callback) callback();
                     return false;
                 }
-                const transaction = new Transaction(lab, fetchStructure, getPrice(mineralType) * lab.store.getCapacity(mineralType), {type : "resource", info : {resourceType : mineralType, amount : Math.min(checkForStore(fetchStructure, mineralType), lab.store.getCapacity(mineralType))}});
+                const transaction = new Transaction(lab, Game.getObjectById(fetchStructureId), getPrice(mineralType) * lab.store.getCapacity(mineralType), {type : "resource", info : {resourceType : mineralType, amount : Math.min(checkForStore(Game.getObjectById(fetchStructureId), mineralType), lab.store.getCapacity(mineralType))}});
                 transaction.Confirm();
-                TaskConstructor.TransferTask({fromId : fetchStructure.id, fromPos : fetchStructure.pos}, {toId : lab.id, toPos : lab.pos}, {list : {[mineralType] : Math.min(checkForStore(fetchStructure, mineralType), lab.store.getCapacity(mineralType))}, transactions : {[mineralType] : [transaction]}}, {callback : callback});
+                TaskConstructor.TransferTask({fromId : fetchStructureId, fromPos : Game.getObjectById(fetchStructureId).pos}, {toId : lab.id, toPos : lab.pos}, {list : {[mineralType] : Math.min(checkForStore(Game.getObjectById(fetchStructureId), mineralType), lab.store.getCapacity(mineralType))}, transactions : {[mineralType] : [transaction]}}, {callback : callback});
             };
         };
         let storeStructure = null, fetchStructure = null;
@@ -161,14 +174,16 @@ class LabUnit {
                 return false;
             }
         }
-        fetchStructure = global.ResourceManager.Query(lab, mineralType, lab.store.getCapacity(mineralType), {type : "retrieve", confinedInRoom : true, key : "labs"});
-        if (!fetchStructure) {
-            console.log(`<p style="display:inline;color:red;">Error:</p> Cannot find a fetching structure for ${lab} (mineralType : ${mineralType})`);
-            return false;
+        if (mineralType) {
+            fetchStructure = global.ResourceManager.Query(lab, mineralType, lab.store.getCapacity(mineralType), {type : "retrieve", confinedInRoom : true, key : "labs"});
+            if (!fetchStructure) {
+                console.log(`<p style="display:inline;color:red;">Error:</p> Cannot find a fetching structure for ${lab} (mineralType : ${mineralType})`);
+                return false;
+            }
         }
         if (DEBUG) console.log(`[${this.roomName}] ${lab} <= ${mineralType} : storeStructure ${storeStructure}, fetchStructure ${fetchStructure}`);
         this.labStatus[lab.id] = "disabled";
-        outFunc(storeStructure, inFunc(fetchStructure, () => this.labStatus[lab.id] = "working"))();
+        outFunc(storeStructure ? storeStructure.id : null, inFunc(fetchStructure ? fetchStructure.id : null, () => this.labStatus[lab.id] = "working"))();
         return true;
     }
     /**
@@ -294,6 +309,48 @@ class LabUnit {
         this["_tick"] = Game.time + getCacheExpiration(100, 10);
         return;
     }
+    /**
+     * @param {MineralBoostConstant} mineralType
+     * @param {Creep} creep
+     * @returns {Id<StructureLab> | null}
+     */
+    Reserve(mineralType, creep) {
+        if (this.mineralType2labs[mineralType]) {
+            this.mineralType2creeps[mineralType].add(creep);
+            this.creep2mineralType[creep.id] = mineralType;
+            this.fill(Game.getObjectById(this.mineralType2labs[mineralType]), RESOURCE_ENERGY);
+            return this.mineralType2labs[mineralType];
+        }
+        /** Case : No Spare Lab */
+        if (Object.keys(this.mineralType2labs).length === this.OutputLabs.length) return null;
+        const lab = this.OutputLabs.filter(l => this.labStatus[l.id] === "working" && l.mineralType === mineralType)[0] || this.OutputLabs.filter(l => this.labStatus[l.id] === "working")[0];
+        /** Case : No Working Lab */
+        if (!lab) return null;
+        /** Case : No Available Minerals */
+        if (!this.fill(lab, mineralType)) return null;
+        this.fill(lab, RESOURCE_ENERGY);
+        /** Register Process */
+        this.reservedLabs[lab.id] = mineralType;
+        this.mineralType2labs[mineralType] = lab.id;
+        this.creep2mineralType[creep.id] = mineralType;
+        this.mineralType2creeps[mineralType] = new Set([creep.id]);
+        return lab.id;
+    }
+    /**
+     * @param {Creep} creep
+     */
+    Release(creep) {
+        if (!this.creep2mineralType[creep.id]) return;
+        this.mineralType2creeps[this.creep2mineralType[creep.id]].delete(creep.id);
+        if (this.mineralType2creeps[this.creep2mineralType[creep.id]].size === 0) {
+            // Release Lab
+            this.labStatus[this.mineralType2labs[this.creep2mineralType[creep.id]]] = "working";
+            delete this.reservedLabs[this.mineralType2labs[this.creep2mineralType[creep.id]]];
+            delete this.mineralType2labs[this.creep2mineralType[creep.id]];
+            delete this.mineralType2creeps[this.creep2mineralType[creep.id]];
+        }
+        delete this.creep2mineralType[creep.id];
+    }
     Display() {
         const visual = new RoomVisual(this.roomName);
         /**
@@ -301,8 +358,8 @@ class LabUnit {
          */
         if (this.recipe) {
             const posU = new RoomPosition(this.LeftTopPos.x + 1, this.LeftTopPos.y + 1, this.LeftTopPos.roomName), posV = new RoomPosition(this.RightBottomPos.x - 1, this.RightBottomPos.y - 1, this.RightBottomPos.roomName);
-            visual.text(this.recipe[0], posU);
-            visual.text(this.recipe[1], posV);
+            visual.text(this.recipe[0], posU, {color : "blue"});
+            visual.text(this.recipe[1], posV, {color : "blue"});
         }
         if (this["_tick"]) {
             visual.text(this["_tick"] - Game.time, this.LeftTopPos);
@@ -348,10 +405,6 @@ class LabUnit {
             return;
         }
         /**
-         * Clean up OutputLabs
-         */
-        workingOutputLabs.filter(lab => lab.mineralType && (lab.mineralType !== REACTIONS[this.recipe[0]][this.recipe[1]] || lab.store.getFreeCapacity(lab.mineralType) === 0) ).forEach(w => this.fill(w, null));
-        /**
          * Fill up InputLabs
          */
         const workingInputLabs = {[this.recipe[0]] : null, [this.recipe[1]] : null};
@@ -359,28 +412,38 @@ class LabUnit {
             const u = _workingInputLabs[0].mineralType, v = _workingInputLabs[1].mineralType;
             const t_u = this.recipe[0], t_v = this.recipe[1];
             const l_u = _workingInputLabs[0], l_v = _workingInputLabs[1];
+            // if (DEBUG) console.log(u, v, t_u, t_v);
             if (u === t_u && v === t_v) { // Case : 2 matches
                 workingInputLabs[t_u] = l_u;
                 workingInputLabs[t_v] = l_v;
-            } else if (v === t_u && v === t_u) {
+            } else if (v === t_u && u === t_v) {
                 workingInputLabs[t_u] = l_v;
                 workingInputLabs[t_v] = l_u;
             } else if (u === t_u) { // Case : 1 match.
                 workingInputLabs[t_u] = l_u;
+                // if (DEBUG) console.log(v, l_v, t_v);
                 if (!this.fill(l_v, t_v)) return this.delay();
             } else if (u === t_v) {
                 workingInputLabs[t_v] = l_u;
+                // if (DEBUG) console.log(v, l_v, t_u);
                 if (!this.fill(l_v, t_u)) return this.delay();
             } else if (v === t_u) {
                 workingInputLabs[t_u] = l_v;
+                // if (DEBUG) console.log(u, l_u, t_v);
                 if (!this.fill(l_u, t_v)) return this.delay();
             } else if (v === t_v) {
                 workingInputLabs[t_v] = l_v;
+                // if (DEBUG) console.log(u, l_u, t_u);
                 if (!this.fill(l_u, t_u)) return this.delay();
             } else { // Case : 0 match.
                 if (!this.fill(l_u, t_u) || !this.fill(l_v, t_v)) return this.delay();
             }
-        } else return this.delay();
+        } else return;
+        /**
+         * Clean up OutputLabs
+         * Should be put after filling Input Labs, because of potential transfering between output labs and input labs.
+         */
+        workingOutputLabs.filter(lab => lab.mineralType && (lab.mineralType !== REACTIONS[this.recipe[0]][this.recipe[1]] || lab.store.getFreeCapacity(lab.mineralType) === 0) ).forEach(w => this.fill(w, null));
         // if (DEBUG) console.log(`[${this.roomName}] Working Input Labs : ${JSON.stringify(workingInputLabs)}`);
         /**
          * Case : Input Labs or Output Labs are not working.
@@ -404,6 +467,12 @@ class LabUnit {
          * NOTICE : At most this.OutputLabs.length - 1 labs could be reserved.
          */
         this.reservedLabs = {};
+        /** @type { {[mineralType in MineralBoostConstant] : Id<StructureLab>} } */
+        this.mineralType2labs = {};
+        /** @type { {[mineralType in MineralBoostConstant] : Set<Id<Creep>>} } */
+        this.mineralType2creeps = {};
+        /** @type { {[id : string] : MineralBoostConstant} } */
+        this.creep2mineralType = {};
         /** @type {{[id : string] : "working" | "disabled"}} */
         this.labStatus = {};
         this.init();

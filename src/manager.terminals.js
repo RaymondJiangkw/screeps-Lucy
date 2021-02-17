@@ -156,9 +156,10 @@ class MyTerminal extends StructureTerminal {
         return sum;
     }
     Run() {
+        const ENERGY_REQUEST_INTERVAL = 50;
         if (this.cooldown > 0) return;
         let availableEnergy = this.store[RESOURCE_ENERGY];
-        if (availableEnergy < global.Lucy.Rules.terminal.startEnergy) return;
+        if (availableEnergy < global.Lucy.Rules.terminal.startEnergy) return Game.time % ENERGY_REQUEST_INTERVAL === 0 ? this.Request(RESOURCE_ENERGY, global.Lucy.Rules.terminal.startEnergy, {byInRoomTransfer : true, byCrossRoomSend : false, byOrder : false}) : null;
         /**
          * 1. Respond to `send` orders
          */

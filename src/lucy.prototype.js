@@ -55,3 +55,4 @@ require("./manager.tasks");
 require("./manager.creeps");
 require("./manager.terminals");
 require("./manager.labs");
+require("./manager.deposits");

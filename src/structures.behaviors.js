@@ -757,7 +757,6 @@ function giveRampartBehaviors() {
             return global.ResourceManager.Query(this, resourceType, amount, {type : "store"});
         }.bind(this);
         /* Use Data to Determine Body */
-        const availableEnergy = global.ResourceManager.Sum(this.pos.roomName, RESOURCE_ENERGY, {type : "retrieve", allowToHarvest : false, key : "default"});
         const energyConsumptionPerUnitPerTick = 1;
         new Task(`[${this.room.name}:RampartRepair]`, this.pos.roomName, this, new TaskDescriptor("Defense", {
             worker : {
@@ -770,11 +769,11 @@ function giveRampartBehaviors() {
                     },
                 estimateWorkingTicks :
                     (object) => object.store.getCapacity() / evaluateAbility(object, "repair"),
-                bodyMinimumRequirements : bodyPartDetermination({type : "exhuastEnergy", availableEnergy, energyConsumptionPerUnitPerTick}),
+                expandFunction : (room) => bodyPartDetermination({type : "exhuastEnergy", availableEnergy : global.ResourceManager.Sum(room.name, RESOURCE_ENERGY, {type : "retrieve", allowToHarvest : false, key : "default"})}),
                 groupTag : "defensePatch",
                 tag : `${energyConsumptionPerUnitPerTick}-worker`,
                 allowEmptyTag : true,
-                mode : "shrinkToEnergyAvailable",
+                mode : "expand",
                 allowOtherTags : [`5-worker`]
             }
         }), {

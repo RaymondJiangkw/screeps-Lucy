@@ -85,7 +85,6 @@ function giveSourceBehaviors() {
 }
 function giveLabBehaviors() {
     StructureLab.prototype.register = function() {
-        global.LabManager.Update(this.room.name);
         /** @type {Array<MineralCompoundConstant | MineralConstant>} */
         const mineralTypes = [].concat(Object.keys(REACTION_TIME), Object.keys(MINERAL_MIN_AMOUNT));
         for (const mineralType of mineralTypes) {
@@ -122,6 +121,8 @@ const RoomResetTriggerPlugin = {
                 if (room.terminal) room.terminal.register();
                 room["links"].forEach(l => l.register());
                 room["labs"].forEach(l => l.register());
+                /** Register into LabManager should be put after registering labs into ResourceManager */
+                if (room["labs"].length > 0) global.LabManager.Update(room.name);
             }
         }
     }

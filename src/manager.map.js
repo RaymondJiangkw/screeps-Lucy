@@ -11,6 +11,7 @@ const isMyRoom              =   require('./util').isMyRoom;
 const PriorityQueue         =   require('./util').PriorityQueue;
 const Response              =   require("./util").Response;
 const ResponsePatch         =   require("./util").ResponsePatch;
+const DisjointSet           =   require("./util").DisjointSet;
 const username              =   require('./util').username;
 const StructureConstants    =   require("./util").StructureConstants;
 const TaskConstructor       =   require('./manager.tasks').TaskConstructor;
@@ -1569,8 +1570,8 @@ class Map {
      * @param {string} roomNameV
      */
     CalcRoomDistance(roomNameU, roomNameV) {
-        this.updateAdjacentRooms(roomNameU, {fullDistrict : true});
-        this.updateAdjacentRooms(roomNameV, {fullDistrict : true});
+        // this.updateAdjacentRooms(roomNameU, {fullDistrict : true});
+        // this.updateAdjacentRooms(roomNameV, {fullDistrict : true});
         if (this.disFromRoom[roomNameU]) this.updateDistanceBetweenRooms(roomNameU);
         else this.updateDistanceBetweenRooms(roomNameV);
         if (this.disFromRoom[roomNameU]) return this.disFromRoom[roomNameU][roomNameV].distance;
@@ -1627,12 +1628,13 @@ class Map {
      * @param {string} fromRoomName
      */
     SetAsUnreachable(toRoomName, fromRoomName) {
-        Memory._unreachableRooms[toRoomName] = Game.map.getRoomStatus(toRoomName).timestamp || Game.map.getRoomStatus(fromRoomName).timestamp;
+        Memory._unreachableRooms[toRoomName] = toRoomName? Game.map.getRoomStatus(toRoomName).timestamp : null || fromRoomName? Game.map.getRoomStatus(fromRoomName).timestamp : null || -1;
     }
     /**
      * @param {string} roomName
      */
     IsUnreachable(roomName) {
+        if (Memory._unreachableRooms[roomName] && Memory._unreachableRooms[roomName] === -1) return false;
         if (Memory._unreachableRooms[roomName] && Memory._unreachableRooms[roomName] < new Date().getTime()) delete Memory._unreachableRooms[roomName];
         if (!Memory._unreachableRooms[roomName]) return false;
         return true;
@@ -2059,6 +2061,33 @@ class Map {
             }));
         }
     }
+    /**
+     * @deprecated
+     * `StructureObserver` is much more efficient.
+     */
+    ScoutingRooms() {
+        /**
+         * @param {Set<string>} roomSet
+         * @param {number} TIMEOUT
+         */
+        const scoutingRooms = (roomSet, TIMEOUT) => {
+            Array.from(roomSet).filter(r => !this.IsUnreachable(r) && (!Memory.rooms[r] || Memory.rooms[r]._lastCheckingTick + TIMEOUT < Game.time)).forEach(r => TaskConstructor.ScoutTask(r));
+        };
+        /**
+         * Detecting Deposits and PowerBanks
+         * For a nearby highway room, if a powerbank could be successfully harvested, its remaining tick should be larger than 4500 when detected.
+         * Considering ticks spent on the road (~100-200), the scouting interval should be set to 100.
+         */
+        scoutingRooms(this.highwayRoomRecorded, 100);
+        /**
+         * Detecting Invader Core
+         */
+        scoutingRooms(this.SKRoomRecorded, 1000);
+        /**
+         * Portals are quite stable, which do not require frequent visiting.
+         */
+        scoutingRooms(this.PortalRoomRecorded, 10000);
+    }
     constructor() {
         /** @type { {[roomName : string] : Array<string>} } */
         this.sortedDistances            = {};
@@ -2121,6 +2150,9 @@ const MapPlugin = {
         global.Map = _Map;
         global.MapMonitorManager = mapMonitor;
         global.Planer = planer;
+    },
+    tickStart: () => {
+        // global.Map.ScoutingRooms();
     }
 };
 global.Lucy.App.on(MapPlugin);

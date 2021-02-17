@@ -54,9 +54,7 @@ module.exports = {
     lab : {
         checkReactionAmount : 3000 * 8,
         allowedToBuyMinerals : {
-            OH : true,
-            ZK : true,
-            UL : true
+            
         }
     }
 };

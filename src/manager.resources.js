@@ -280,7 +280,7 @@ class ResourceManager {
              * @returns {number} Positive Number
              */
             const calcKeyPenalty = function(des) {
-                if (options.key === "default" && des.Key !== "default") {
+                if (options.key !== des.Key) {
                     /* Calc the distance again */
                     return Infinity; // calcInRoomDistance(des.Obj.pos, pos) * 2 * getPrice("cpu") / 5;
                 } else return 0;

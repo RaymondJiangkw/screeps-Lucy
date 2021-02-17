@@ -69,6 +69,46 @@ class PriorityQueue {
         }
     }
 }
+class DisjointSet {
+    /**
+     * @private
+     * @param {string} key
+     */
+    init(key) {
+        if (!this.parent[key]) this.parent[key] = key;
+    }
+    /**
+     * @param {string} key
+     * @returns {string}
+     */
+    Find(key) {
+        this.init(key);
+        if (this.parent[key] === key) return key;
+        else return this.parent[key] = this.Find(this.parent[key]);
+    }
+    /**
+     * @param {string} keyU
+     * @param {string} keyV
+     */
+    Merge(keyU, keyV) {
+        this.init(keyU);
+        this.init(keyV);
+        this.parent[this.Find(keyU)] = this.Find(keyV);
+    }
+    /**
+     * @param {string} keyU
+     * @param {string} keyV
+     */
+    Same(keyU, keyV) {
+        this.init(keyU);
+        this.init(keyV);
+        return this.Find(keyU) === this.Find(keyV);
+    }
+    constructor() {
+        /** @type { {[key : string] : string} } */
+        this.parent = {};
+    }
+}
 /**
  * @param {string} name
  */
@@ -571,5 +611,6 @@ module.exports = {
         [STRUCTURE_PORTAL]          : STRUCTURE_PORTAL
     },
     Response : Response,
-    ResponsePatch : ResponsePatch
+    ResponsePatch : ResponsePatch,
+    DisjointSet : DisjointSet
 };

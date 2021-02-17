@@ -559,9 +559,7 @@ class MyRoom extends Room {
         this.memory._lastCheckingTick = Game.time;
         this.memory.owner = this.controller ? this.controller.owner ? this.controller.owner.username : this.controller.reservation? this.controller.reservation.username : null : null;
         /** Detect InvaderCore */
-        const OriginalHostileStructures = this.memory.hostileStructures || [];
         this.memory.hostileStructures = this.find(FIND_HOSTILE_STRUCTURES).map(s => s.id);
-        const differenceHostileStructures = _.difference(this.memory.hostileStructures, OriginalHostileStructures);
         /** Avoid Room */
         if (this.find(FIND_HOSTILE_STRUCTURES, {filter : {structureType : STRUCTURE_TOWER}}).length > 0) this.memory.avoid = true;
         else delete this.memory.avoid;
@@ -572,7 +570,9 @@ class MyRoom extends Room {
         /** Detect Mineral */
         if (!this.memory.mineralType) this.memory.mineralType = this.mineral ? this.mineral.mineralType : null;
         /** Detect Portals */
-        this.memory.portals = this.find(FIND_STRUCTURES, {filter : {structureType : STRUCTURE_PORTAL}}).map(portal => {return {destination : portal.destination, ticksToDecay : portal.ticksToDecay};});
+        this.memory.portals = this.find(FIND_STRUCTURES, {filter : {structureType : STRUCTURE_PORTAL}}).map(portal => {return {destination : portal.destination, ticksToDecay : portal.ticksToDecay, id : portal.id, pos : portal.pos};});
+        /** Detect Deposits */
+        this.find(FIND_DEPOSITS).forEach(d => global.DepositManager.Register(d));
         /** Add to global.Map */
         global.Map.updateAdjacentRooms(this.name);
     }
