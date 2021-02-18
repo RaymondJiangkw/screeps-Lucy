@@ -15,6 +15,8 @@ const calcInRoomDistance            = require('./util').calcInRoomDistance;
 const isCreep                       = require('./util').isCreep;
 const isStructure                   = require('./util').isStructure;
 const isConstructionSite            = require('./util').isConstructionSite;
+const calcBoost                     = require("./util").calcBoost;
+const Project                       = require("./task.modules").Project;
 const profiler = require("./screeps-profiler");
 /**
  * @type { {[id : string] : Task} }
@@ -40,10 +42,11 @@ function CleanTaskById(id) {
 /**
  * Class representing a Descriptor for Task.
  * @typedef {"creep" | "common"} RoleType
+ * @typedef {{[body in BodyPartConstant]? : {boostCompound : MineralBoostConstant, ratio : number, mode : "stubborn" | "once"}[] }} BoostRequirements
  * Support abstract task-taken objects.
  * @typedef {"static" | "expand" | "shrinkToEnergyAvailable" | "shrinkToEnergyCapacity"} CreepSpawnMode Notice that in "expand" mode, only `tag` will be considered.
  * @typedef { { minimumNumber : number, maximumNumber : number, estimateProfitPerTurn : (object : GameObject) => number, estimateWorkingTicks : (object : GameObject) => number, tag ? : string, groupTag ? : string, allowEmptyTag ? : boolean, allowOtherTags ? : Array<string>} } CommonRoleDescription `tag` is used for hiring specific `creep`. Those creeps with defined tag will not be hired into `role` without tag. `groupTag` is used to control the spawning of creeps.
- * @typedef { { bodyMinimumRequirements : {[body in BodyPartConstant]? : number}, bodyBoostRequirements? : {[body in BodyPartConstant]? : { [compound in ResourceConstant]? : number }}, expandFunction? : (room : Room) => {[body in BodyPartConstant]? : number}, mode? : CreepSpawnMode, confinedInRoom? : boolean, workingPos? : RoomPosition } & CommonRoleDescription } CreepRoleDescription
+ * @typedef { { bodyMinimumRequirements : {[body in BodyPartConstant]? : number}, bodyBoostRequirements? : BoostRequirements, expandFunction? : (room : Room) => {[body in BodyPartConstant]? : number}, mode? : CreepSpawnMode, confinedInRoom? : boolean, workingPos? : RoomPosition } & CommonRoleDescription } CreepRoleDescription
  * `expandFunction` allows much more flexibility into the setup for bodies of creeps, since it sets up the upper line instead of the bottom line and can adjust the body settings according to instant condition in the room. NOTICE : `move` parts should be specified. Values in `bodyBoostRequirements` are interpreted as ratio between satisfied bodyparts and total bodyparts. Higher level compound is calculated at higher priority, while bodypart with higher level compound is compatible with requirement of lower level compound, if it is not counted.
  * @typedef { { isSatisfied : (object : GameObject) => Boolean} & CommonRoleDescription } ObjectRoleDescription - Exclude Creep
  * @typedef { {[role : string] : CreepRoleDescription | ObjectRoleDescription } } RoleDescription
@@ -60,6 +63,9 @@ class TaskDescriptor {
     isBodySatisfied(creep, role, loose = false) {
         if (!this.roleDescription[role] || !this.roleDescription[role].bodyMinimumRequirements) return false;
         const bodyCounts = _.countBy(creep.body, 'type');
+        const boostCounts = calcBoost(creep);
+        const boostCompounds = {};
+        if (this.roleDescription[role].bodyBoostRequirements) Object.keys(this.roleDescription[role].bodyBoostRequirements).forEach(v => boostCompounds[v] = this.roleDescription[role].bodyBoostRequirements[v].map(v => v.boostCompound));
         for (const body in this.roleDescription[role].bodyMinimumRequirements) {
             if (!loose) {
                 if (this.roleDescription[role].bodyMinimumRequirements[body] > (bodyCounts[body] || 0)) return false;
@@ -67,9 +73,16 @@ class TaskDescriptor {
                 if (bodyCounts[body] === undefined) return false;
             }
             /**
-             * @TODO
              * Check whether conditions for boosting are satisfied.
+             *  1. There shouldn't be any minerals which are not allowed.
+             *  2. The ratio should not exceeds the limitation.
              */
+            if (boostCompounds[body] && boostCounts[body]) {
+                if (boostCounts[body].filter(m => !boostCompounds[body].includes(m)).length > 0) return false;
+                for (const v of this.roleDescription[role].bodyBoostRequirements[body]) {
+                    if (boostCounts[body].filter(m => m === v.boostCompound).length / bodyCounts[body] > v.ratio) return false;
+                }
+            }
         }
         return true;
     }
@@ -305,6 +318,7 @@ class Task {
                 if (this.roles[role].length < this.descriptor.RoleDescription[role].minimumNumber) this.roles[role].sufficient = false;
             }
             delete this.employee2role[indicater];
+            delete this.employee2boost[indicater];
             --this._numOfEmployees;
             if (this.transactions[indicater]) {
                 this.transactions[indicater].Done();
@@ -327,6 +341,8 @@ class Task {
         const role = this.allocRoleFunc(obj)["role"];
         Lucy.Logs.Push(new EventTaskStatusChange("employ", this, { employer: this.mountObj, role: role }));
         this.employee2role[indicater] = role;
+        this.employee2boost[indicater] = {};
+        if (this.Descriptor.RoleDescription[role].bodyBoostRequirements) Object.keys(this.Descriptor.RoleDescription[role].bodyBoostRequirements).forEach(body => this.Descriptor.RoleDescription[role].bodyBoostRequirements[body].forEach(description => this.employee2boost[indicater][description.boostCompound] = {completed : false, targetLabId : null}));
         if (!this.roles[role]) this.roles[role] = [];
         this.roles[role].push(indicater);
         /* Check whether MinimumAmount of `role` becomes satisfied */
@@ -369,6 +385,60 @@ class Task {
         }
     }
     /**
+     * @param {Creep} creep
+     * @returns {boolean}
+     */
+    Boost(creep) {
+        const role = this.employee2role[creep.id]; // => Creep must satisfy the requirements of `role`.
+        if (!this.Descriptor.RoleDescription[role].bodyBoostRequirements) return true;
+        /** @type {BoostRequirements} */
+        const boostRequirements = this.Descriptor.RoleDescription[role].bodyBoostRequirements;
+        if (this.employee2boost[creep.id].total) return true;
+        const boostCounts = calcBoost(creep);
+        for (const body in boostRequirements) {
+            for (const des of boostRequirements[body]) {
+                if (this.employee2boost[creep.id][des.boostCompound].completed) continue;
+                const boostedAmount = boostCounts[body].filter(m => m === des.boostCompound).length, totalAmount = boostCounts[body].length, expectedAmount = Math.round(totalAmount * des.ratio);
+                /**
+                 * Completion Test
+                 */
+                if (boostedAmount >= expectedAmount || (boostedAmount > 0 && des.mode === "once")) {
+                    this.employee2boost[creep.id][des.boostCompound].completed = true;
+                    global.LabManager.Release(creep);
+                    continue;
+                }
+                /**
+                 * Fetch Target Lab
+                 */
+                if (!this.employee2boost[creep.id][des.boostCompound].targetLabId) {
+                    this.employee2boost[creep.id][des.boostCompound].targetLabId = global.LabManager.Reserve(des.boostCompound, creep);
+                    if (!this.employee2boost[creep.id][des.boostCompound].targetLabId) {
+                        if (des.mode === 'once') {
+                            this.employee2boost[creep.id][des.boostCompound].completed = true;
+                            continue;
+                        }
+                        // Ensure Amount
+                        global.ResourceManager.Query(creep, des.boostCompound, Math.ceil(totalAmount * des.ratio), {type : "retrieve"});
+                        return false;
+                    }
+                }
+                /**
+                 * Boost Process
+                 */
+                const lab = Game.getObjectById(this.employee2boost[creep.id][des.boostCompound].targetLabId);
+                if ((lab.mineralType !== des.boostCompound && !global.LabManager.Fill(creep, "compound") && des.mode === "once") || (lab.store[RESOURCE_ENERGY] === 0 && !global.LabManager.Fill(creep, "energy") && des.mode === "once")) {
+                    this.employee2boost[creep.id][des.boostCompound].completed = true;
+                    global.LabManager.Release(creep);
+                    continue;
+                }
+                // Could be in the process of transfering (filling / emptying).
+                if (lab.mineralType === des.boostCompound && lab.boostCreep(creep, expectedAmount - boostedAmount) === ERR_NOT_IN_RANGE) creep.travelTo(lab);
+                return false;
+            }
+        }
+        return this.employee2boost[creep.id].total = true;
+    }
+    /**
      * @returns { GameObject | null }
      */
     get mountObj() {
@@ -384,18 +454,20 @@ class Task {
     /**
      * Returned Values should be valid.
      * @param {string} role
-     * @returns {Array<Id<Creep>>}
+     * @returns {Array<Creep>}
      */
     FetchEmployees(role) {
-        if (!this.roles[role]) return [];
-        return this.roles[role];
+        if (!this[`_employees_${role}_tick`] || this[`_employees_${role}_tick`] < Game.time) {
+            if (!this.roles[role]) return this[`_employees_${role}`] = [];
+            return this[`_employees_${role}`] = this.roles[role].map(Game.getObjectById).filter(c => this.Boost(c)); 
+        } else return this[`_employees_${role}`];
     }
     /**
      * @param { string } name
      * @param { string } mountRoomName
      * @param { GameObject } mountObj
      * @param { TaskDescriptor } descriptor
-     * @param { {selfCheck: () => "working" | "dead", run: import("./task.modules").Project | () => Array<GameObject>, calcCommutingTicks? : (obj : GameObject) => number } } [funcs] calcCommutingTicks will only be used when !`mountObj` or !`mountObj.pos` or !`obj` or `obj.pos`
+     * @param { {selfCheck: () => "working" | "dead", run: import("./task.modules").Project | {[role : string] : import("./task.modules").Project} | () => Array<GameObject>, calcCommutingTicks? : (obj : GameObject) => number } } [funcs] calcCommutingTicks will only be used when !`mountObj` or !`mountObj.pos` or !`obj` or `obj.pos`
      * @param { {} } data
      */
     constructor(name, mountRoomName, mountObj, descriptor, funcs, data = {}) {
@@ -425,6 +497,11 @@ class Task {
          * @private
          */
         this.employee2role = {};
+        /**
+         * @type { {[indicater : string] : {[mineralType : string] : {completed : boolean, targetLabId : Id<StructureLab>}, total : boolean}} }
+         * @private
+         */
+        this.employee2boost = {};
         /**
          * @type { {[role: string]: Array<string>} }
          * @private
@@ -504,7 +581,7 @@ class Task {
             if (this.State === "dead") return [];
             if (typeof this._run === "function") return this._run();
             /**
-             * @type {import("./task.modules").Project}
+             * @type {import("./task.modules").Project | {[role : string] : import("./task.modules").Project}
              */
             const project = this._run;
             /**
@@ -517,7 +594,8 @@ class Task {
                  */
                 const object = Game.getObjectById(id);
                 if (!object) console.log(`<p style="display:inline;color:red;">Error: </p>${id} in Task is invalid!`);
-                const ret = project.Run(object, this);
+                if (!this.Boost(object)) continue;
+                const ret = project instanceof Project ? project.Run(object, this) : project[this.employee2role[id]].Run(object, this);
                 if (ret) firedEmployees.push(object);
             }
             return firedEmployees;

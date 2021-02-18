@@ -57,7 +57,7 @@ function giveSpawnBehaviors() {
             if (!nearSpawnLackingEnergy) return;
             /* Query `resource` in order to decide which task to issue */
             let isResourceSpawnOnly = true;
-            let resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, lackingEnergy, {key : Lucy.Rules.arrangements.SPAWN_ONLY, type : "retrieve", excludeDefault : true, confinedInRoom : true});
+            let resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, lackingEnergy, {key : Lucy.Rules.arrangements.SPAWN_ONLY, type : "retrieve", excludeDefault : true, confinedInRoom : true, allowToHarvest : false});
             if (!resource) isResourceSpawnOnly = false;
             if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, lackingEnergy, {type : "retrieve", allowToHarvest : false, confinedInRoom : true});
             if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, lackingEnergy, {type : "retrieve", allowToHarvest : true, confinedInRoom : false});
@@ -133,7 +133,7 @@ function giveSpawnBehaviors() {
                         /**
                          * @type {Array<Creep>}
                          */
-                        const workers = Object.keys(this.employee2role).map(Game.getObjectById);
+                        const workers = this.FetchEmployees("worker");
                         /**
                          * @type {Source | AnyStoreStructure}
                          */
@@ -204,7 +204,8 @@ function giveSpawnBehaviors() {
             /**
              * @type { import('./task.prototype').GameObject | null }
              */
-            let resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, lackingEnergy, {key : Lucy.Rules.arrangements.SPAWN_ONLY, type : "retrieve", confinedInRoom : true});
+            let resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, lackingEnergy, {key : Lucy.Rules.arrangements.SPAWN_ONLY, type : "retrieve", excludeDefault : true, confinedInRoom : true, allowToHarvest : false});
+            if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, lackingEnergy, {type : "retrieve", allowToHarvest : false, confinedInRoom : true});
             if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, lackingEnergy, {type : "retrieve", allowToHarvest : true, confinedInRoom : false});
             /**
              * If there is no resources available, the refilling will be postponed.
@@ -229,7 +230,7 @@ function giveSpawnBehaviors() {
             new Task(`[${this.room.name}:farFromSpawnEnergyFilling]`, this.pos.roomName, this, new TaskDescriptor(Lucy.Rules.arrangements.SPAWN_ONLY, {
                 worker : {
                     minimumNumber : 1,
-                    maximumNumber : Infinity,
+                    maximumNumber : 1,
                     estimateProfitPerTurn :
                         function (object) {
                             if (this.EmployeeAmount === 0) return 2 * getPrice("energy") * object.store.getCapacity();
@@ -274,7 +275,7 @@ function giveSpawnBehaviors() {
                     /**
                      * @type {Array<Creep>}
                      */
-                    const workers = Object.keys(this.employee2role).map(Game.getObjectById);
+                    const workers = this.FetchEmployees("worker");
                     /**
                      * @type {Source | AnyStoreStructure}
                      */
@@ -561,7 +562,7 @@ function giveContainerBehaviors() {
             run : // Because of StructureLink, function is used here.
                 function() {
                     /** @type {Creep} */
-                    const worker = Object.keys(this.employee2role).map(Game.getObjectById)[0];
+                    const worker = this.FetchEmployees("worker")[0];
                     if (!worker) return [];
                     /** @type {StructureContainer} */
                     const container = Game.getObjectById(this.taskData.containerId);
@@ -628,7 +629,7 @@ function giveTowerBehaviors() {
             if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", confinedInRoom : false, allowToHarvest : false});
             return resource;
         }.bind(this);
-        TaskConstructor.RequestTask(this, RESOURCE_ENERGY, "triggerFillingEnergy", this.store.getFreeCapacity(RESOURCE_ENERGY), "Defense", 1, requestResource, strictRequestResource, (creep) => Math.min(creep.store.getFreeCapacity(RESOURCE_ENERGY), this.store.getFreeCapacity(RESOURCE_ENERGY)), (room) => global.ResourceManager.Sum(room.name, RESOURCE_ENERGY, {type : "retrieve", allowToHarvest : false}), (object) => object.store.getCapacity() * getPrice("energy") * 1.5, (tower) => tower.store.getFreeCapacity(RESOURCE_ENERGY) <= 10);
+        TaskConstructor.RequestTask(this, RESOURCE_ENERGY, "triggerFillingEnergy", this.store.getFreeCapacity(RESOURCE_ENERGY), "Defense", 1, requestResource, strictRequestResource, (creep) => Math.min(creep.store.getFreeCapacity(RESOURCE_ENERGY), this.store.getFreeCapacity(RESOURCE_ENERGY)), (room) => global.ResourceManager.Sum(room.name, RESOURCE_ENERGY, {type : "retrieve", allowToHarvest : false}), (object) => object.store.getCapacity() * getPrice("energy") * 5, (tower) => tower.store.getFreeCapacity(RESOURCE_ENERGY) <= 10);
     }
 }
 function giveStorageBehaviors() {

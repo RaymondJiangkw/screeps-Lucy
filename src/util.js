@@ -445,6 +445,19 @@ module.exports = {
         return ret;
     },
     /**
+     * @param {Creep} creep
+     * @returns { {[bodyPart in BodyPartConstant]? : Array<MineralBoostConstant | null>} }
+     */
+    calcBoost(creep) {
+        /** @type { {[bodyPart in BodyPartConstant]? : Array<MineralBoostConstant | null>} } */
+        const ret = {};
+        for (const des of creep.body) {
+            if (!ret[des.type]) ret[des.type] = [];
+            ret[des.type].push(des.boost || null);
+        }
+        return ret;
+    },
+    /**
      * @param {Source} source
      */
     evaluateSource(source) {

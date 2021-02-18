@@ -52,7 +52,7 @@ module.exports = {
         }
     },
     lab : {
-        checkReactionAmount : 3000 * 8,
+        checkReactionAmount : 3000,
         allowedToBuyMinerals : {
             
         }

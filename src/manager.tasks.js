@@ -358,11 +358,12 @@ class TaskConstructor {
      * when `merge` is designed to be avoided. This can be solved in some ways by "take over the task without delay".
      * @param {{fromId : Id, fromPos : RoomPosition}} param0
      * @param {{toId : Id, toPos : RoomPosition}} param1
-     * @param {{list : {[resourceType in ResourceConstant]? : number}, transactions : {[resourceType in ResourceConstant]? : import("./money.prototype").Transaction[]}}} param2
+     * @param {{list : {[resourceType in ResourceConstant]? : number}, transactions : {[resourceType in ResourceConstant]? : import("./money.prototype").Transaction[] | import("./money.prototype").Transaction}}} param2
      * @param {{merge? : boolean, callback? : Function}} [options] `callback` is disabled in the case of transfering among the CentralTransferUnit because of the existence of transfering queue, which makes life easier and is much more advanced than `callback`.
      */
-    TransferTask({fromId, fromPos}, {toId, toPos}, {list, transactions = {}}, options = {}) {
+    TransferTask({fromId, fromPos}, {toId, toPos}, {list = {}, transactions = {}}, options = {}) {
         _.defaults(options, {merge : true});
+        for (const resourceType in transactions) if (!Array.isArray(transactions[resourceType])) transactions[resourceType] = [transactions[resourceType]];
         console.log(`[Transfer] ${fromId} ${fromPos} => ${toId} ${toPos} : ${JSON.stringify(list)} `);
         // At the same time, only one transfer task between `from` and `to` is allowed to exist, which is used to control amount.
         // Additional request will be added.
@@ -370,7 +371,7 @@ class TaskConstructor {
             let func = Math.max;
             if (options.merge) func = (a, b) => a + b;
             /** @type {import("./task.prototype").Task} */
-            const task = global.TaskManager.Fetch(to.id, `${fromId}->${toId}`)[0];
+            const task = global.TaskManager.Fetch(toId, `${fromId}->${toId}`)[0];
             /** Merge List */
             for (const resourceType in list) {
                 if (!task.taskData.list[resourceType]) task.taskData.list[resourceType] = 0;
@@ -391,7 +392,7 @@ class TaskConstructor {
         }
         const transferRun = function() {
             /** @type {Creep} */
-            const worker = Object.keys(this.employee2role).map(Game.getObjectById)[0];
+            const worker = this.FetchEmployees("worker")[0];
             if (!worker) return [];
             /** @type {{[resourceType in ResourceConstant]? : number}} */
             const list = this.taskData.list;
@@ -584,7 +585,7 @@ class TaskConstructor {
                 },
                 run : function() {
                     /** @type {Creep} */
-                    const worker = Object.keys(this.employee2role).map(Game.getObjectById)[0];
+                    const worker = this.FetchEmployees("worker")[0];
                     if (!worker) return [];
                     if (worker.room.name === this.taskData.targetRoom) {
                         if (worker.claimController(worker.room.controller) === ERR_NOT_IN_RANGE) worker.travelTo(worker.room.controller);
@@ -649,7 +650,7 @@ class TaskConstructor {
                 },
                 run : function() {
                     /** @type {Creep} */
-                    const worker = Object.keys(this.employee2role).map(Game.getObjectById)[0];
+                    const worker = this.FetchEmployees("worker")[0];
                     if (!worker) return [];
                     if (!worker.memory.flags) worker.memory.flags = {};
                     if (worker.room.name === this.taskData.targetRoom) return [worker];

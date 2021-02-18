@@ -96,7 +96,7 @@ class LabUnit {
         /** @type {StructureLab[]} */
         const labs = global.MapMonitorManager.FetchStructureWithTag(this.roomName, "labs", STRUCTURE_LAB);
         labs.forEach(lab => lab.pos.x > this.LeftTopPos.x && lab.pos.x < this.RightBottomPos.x && lab.pos.y > this.LeftTopPos.y && lab.pos.y < this.RightBottomPos.y ? this.inputLabIds.push(lab.id) : this.outputLabIds.push(lab.id));
-        labs.forEach(lab => this.labStatus[lab.id] = "working");
+        labs.forEach(lab => this.labStatus[lab.id] = {transfer : "working", boost : false});
         if (this.inputLabIds.length === 2 && this.outputLabIds.length > 0) {
             this.working = true;
             this.updateRecipe();
@@ -136,7 +136,7 @@ class LabUnit {
         /**
          * `disabled` means that this lab is under transition. It should not to be disturbed.
          */
-        if (this.labStatus[lab.id] === "disabled") return false;
+        if (this.labStatus[lab.id].transfer === "disabled") return false;
         /**
          * In this case, `fill` is already satisfied.
          */
@@ -182,8 +182,8 @@ class LabUnit {
             }
         }
         if (DEBUG) console.log(`[${this.roomName}] ${lab} <= ${mineralType} : storeStructure ${storeStructure}, fetchStructure ${fetchStructure}`);
-        this.labStatus[lab.id] = "disabled";
-        outFunc(storeStructure ? storeStructure.id : null, inFunc(fetchStructure ? fetchStructure.id : null, () => this.labStatus[lab.id] = "working"))();
+        this.labStatus[lab.id].transfer = "disabled";
+        outFunc(storeStructure ? storeStructure.id : null, inFunc(fetchStructure ? fetchStructure.id : null, () => this.labStatus[lab.id].transfer = "working"))();
         return true;
     }
     /**
@@ -210,7 +210,7 @@ class LabUnit {
     /**
      * @private
      * @param {MineralCompoundConstant | MineralConstant} u
-     * @param {number} amountU
+     * @param {number} amountU `amountU` is guaranteed to be bigger than 0.
      * @returns {null | {mineralTypes : [MineralCompoundConstant | MineralConstant, MineralCompoundConstant | MineralConstant], tier : number, amount : number}}
      */
     find(u, amountU) {
@@ -223,12 +223,13 @@ class LabUnit {
          */
         const checkReactionAmount = global.Lucy.Rules.lab.checkReactionAmount;
         let tier = null, amount = null, retMineralType = null, producedAmount = null;
-        for (const v in REACTIONS[u]) {
+        const v_s = Object.keys(REACTIONS[u]).sort((a, b) => this.sum(REACTIONS[u][b]) - this.sum(REACTIONS[u][a]));
+        for (const v of v_s) {
             const _producedAmount = this.sum(REACTIONS[u][v]);
             const _tier = getTier(REACTIONS[u][v]);
             const mineralTypeVAmount = Math.min(this.sum(v), amountU);
             if (DEBUG) console.log(`[${this.roomName}] ${u} & ${v} => ${REACTIONS[u][v]} : repo ${_producedAmount}, amount ${mineralTypeVAmount}, tier ${_tier}`);
-            if (!retMineralType || producedAmount >= checkReactionAmount || (_tier > tier && mineralTypeVAmount > 0) || (_tier === tier && mineralTypeVAmount > amount) || (_tier <= tier && amount === 0)) {
+            if (!retMineralType || producedAmount >= checkReactionAmount || (_tier > tier && (mineralTypeVAmount > 0 || isAllowedToBuy(v))) || (_tier === tier && (mineralTypeVAmount > amount || isAllowedToBuy(v))) || (_tier < tier && amount === 0 && isAllowedToBuy(v))) {
                 retMineralType = v;
                 amount = mineralTypeVAmount;
                 tier = _tier;
@@ -318,19 +319,18 @@ class LabUnit {
         if (this.mineralType2labs[mineralType]) {
             this.mineralType2creeps[mineralType].add(creep);
             this.creep2mineralType[creep.id] = mineralType;
-            this.fill(Game.getObjectById(this.mineralType2labs[mineralType]), RESOURCE_ENERGY);
             return this.mineralType2labs[mineralType];
         }
         /** Case : No Spare Lab */
         if (Object.keys(this.mineralType2labs).length === this.OutputLabs.length) return null;
-        const lab = this.OutputLabs.filter(l => this.labStatus[l.id] === "working" && l.mineralType === mineralType)[0] || this.OutputLabs.filter(l => this.labStatus[l.id] === "working")[0];
+        const lab = this.OutputLabs.filter(l => !this.labStatus[l.id].boost && this.labStatus[l.id].transfer === "working" && l.mineralType === mineralType)[0] || this.OutputLabs.filter(l => !this.labStatus[l.id].boost && this.labStatus[l.id].transfer === "working")[0];
         /** Case : No Working Lab */
         if (!lab) return null;
-        /** Case : No Available Minerals */
-        if (!this.fill(lab, mineralType)) return null;
-        this.fill(lab, RESOURCE_ENERGY);
+        /** Case : No Available Minerals or Energy */
+        if (!this.fill(lab, mineralType) || !this.fill(lab, RESOURCE_ENERGY)) return null;
         /** Register Process */
-        this.reservedLabs[lab.id] = mineralType;
+        this.labStatus[l.id].boost = true;
+        this.labs2mineralType[lab.id] = mineralType;
         this.mineralType2labs[mineralType] = lab.id;
         this.creep2mineralType[creep.id] = mineralType;
         this.mineralType2creeps[mineralType] = new Set([creep.id]);
@@ -341,15 +341,32 @@ class LabUnit {
      */
     Release(creep) {
         if (!this.creep2mineralType[creep.id]) return;
-        this.mineralType2creeps[this.creep2mineralType[creep.id]].delete(creep.id);
-        if (this.mineralType2creeps[this.creep2mineralType[creep.id]].size === 0) {
+        const mineralType = this.creep2mineralType[creep.id];
+        const labId = this.mineralType2labs[mineralType];
+        this.mineralType2creeps[mineralType].delete(creep.id);
+        if (this.mineralType2creeps[mineralType].size === 0) {
             // Release Lab
-            this.labStatus[this.mineralType2labs[this.creep2mineralType[creep.id]]] = "working";
-            delete this.reservedLabs[this.mineralType2labs[this.creep2mineralType[creep.id]]];
-            delete this.mineralType2labs[this.creep2mineralType[creep.id]];
-            delete this.mineralType2creeps[this.creep2mineralType[creep.id]];
+            this.labStatus[labId].boost = false;
+            delete this.labs2mineralType[labId];
+            delete this.mineralType2labs[mineralType];
+            delete this.mineralType2creeps[mineralType];
         }
         delete this.creep2mineralType[creep.id];
+    }
+    /**
+     * `Fill` is different from `fill`.
+     * `Fill` is designed to explicitly trigger filling reserved lab with boosted compound and energy.
+     * @param {Creep} creep
+     * @param {"compound" | "energy"} type
+     * @returns {boolean}
+     */
+    Fill(creep, type) {
+        if (!this.creep2mineralType[creep.id]) return false;
+        const mineralType = this.creep2mineralType[creep.id];
+        const lab = Game.getObjectById(this.mineralType2labs[mineralType]);
+        if (type === "compound" && this.labStatus[lab.id].transfer === "working" && !this.fill(lab, mineralType)) return false;
+        else if (type === "energy" && !this.fill(lab, RESOURCE_ENERGY)) return false;
+        return true;
     }
     Display() {
         const visual = new RoomVisual(this.roomName);
@@ -395,8 +412,8 @@ class LabUnit {
         /**
          * Prepare Working Labs
          */
-        const _workingInputLabs = this.InputLabs.filter(lab => this.labStatus[lab.id] === "working");
-        const workingOutputLabs = this.OutputLabs.filter(lab => this.labStatus[lab.id] === 'working');
+        const _workingInputLabs = this.InputLabs.filter(lab => this.labStatus[lab.id].transfer === "working" && !this.labStatus[lab.id].boost);
+        const workingOutputLabs = this.OutputLabs.filter(lab => this.labStatus[lab.id].transfer === 'working' && !this.labStatus[lab.id].boost);
         /**
          * Case : `recipe` run out of resources.
          */
@@ -448,8 +465,8 @@ class LabUnit {
         /**
          * Case : Input Labs or Output Labs are not working.
          */
-        if (this.InputLabs.filter(lab => this.labStatus[lab.id] === "working").length < 2 || this.OutputLabs.filter(lab => this.labStatus[lab.id] === "working").length <= 0) return;
-        this.OutputLabs.filter(lab => this.labStatus[lab.id] === "working" && lab.cooldown === 0).forEach(l => l.runReaction(this.InputLabs[0], this.InputLabs[1]) === OK ? this.recipeFunction = true : null);
+        if (this.InputLabs.filter(lab => this.labStatus[lab.id].transfer === "working" && !this.labStatus[lab.id].boost).length < 2 || this.OutputLabs.filter(lab => this.labStatus[lab.id].transfer === "working" && !this.labStatus[lab.id].boost).length <= 0) return;
+        this.OutputLabs.filter(lab => this.labStatus[lab.id].transfer === "working" && !this.labStatus[lab.id].boost && lab.cooldown === 0).forEach(l => l.runReaction(this.InputLabs[0], this.InputLabs[1]) === OK ? this.recipeFunction = true : null);
     }
     /**
      * @param {string} roomName
@@ -466,14 +483,14 @@ class LabUnit {
          * @type {{[id : string] : MineralCompoundConstant | MineralConstant | null}}
          * NOTICE : At most this.OutputLabs.length - 1 labs could be reserved.
          */
-        this.reservedLabs = {};
+        this.labs2mineralType = {};
         /** @type { {[mineralType in MineralBoostConstant] : Id<StructureLab>} } */
         this.mineralType2labs = {};
         /** @type { {[mineralType in MineralBoostConstant] : Set<Id<Creep>>} } */
         this.mineralType2creeps = {};
         /** @type { {[id : string] : MineralBoostConstant} } */
         this.creep2mineralType = {};
-        /** @type {{[id : string] : "working" | "disabled"}} */
+        /** @type {{[id : string] : {transfer : "working" | "disabled", boost : boolean}}} */
         this.labStatus = {};
         this.init();
     }
@@ -493,6 +510,30 @@ class LabManager {
     }
     Display() {
         Object.values(this.room2labUnit).forEach(l => l.Display());
+    }
+    /**
+     * @param {MineralBoostConstant} mineralType
+     * @param {Creep} creep
+     */
+    Reserve(mineralType, creep) {
+        if (!this.room2labUnit[creep.room.name]) return null;
+        return this.room2labUnit[creep.room.name].Reserve(mineralType, creep);
+    }
+    /**
+     * @param {Creep} creep
+     */
+    Release(creep) {
+        if (!this.room2labUnit[creep.room.name]) return null;
+        return this.room2labUnit[creep.room.name].Release(mineralType, creep);
+    }
+    /**
+     * @param {Creep} creep
+     * @param {"compound" | "energy"} type
+     * @returns {boolean}
+     */
+    Fill(creep, type) {
+        if (!this.room2labUnit[creep.room.name]) return false;
+        return this.room2labUnit[creep.room.name].Fill(creep, type);
     }
     constructor() {
         /** @type { {[roomName : string] : LabUnit} } */

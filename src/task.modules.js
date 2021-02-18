@@ -467,21 +467,25 @@ function ConstructDoSomethingComponent(func, targetKey = "targetId", paramKey = 
 function BuildDepositIrrelevantResourcesProject(fetchFunc) {
     const project = new Project()
                         .InsertLayer({
-                            [OK] : new Project()
-                                        .InsertLayer({[OK] : ConstructArrayLengthCheckComponent("containedResourceTypes")})
-                                        .InsertLayer({[ARRAY_NOT_EMPTY] : ConstructArrayPopComponent("containedResourceTypes", "resourceType")})
-                                        .InsertLayer({[OK] : ConstructFetchStoreComponent(fetchFunc, (object, resourceType) => object.store[resourceType])})
-                                        .InsertLayer({[OK] : BuildGoToDoSomethingProject(1, Creep.prototype.transfer)})
-                                        .Cyclize(OK)
-                        })
-                        .InsertLayer({
-                            [OK] : ConstructEmptyComponent(OK),
-                            [ERR_NOT_FOUND] : new Project()
-                                                    .InsertLayer({[OK] : ConstructStoreFullCheckComponent()})
-                                                    .InsertLayer({
-                                                        [OK] : ConstructEmptyComponent(ERR_FULL),
-                                                        [ERR_NOT_ENOUGH_RESOURCES] : ConstructEmptyComponent(OK)
-                                                    })
+                            [OK] : new Component(function(object, task) {
+                                const attachedData = this.attachedData[object.id] || {};
+                                if (!attachedData.containedResourceTypes) return ConstructSignal(ERR_INVALID_ARGS, attachedData);
+                                let resourceType = attachedData.containedResourceTypes[0];
+                                while (attachedData.containedResourceTypes.length > 0) {
+                                    if (object.store[resourceType] === 0) {
+                                        attachedData.containedResourceTypes.shift();
+                                        resourceType = attachedData.containedResourceTypes[0];
+                                    } else break;
+                                }
+                                if (attachedData.containedResourceTypes.length === 0) return ConstructSignal(OK, attachedData);
+                                const target = fetchFunc(object.store[resourceType], resourceType);
+                                if (!target) {
+                                    if (object.store.getFreeCapacity() > 0) return ConstructSignal(OK, attachedData);
+                                    else return ConstructSignal(ERR_NOT_FOUND, attachedData);
+                                }
+                                if (object.transfer(target, resourceType) === ERR_NOT_IN_RANGE) object.travelTo(target);
+                                return null;
+                            })
                         });
     profiler.registerObject(project, `[Project DepositIrrelevantResources]`);
     return project;

@@ -131,7 +131,7 @@ class CentralSpawnUnit {
                 },
                 run : function() {
                     /** @type {Creep} */
-                    const worker = Object.keys(this.employee2role).map(Game.getObjectById)[0];
+                    const worker = this.FetchEmployees("worker")[0];
                     if (!worker) return [];
                     /** @type {number} */
                     const index = this.taskData.index;
@@ -319,7 +319,7 @@ class CentralTransferUnit {
             selfCheck : () => "working",
             run : function() {
                 /** @type {Creep} */
-                const worker = Object.keys(this.employee2role).map(Game.getObjectById)[0];
+                const worker = this.FetchEmployees("worker")[0];
                 if (!worker) return [];
                 if (!worker.memory.flags) worker.memory.flags = {};
                 /** @type {RoomPosition} */

@@ -56,6 +56,10 @@ class Traveler {
         // this.circle(destination.pos, "orange");
         // check if creep is stuck
         if (this.isStuck(creep, state)) {
+            /**
+             * @TODO
+             * Position Exchange
+             */
             state.stuckCount++;
             Traveler.circle(creep.pos, "magenta", state.stuckCount * .2);
         }
