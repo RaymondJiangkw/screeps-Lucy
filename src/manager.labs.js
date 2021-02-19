@@ -400,6 +400,7 @@ class LabUnit {
          */
         if (this["_tick"] && this["_tick"] <= Game.time) {
             this["_tick"] = null;
+            console.log(`Update Recipe from _tick`);
             this.updateRecipe();
         }
         /**

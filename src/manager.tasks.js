@@ -16,6 +16,7 @@ const Task                  = require('./task.prototype').Task;
 const TaskDescriptor        = require('./task.prototype').TaskDescriptor;
 const Constructors          = require('./task.modules').Constructors;
 const Builders              = require('./task.modules').Builders;
+const Notifier              = require("./visual.notifier").Notifier;
 const profiler              = require("./screeps-profiler");
 /**
  * A Constructor, which aims at helping to construct role.
@@ -702,8 +703,14 @@ class TaskManager {
      * @param {import("./task.prototype").Task} task
      */
     Register(roomName, task) {
-        if (!this.room2tag2tasks[roomName]) this.room2tag2tasks[roomName] = {};
-        if (!this.room2tag2tasks[roomName][task.Type]) this.room2tag2tasks[roomName][task.Type] = [];
+        if (!this.room2tag2tasks[roomName]) {
+            this.room2tag2tasks[roomName] = {};
+            Notifier.register(roomName, `Grouped Tasks`, "Total", () => `${this.room2ticks[roomName] || 0.00}`);
+        }
+        if (!this.room2tag2tasks[roomName][task.Type]) {
+            this.room2tag2tasks[roomName][task.Type] = [];
+            Notifier.register(roomName, `Grouped Tasks`, task.Type, () => `[${this.room2tag2tasks[roomName][task.Type].length || 0}] ${_.sum(this.room2tag2tasks[roomName][task.Type].map(t => t.EmployeeAmount)) || 0} => ${this.room2tag2ticks[roomName][task.Type] || 0.00}`);
+        }
         this.room2tag2tasks[roomName][task.Type].push(task);
         /** Register into Id Controller */
         if (task.Descriptor.Key) {
@@ -826,9 +833,10 @@ class TaskManager {
      */
     Run() {
         for (const roomName in this.room2tag2tasks) {
-            const _cpuUsed = Game.cpu.getUsed();
             // console.log(`[${roomName}]`);
+            const _cpuUsed = Game.cpu.getUsed();
             for (const tag in this.room2tag2tasks[roomName]) {
+                const _cpuUsed = Game.cpu.getUsed();
                 // console.log(`\t-[${tag}][${this.room2tag2tasks[roomName][tag].length}]`);
                 // this.updateTasks is cancelled here.
                 // this.updateTasks(roomName, tag);
@@ -838,7 +846,9 @@ class TaskManager {
                     task.Run();
                     // console.log(`\t\t-${task.name}[${task.EmployeeAmount}] : ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`);
                 }
+                _.set(this.room2tag2ticks, [roomName, tag], `${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`);
             }
+            this.room2ticks[roomName] = `${(Game.cpu.getUsed() - _cpuUsed).toFixed(3)}`;
             // console.log(`Total: ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`);
         }
     }
@@ -853,6 +863,10 @@ class TaskManager {
          * @type { {[id : string] : {[key : string] : Array<import("./task.prototype").Task>}} }
          */
         this.id2key2tasks = {};
+        /** @type { {[roomName : string] : number} } */
+        this.room2ticks = {};
+        /** @type { {[roomName : string] : {[tag : string] : number}} } */
+        this.room2tag2ticks = {};
     }
 };
 const _taskManager = new TaskManager();

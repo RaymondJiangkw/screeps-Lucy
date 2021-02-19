@@ -109,7 +109,7 @@ function giveSpawnBehaviors() {
                     selfCheck : function() {
                         const _selfCheck = function() {
                             if (!this.mountObj || !Game.getObjectById(this.taskData.targetId)) return "dead";
-                            const nearSpawnExtensions = _.filter(this.mountObj.room.extensions, e => Game.getTagById(e.id) === global.Lucy.Rules.arrangements.SPAWN_ONLY);
+                            const nearSpawnExtensions = _.filter(this.mountObj.room.extensions, e => e && Game.getTagById(e.id) === global.Lucy.Rules.arrangements.SPAWN_ONLY);
                             const nearSpawnLackingEnergy = _.sum(nearSpawnExtensions.map(e => e.store.getCapacity(RESOURCE_ENERGY) - e.store.getUsedCapacity(RESOURCE_ENERGY))) + _.sum(this.mountObj.room.spawns.map(s => s.store.getCapacity(RESOURCE_ENERGY) - s.store.getUsedCapacity(RESOURCE_ENERGY)));
                             /* Assume Resources are exhausted while the task is not completed. */
                             if (nearSpawnLackingEnergy > 0 && checkForStore(Game.getObjectById(this.taskData.targetId), RESOURCE_ENERGY) === 0) {
@@ -253,7 +253,7 @@ function giveSpawnBehaviors() {
                 selfCheck : function() {
                     const _selfCheck = function() {
                         if (!this.mountObj || !Game.getObjectById(this.taskData.targetId)) return "dead";
-                        const farFromSpawnExtensions = _.filter(this.mountObj.room.extensions, e => Game.getTagById(e.id) !== global.Lucy.Rules.arrangements.SPAWN_ONLY && (Game.getTagById(e.id) !== global.Lucy.Rules.arrangements.TRANSFER_ONLY || (Game.getTagById(e.id) === global.Lucy.Rules.arrangements.TRANSFER_ONLY && this.taskData.includeTransferExtension)));
+                        const farFromSpawnExtensions = _.filter(this.mountObj.room.extensions, e => e && Game.getTagById(e.id) !== global.Lucy.Rules.arrangements.SPAWN_ONLY && (Game.getTagById(e.id) !== global.Lucy.Rules.arrangements.TRANSFER_ONLY || (Game.getTagById(e.id) === global.Lucy.Rules.arrangements.TRANSFER_ONLY && this.taskData.includeTransferExtension)));
                         const farFromSpawnExtensionsLackingEnergy = _.sum(farFromSpawnExtensions.map(e => e.store.getCapacity(RESOURCE_ENERGY) - e.store.getUsedCapacity(RESOURCE_ENERGY)));
                         if (farFromSpawnExtensionsLackingEnergy > 0 && checkForStore(Game.getObjectById(this.taskData.targetId), RESOURCE_ENERGY) === 0) {
                             Lucy.Timer.add(Game.time + getCacheExpiration(nextFillingTIMEOUT, nextFillingOFFSET), issueFarFromSpawnEnergyFilling, this.mountObj.id, [], "Filling Energies for far-from-spawn Structures");

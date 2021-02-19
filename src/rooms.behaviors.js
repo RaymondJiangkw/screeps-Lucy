@@ -13,6 +13,7 @@ const checkForStore         = require('./util').checkForStore;
 const checkForFreeStore     = require('./util').checkForFreeStore;
 const getCacheExpiration    = require('./util').getCacheExpiration;
 const isMyRoom              = require('./util').isMyRoom;
+const Notifier              = require("./visual.notifier").Notifier;
 /**
  * Class Representation for CentralSpawn
  * @hardcode @see {manager.map#centralSpawn}
@@ -623,6 +624,8 @@ function mount() {
 }
 global.Lucy.App.mount(Room, MyRoom);
 global.Lucy.App.mount(mount);
+/** @type {{[roomName : string] : string}} */
+const ticks = {};
 /** @type {import("./lucy.app").AppLifecycleCallbacks} */
 const RoomPlugin = {
     reset : () => {
@@ -631,13 +634,16 @@ const RoomPlugin = {
         }
     },
     tickStart : () => {
-        const _cpuUsed = Game.cpu.getUsed();
+        
         for (const roomName in Game.rooms) {
+            const _cpuUsed = Game.cpu.getUsed();
             if (isMyRoom(Game.rooms[roomName])) {
                 Game.rooms[roomName].init();
                 global.Map.AutoPlan(roomName);
                 /** @TODO */
                 // global.Map.RemoteMine(roomName);
+                if (!ticks[roomName]) Notifier.register(roomName, `Ticks Consumption`, `Room`, () => `${ticks[roomName] || 0.00}`);
+                ticks[roomName] = `${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`;
             } else {
                 /** Trigger Tasks in Neutral Room */
                 if (Game.rooms[roomName].becomeVisible && Game.rooms[roomName].isResponsible) Game.rooms[roomName].NeutralTrigger();

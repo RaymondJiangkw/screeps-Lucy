@@ -10,8 +10,8 @@
  * @typedef { () => void } MountFunction 执行挂载的函数
  * @typedef { {[key : string] : any} } AnyClass
  * @typedef { {id : number, callback : AnyCallback}[] _CallbackStore }
- * @typedef { {"born"? : _CallbackStore, "init"? : _CallbackStore , "reset"? : _CallbackStore, "beforeTickStart"? : _CallbackStore, "tickStart"? : _CallbackStore, "afterWork"? : _CallbackStore, "tickEnd"? : _CallbackStore} } CallbackStore
- * @typedef { {"born"? : AnyCallback, "init"? : AnyCallback, "reset"? : AnyCallback, "beforeTickStart"? : AnyCallback, "tickStart"? : AnyCallback, "afterWork"? : AnyCallback, "tickEnd"? : AnyCallback} } AppLifecycleCallbacks
+ * @typedef { {"born"? : _CallbackStore, "init"? : _CallbackStore , "reset"? : _CallbackStore, "beforeTickStart"? : _CallbackStore, "tickStart"? : _CallbackStore, "afterTickEnd"? : _CallbackStore, "tickEnd"? : _CallbackStore} } CallbackStore
+ * @typedef { {"born"? : AnyCallback, "init"? : AnyCallback, "reset"? : AnyCallback, "beforeTickStart"? : AnyCallback, "tickStart"? : AnyCallback, "afterTickEnd"? : AnyCallback, "tickEnd"? : AnyCallback} } AppLifecycleCallbacks
  * @typedef { {[key : string] : any} } AnyHashMap
  * @typedef { {label : string, init : number, fetch : () => number, fetchParams? : any[], func : (newNumber : number, oldNumber : number, ...args : any[]) => void, funcParams? : any[]} } MonitorEntry 数值监视单件
  */
@@ -35,7 +35,7 @@ class App {
          * @private
          */
         this.lifecycleCallbacks = {
-            born : [], init : [], reset : [], beforeTickStart : [], tickStart : [], afterWork : [], tickEnd: []
+            born : [], init : [], reset : [], beforeTickStart : [], tickStart : [], afterTickEnd : [], tickEnd: []
         };
         /**
          * 用于标识下个on所注册回调的索引 会在on执行后自增
@@ -204,8 +204,8 @@ class App {
 
         this.execLifecycleCallback("tickStart");
 
-        this.execLifecycleCallback("afterWork");
         this.execLifecycleCallback("tickEnd");
+        this.execLifecycleCallback("afterTickEnd");
 
         return this;
     }

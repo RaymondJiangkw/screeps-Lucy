@@ -9,6 +9,7 @@ const isMyRoom                      = require('./util').isMyRoom;
 const evaluateCost                  = require('./util').evaluateCost;
 const calcInRoomDistance            = require('./util').calcInRoomDistance;
 const parseBodyPartsConfiguration   = require('./util').parseBodyPartsConfiguration;
+const { Notifier } = require("./visual.notifier");
 const profiler = require("./screeps-profiler");
 const CREEP_SPAWN_CACHE_TIMEOUT =   50;
 const CREEP_SPAWN_CACHE_OFFSET  =   5;
@@ -54,7 +55,10 @@ class CreepSpawnManager {
                 this.room2creepSpawns[descriptor.roomName].push(descriptor.creepDescriptor);
             } else {
                 if (!this.room2creepSpawnsPatch[descriptor.roomName]) this.room2creepSpawnsPatch[descriptor.roomName] = {};
-                if (!this.room2creepSpawnsPatch[descriptor.roomName][descriptor.creepDescriptor.GroupTag]) this.room2creepSpawnsPatch[descriptor.roomName][descriptor.creepDescriptor.GroupTag] = [];
+                if (!this.room2creepSpawnsPatch[descriptor.roomName][descriptor.creepDescriptor.GroupTag]) {
+                    this.room2creepSpawnsPatch[descriptor.roomName][descriptor.creepDescriptor.GroupTag] = [];
+                    Notifier.register(descriptor.roomName, `Grouped Creeps`, `${descriptor.creepDescriptor.GroupTag}`, () => `${this.room2creepSpawnsPatch[descriptor.roomName][descriptor.creepDescriptor.GroupTag].CurrentAmount || 0}/${this.room2creepSpawnsPatch[descriptor.roomName][descriptor.creepDescriptor.GroupTag].MinimumAmount || 0}`);
+                }
                 this.room2creepSpawnsPatch[descriptor.roomName][descriptor.creepDescriptor.GroupTag].push(descriptor.creepDescriptor);
             }
         }
@@ -174,14 +178,18 @@ class CreepSpawnManager {
 };
 const _creepSpawnManager = new CreepSpawnManager();
 profiler.registerClass(CreepSpawnManager, "CreepSpawnManager");
+/** @type {[roomName : string] : string} */
+const ticks = {};
 /** @type {import("./lucy.app").AppLifecycleCallbacks} */
 const CreepSpawnManagerPlugin = {
     init : () => global.CreepSpawnManager = _creepSpawnManager,
     tickEnd : () => {
-        const _cpuUsed = Game.cpu.getUsed();
         for (const roomName in Game.rooms) {
             const room = Game.rooms[roomName];
             if (!isMyRoom(room)) continue;
+            const _cpuUsed = Game.cpu.getUsed();
+            if (!ticks[roomName]) Notifier.register(roomName, `Ticks Consumption`, `Spawn`, () => `${ticks[roomName] || 0}`);
+            ticks[roomName] = `0.00`;
             // NOTICE : Query Creep is time-consuming, and it is unnecessary when no spawn is available.
             /** @type {Array<StructureSpawn>} */
             const candidateSpawns = room.spawns.filter(s => !s.spawning);
@@ -208,8 +216,8 @@ const CreepSpawnManagerPlugin = {
                         ]
                 }
             );
+            ticks[roomName] = `${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`;
         }
-        // console.log(`Spawn -> ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`);
     }
 };
 global.Lucy.App.on(CreepSpawnManagerPlugin);

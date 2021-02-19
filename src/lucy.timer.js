@@ -11,10 +11,12 @@ class Timer extends Array {
      * @param {string} description
      */
     add(tick, func, funcThis, params, description) {
+        // const { Notifier, NotifierPriority } = require("./visual.notifier");
         if (tick <= Game.time) return;
         if (!this[tick]) this[tick] = [];
         this[tick].push({ func, funcThis, params, description });
-        // console.log(`<p style="color:gray;display:inline;">[Task]</p> Scheduled Task "${description}" at ${tick} is added at ${Game.time} ...`);
+        // Notifier.notify(`Lucy.Timer.add ${description} scheduled at ${tick}`);
+        console.log(`<p style="color:gray;display:inline;">[Task]</p> Scheduled Task "${description}" at ${tick} is added at ${Game.time} ...`);
     }
     /**
      * Iterate over functions scheduled at current tick.

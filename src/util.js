@@ -7,6 +7,9 @@ const parent = i => ((i + 1) >>> 1) - 1;
 const left = i => (i << 1) + 1;
 const right = i => (i + 1) << 1;
 const username = _.sample(Game.spawns).owner.username;
+function getCacheExpiration(timeout, offset) {
+    return timeout + Math.round((Math.random()*offset*2)-offset);
+}
 class PriorityQueue {
     constructor(comparator=(a,b)=>a>b){
         this._heap=[];
@@ -308,9 +311,7 @@ module.exports = {
      * @param {number} offset
      * @returns {number}
      */
-    getCacheExpiration : function(timeout, offset) {
-        return timeout + Math.round((Math.random()*offset*2)-offset);
-    },
+    getCacheExpiration : getCacheExpiration,
     /**
      * calcDistance returns the distance between `roomU` and `roomV`.
      * @param {string | RoomPosition} roomNameU_or_posU

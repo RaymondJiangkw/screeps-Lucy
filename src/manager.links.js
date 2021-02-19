@@ -2,6 +2,7 @@
  * @module manager.link
  */
 const profiler = require("./screeps-profiler");
+const Notifier = require("./visual.notifier").Notifier;
 class LinkManager {
     /**
      * @param {string} roomName
@@ -28,6 +29,9 @@ class LinkManager {
      */
     Run() {
         for (const roomName in this.room2tags2links) {
+            const _cpuUsed = Game.cpu.getUsed();
+            if (!this.room2ticks[roomName]) Notifier.register(roomName, `Ticks Consumption`, `Link`, () => `${this.room2ticks[roomName] || 0}`);
+            this.room2ticks[roomName] = `0.00`;
             /**
              * Transfer Energy from Source Link to Spawn / Controller Link
              * Transfer Link is used while Source Links are empty, and, in this case, if Transfer Link is empty, Filling Order is issued.
@@ -70,11 +74,14 @@ class LinkManager {
                     break;
                 }
             }
+            this.room2ticks[roomName] = `${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`;
         }
     }
     constructor() {
         /** @type { {[roomName : string] : {[tag : string] : Array<Id<StructureLink>>}} } */
         this.room2tags2links = {};
+        /** @type { {[roomName : string] : string} } */
+        this.room2ticks = {};
     }
 };
 /** @param {"source" | "controller" | "spawn" | "transfer"} type */
@@ -90,9 +97,8 @@ profiler.registerClass(LinkManager, "LinkManager");
 const LinkManagerPlugin = {
     init : () => global.LinkManager = _linkManager,
     tickStart : () => {
-        const _cpuUsed = Game.cpu.getUsed();
         global.LinkManager.Run();
-        // console.log(`Link -> ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`);
+        
     }
 };
 global.Lucy.App.on(LinkManagerPlugin);

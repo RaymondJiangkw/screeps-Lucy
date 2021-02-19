@@ -28,10 +28,15 @@
 - *Structure Memory* (removed)
     - Periodical or Computation-oriented Recycle.
 - Fast Energy-Filling
-    - Imitate the layout of `tigga`.
+    - Imitate the layout of @tigga.
 
     <div style="text-align:center;"><img src="./demo/fast-energy-filling.PNG" alt="Fast Energy Filling Layout" /></div>
 - Central Transfer Unit
     - Enable flexible and fast transferring of Resources
 - Dynamic BodyParts
     - Determined based on demand
+- Visualizer & Notifier
+    - Adapted from `Overmind` written by @bencbartlett.
+    - Extend with monitoring any `variable`.
+
+    <div style="text-align:center;"><img src="./demo/notifier.PNG" alt="Notifier" /></div>

@@ -3,22 +3,17 @@ const { Timer }     = require("./lucy.timer");
 const { LogPool }   = require("./lucy.log");
 const Lucy = {
     Rules   : require("./lucy.rules"),
+    Timer   : new Timer(),
     Logs    : new LogPool(),
-    App     : new App(),
-    Timer   : new Timer()
+    App     : new App()
 };
 global.Lucy = Lucy;
-Lucy.App.on({
-    /** Signal Initialization */
-    beforeTickStart : () => {
-        global.signals = {
-            IsStructureDestroy : {},
-            IsConstructionSiteCancel : {},
-            IsNewStructure : {},
-            IsNewConstructionSite : {}
-        };
-    }
-});
+/** Mount Visual Prototype */
+require("./visual.prototype");
+/** Mount Visual Notifier */
+require("./visual.notifier");
+/** Mount Global Signals */
+require("./lucy.signal");
 /** Mount Creep.prototype.travelTo */
 require('./Traveler');
 /** Mount structures on Room.prototype */
@@ -55,4 +50,5 @@ require("./manager.tasks");
 require("./manager.creeps");
 require("./manager.terminals");
 require("./manager.labs");
+require("./manager.attack");
 require("./manager.deposits");

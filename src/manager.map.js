@@ -248,7 +248,7 @@ class Unit {
                 let subjects = [];
                 for (const structureType of this.metrics.subjects) subjects = subjects.concat(this.FetchStructurePos(structureType).map(p => new RoomPosition(p[1] + x, p[0] + y, room.name)));
                 let ret = 0;
-                subjects.forEach(s_p => objects.forEach(o_p => ret += calcInRoomDistance(s_p, o_p)));
+                subjects.forEach(s_p => objects.forEach(o_p => ret += s_p.getRangeTo(o_p)));
                 return ret + evaluateDistanceToExit_X(x, x + this.dx - 1) + evaluateDistanceToExit_Y(y, y + this.dy - 1);
             };
         }
@@ -752,7 +752,7 @@ class Planer {
                 const existStructureTypes = mapMonitor.Fetch(roomName, y, x).map(s => s.structureType);
                 const desiredStructureTypes = unit.Fetch(j, i);
                 const difference = _.difference(existStructureTypes, desiredStructureTypes);
-                if (difference > 0) return -1;
+                if (difference.length > 0) return -1;
                 /**
                  * STRUCTURE_ROAD is not counted.
                  */
@@ -814,7 +814,9 @@ class Planer {
         const fetchNumbers = Object.keys(record).map(v => parseInt(v, 10)).sort((a, b) => b - a);
         /** @type { [number, number, number, number][] } */
         let pos = [];
-        for (let i = 0; i < fetchNumbers.length && pos.length < num; ++i) pos = pos.concat(record[fetchNumbers[i]].sort((a, b) => unit.EvaluatePos(Game.rooms[roomName], a[0], a[1]) - unit.EvaluatePos(Game.rooms[roomName], b[0], b[1])));
+        for (let i = 0; i < fetchNumbers.length && pos.length < num; ++i) {
+            pos = pos.concat(record[fetchNumbers[i]].sort((a, b) => unit.EvaluatePos(Game.rooms[roomName], a[0], a[1]) - unit.EvaluatePos(Game.rooms[roomName], b[0], b[1])));
+        }
         return pos.slice(0, num);
     }
     /**
@@ -1036,9 +1038,12 @@ class Planer {
         if (!vacantPos) {
             console.log(`<p style="display:inline;color:red;">Error: </p>Unable to construct Link for ${object} : ${mapMonitor.FetchAroundVacantPos(road.pos.roomName, road.pos.y, road.pos.x, [STRUCTURE_LINK, STRUCTURE_RAMPART])}`);
             return new Response(Response.prototype.WAIT_UNTIL_TIMEOUT);
-        } else if (DEBUG) {
-            console.log(`${object}->${vacantPos}`);
         }
+        if (!this[`_planForAroundLink_${object.id}_${tag}`]) {
+            this[`_planForAroundLink_${object.id}_${tag}`] = true;
+            this.setPositionOccupied(object.pos.roomName, vacantPos.y, vacantPos.x, STRUCTURE_LINK);
+        }
+        // console.log(`${object}->${vacantPos}`);
         /** @type {StructureLink | ConstructionSite<StructureLink>} */
         const link = mapMonitor.Fetch(roomName, vacantPos.y, vacantPos.x).filter(s => s.structureType === STRUCTURE_LINK)[0];
         const rampart = mapMonitor.Fetch(roomName, vacantPos.y, vacantPos.x).filter(s => s.structureType === STRUCTURE_RAMPART)[0];
@@ -1164,6 +1169,10 @@ class Planer {
             const visual = new RoomVisual(roomName);
             rampartPos.forEach(({x, y}) => visual.circle(x, y, {radius: 0.5, fill:'#75e863',opacity: 0.3}));
         }
+        // if (!this[`_planForProtectedRamparts_${roomName}`]) {
+        //    this[`_planForProtectedRamparts_${roomName}`] = true;
+        //    rampartPos.forEach(pos => this.setPositionOccupied(roomName, pos.y, pos.x, STRUCTURE_RAMPART));
+        //}
         if (options.build) return this.constructAlongPath(roomName, rampartPos, STRUCTURE_RAMPART);
         else return new Response(Response.prototype.FINISH);
     }
@@ -1994,6 +2003,9 @@ class Map {
                     readFromMemory : true,
                     unitTypeAlias : `extensionUnit_${1}`
                 }));
+                /* Plan for Container of Mineral */
+                if (!this.planCache[roomName].feedbacks["harvestMineral"]) this.planCache[roomName].feedbacks["harvestMineral"] = new Response(Response.prototype.PLACE_HOLDER);
+                if (parseResponse(this.planCache[roomName].feedbacks["harvestMineral"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["harvestMineral"].Feed(planer.PlanForAroundOverlapContainer(Game.rooms[roomName].mineral, "forMineral", true));
                 /* Plan for Extensions */
                 if (!this.planCache[roomName].feedbacks[`extensionUnit_${2}`]) this.planCache[roomName].feedbacks[`extensionUnit_${2}`] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
                 this.planCache[roomName].feedbacks[`extensionUnit_${2}`].Merge(planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "extensions", {
@@ -2005,14 +2017,13 @@ class Map {
                     readFromMemory : true,
                     unitTypeAlias : `extensionUnit_${2}`
                 }));
-                /* Plan for Container of Mineral */
-                if (!this.planCache[roomName].feedbacks["harvestMineral"]) this.planCache[roomName].feedbacks["harvestMineral"] = new Response(Response.prototype.PLACE_HOLDER);
-                if (parseResponse(this.planCache[roomName].feedbacks["harvestMineral"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["harvestMineral"].Feed(planer.PlanForAroundOverlapContainer(Game.rooms[roomName].mineral, "forMineral", true));
                 /* Plan for Protected Ramparts */
                 if (!this.planCache[roomName].feedbacks["protectedRamparts"]) this.planCache[roomName].feedbacks["protectedRamparts"] = new Response(Response.prototype.PLACE_HOLDER);
                 this.planCache[roomName].feedbacks["protectedRamparts"].Feed(planer.PlanForProtectedRamparts(roomName, ["centralSpawn", "centralTransfer", "towers", "labUnit", `extensionUnit_${0}`, `extensionUnit_${1}`, `extensionUnit_${2}`], {
                     display : true,
-                    build : parseResponse(this.planCache[roomName].feedbacks["protectedRamparts"]) || options.objectDestroy
+                    build : parseResponse(this.planCache[roomName].feedbacks["protectedRamparts"]) || options.objectDestroy,
+                    readFromMemory : true,
+                    writeToMemory : true
                 }));
             }
             if (level >= 6) {
