@@ -75,7 +75,8 @@ class CreepSpawnManager {
          * NOTICE: Neutral or Hostile rooms are also included in `adjacentRooms`.
          * Thus, as long as the TaskCreepDescriptors from those rooms are registered, they could be accessed, which allowing for much more flexibility.
          */
-        const adjacentRooms = global.Map.Query(roomName);
+        const adjacentRooms = global.Map.Query(roomName).filter(roomName => this.room2creepSpawns[roomName] || this.room2creepSpawnsPatch[roomName]);
+        // console.log(`[${roomName}]=>${adjacentRooms}`);
         /**
          * @type { (body : {[body in BodyPartConstant]? : number}) => {[body in BodyPartConstant]? : number} }
          * If there is no `MOVE` elements in `body`, `MOVE` elements whose amount is equal to the sum of other bodyparts will be supplemented.

@@ -15,6 +15,9 @@ const DisjointSet           =   require("./util").DisjointSet;
 const username              =   require('./util').username;
 const StructureConstants    =   require("./util").StructureConstants;
 const TaskConstructor       =   require('./manager.tasks').TaskConstructor;
+const Notifier              =   require("./visual.notifier").Notifier;
+const CHAR_HEIGHT           =   require("./visual.notifier").CHAR_HEIGHT;
+const MineralSVG            =   require("./screeps-svg").Mineral;
 
 const Traveler = require("./Traveler");
 const profiler = require('./screeps-profiler');
@@ -239,11 +242,11 @@ class Unit {
                 };
                 let objects = [];
                 for (const key of this.metrics.objects) {
-                    // if (key === STRUCTURE_SPAWN) console.log(tag, planer.FetchRoomPlannedStructures(room.name, key));
+                    // if (key === STRUCTURE_SPAWN) console.log(tag, planner.FetchRoomPlannedStructures(room.name, key));
                     if (key === "energies") objects = objects.concat(room["energies"].map(s => s.pos));
                     else if (key === "mineral") objects = objects.concat(room["mineral"].pos);
                     else if (key === STRUCTURE_CONTROLLER) objects = objects.concat(room.controller.pos);
-                    else objects = objects.concat(planer.FetchRoomPlannedStructures(room.name, key));
+                    else objects = objects.concat(planner.FetchRoomPlannedStructures(room.name, key));
                 }
                 let subjects = [];
                 for (const structureType of this.metrics.subjects) subjects = subjects.concat(this.FetchStructurePos(structureType).map(p => new RoomPosition(p[1] + x, p[0] + y, room.name)));
@@ -603,7 +606,7 @@ const mapMonitor = new MapMonitor();
 
 const RAMPART_BUILD_CONTROLLER_LEVEL = 4;
 
-class Planer {
+class Planner {
     /**
      * @private
      * @param {number} _y1
@@ -1034,7 +1037,7 @@ class Planer {
         /** @type {StructureRoad} */
         const road = mapMonitor.FetchAroundStructure(roomName, pos.y, pos.x).filter(s => s.structureType === STRUCTURE_ROAD)[0];
         if (!road) return new Response(Response.prototype.WAIT_UNTIL_TIMEOUT);
-        const vacantPos = mapMonitor.FetchAroundVacantPos(road.pos.roomName, road.pos.y, road.pos.x, [STRUCTURE_LINK, STRUCTURE_RAMPART]).filter(pos => !planer.getPositionOccupied(roomName, pos.y, pos.x)).sort((posU, posV) => posU.getRangeTo(object) - posV.getRangeTo(object))[0];
+        const vacantPos = mapMonitor.FetchAroundVacantPos(road.pos.roomName, road.pos.y, road.pos.x, [STRUCTURE_LINK, STRUCTURE_RAMPART]).filter(pos => !planner.getPositionOccupied(roomName, pos.y, pos.x)).sort((posU, posV) => posU.getRangeTo(object) - posV.getRangeTo(object))[0];
         if (!vacantPos) {
             console.log(`<p style="display:inline;color:red;">Error: </p>Unable to construct Link for ${object} : ${mapMonitor.FetchAroundVacantPos(road.pos.roomName, road.pos.y, road.pos.x, [STRUCTURE_LINK, STRUCTURE_RAMPART])}`);
             return new Response(Response.prototype.WAIT_UNTIL_TIMEOUT);
@@ -1185,6 +1188,7 @@ class Planer {
     updateRoadBetweenPositions(posU, posV, options = {}) {
         _.defaults(options, {range : 0, ignoreErr : false});
         const key = `${posU}->${posV}`;
+        if (Memory._roads && Memory._roads[key]) return this.roads[key] = Memory._roads[key].map(v => new RoomPosition(v.x, v.y, v.roomName));
         /**
          * Decide whether road is built in rooms or between rooms.
          */
@@ -1202,12 +1206,13 @@ class Planer {
             path.unshift({x : posU.x, y : posU.y});
             this.roads[key] = path.map(v => new RoomPosition(v.x, v.y, posU.roomName));
         } else {
-            const path = Traveler.findTravelPath(posU, posV, {range : options.range, ignoreCreeps : true, maxOps : 20000, maxRooms : options.maxRooms});
+            const path = Traveler.findTravelPath(posU, posV, {range : options.range, ignoreCreeps : true, maxOps : 500000});
             if (!options.ignoreErr && path.incomplete) {
                 console.log(`<p style="display:inline;color:red;">Error:</p> Path from ${posU} to ${posV} is incomplete.`);
             }
             this.roads[key] = path.path;
         }
+        _.set(Memory, [`_roads`, key], this.roads[key]);
     }
     /**
      * @param {RoomPosition} posU
@@ -1277,21 +1282,21 @@ class Planer {
      * If `roomName` is provided, its `center` will be used as origin.
      * @param {string | RoomPosition} roomName_or_posU
      * @param {string | RoomPosition} roomName_or_posV
-     * @param { {display? : boolean, road? : boolean} } [options]
+     * @param { {display? : boolean, road? : boolean, maxRooms? : number} } [options]
      * @returns {Response}
      */
     Link(roomName_or_posU, roomName_or_posV, options = {}) {
         _.defaults(options, {display : true, road : false});
         if (Memory._disable) options.display = false;
-        const posU = roomName_or_posU instanceof RoomPosition ? roomName_or_posU : _Map.getCenter(roomName_or_posU);
-        const posV = roomName_or_posV instanceof RoomPosition ? roomName_or_posV : _Map.getCenter(roomName_or_posV);
+        const posU = typeof roomName_or_posU === "string"  ? _Map.getCenter(roomName_or_posU) : roomName_or_posU;
+        const posV = typeof roomName_or_posV === "string" ? _Map.getCenter(roomName_or_posV) : roomName_or_posV;
         if (!posU || !posV) {
             console.log(`<p style="display:inline;color:red;">Error:</p> Unable to link ${roomName_or_posU} to ${roomName_or_posV}`);
             return new Response(Response.prototype.WAIT_UNTIL_TIMEOUT);
         }
-        const path = this.FetchRoad(posU, posV, {range : 0, ignoreErr : true});
+        const path = this.FetchRoad(posU, posV, {range : 1, ignoreErr : true, maxRooms : options.maxRooms});
         if (options.display) this.displayRoad(path);
-        if (options.road) return this.linkRoad(path);
+        if (options.road) return this.linkRoad(path, {excludeHeadTail : false});
         else return new Response(Response.prototype.FINISH);
     }
     /**
@@ -1350,14 +1355,11 @@ class Planer {
 /**
  * Static Variable
  */
-Planer.prototype.DISTANCE_FROM_EDGE = 5;
+Planner.prototype.DISTANCE_FROM_EDGE = 5;
 
-/* Room Design Type */
-const ROOM_TYPE_NORMAL_CONTROLLED_ROOM  = "normal";
+const planner = new Planner();
 
-const planer = new Planer();
-
-planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, new Unit(
+planner.RegisterUnit("normal", new Unit(
     [
         [Unit.prototype.PLACE_ANY, STRUCTURE_ROAD, STRUCTURE_ROAD, STRUCTURE_ROAD, STRUCTURE_ROAD, STRUCTURE_ROAD, Unit.prototype.PLACE_ANY],
         [STRUCTURE_ROAD, STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, [STRUCTURE_SPAWN, STRUCTURE_RAMPART], STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, STRUCTURE_ROAD],
@@ -1369,7 +1371,7 @@ planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, new Unit(
     ]
     , "centralSpawn", global.Lucy.Rules.arrangements.SPAWN_ONLY, "", "red", {type:"distanceSum", objects : [STRUCTURE_CONTROLLER, "mineral", "energies"], subjects : [STRUCTURE_SPAWN]}, {avoidOtherToOverLapRoad : true, primary : true}));
 
-planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, new Unit(
+planner.RegisterUnit("normal", new Unit(
     [
         [[STRUCTURE_STORAGE, STRUCTURE_RAMPART], [STRUCTURE_NUKER, STRUCTURE_RAMPART], [STRUCTURE_POWER_SPAWN, STRUCTURE_RAMPART]],
         [[STRUCTURE_TERMINAL, STRUCTURE_RAMPART], STRUCTURE_ROAD, STRUCTURE_EXTENSION],
@@ -1377,13 +1379,13 @@ planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, new Unit(
     ]
     , "centralTransfer", global.Lucy.Rules.arrangements.TRANSFER_ONLY, "", "orange", {type:"distanceSum", objects : [STRUCTURE_CONTROLLER, STRUCTURE_SPAWN], subjects : [STRUCTURE_STORAGE, STRUCTURE_TERMINAL, STRUCTURE_FACTORY]}, {avoidOverLapRoad : true}));
 
-planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, new Unit(
+planner.RegisterUnit("normal", new Unit(
     [
         [[STRUCTURE_TOWER, STRUCTURE_RAMPART]]
     ]
     , "towers", "defense", "⛫", "yellow", {type : "distanceSum", objects : [STRUCTURE_STORAGE, STRUCTURE_CONTAINER, STRUCTURE_TERMINAL], subjects : [STRUCTURE_TOWER]}, {alongRoad : true}));
 
-planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, new Unit(
+planner.RegisterUnit("normal", new Unit(
     [
         [STRUCTURE_ROAD, STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, STRUCTURE_ROAD],
         [STRUCTURE_EXTENSION, STRUCTURE_ROAD, STRUCTURE_EXTENSION, STRUCTURE_ROAD, STRUCTURE_EXTENSION],
@@ -1393,7 +1395,7 @@ planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, new Unit(
     ]
     , "extensionUnit", "extension", "", "yellow", {type : "distanceSum", objects : [STRUCTURE_SPAWN, STRUCTURE_STORAGE, STRUCTURE_TERMINAL], subjects : [STRUCTURE_EXTENSION]}, {avoidOtherToOverLapRoad : true, avoidOverLapRoad : true}));
 
-planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, new Unit(
+planner.RegisterUnit("normal", new Unit(
     [
         [Unit.prototype.PLACE_ANY, [STRUCTURE_LAB, STRUCTURE_RAMPART], [STRUCTURE_LAB, STRUCTURE_RAMPART], Unit.prototype.PLACE_ANY],
         [[STRUCTURE_LAB, STRUCTURE_RAMPART], [STRUCTURE_LAB, STRUCTURE_RAMPART, Unit.prototype.FIRST_BUILD_HERE], STRUCTURE_ROAD, [STRUCTURE_LAB, STRUCTURE_RAMPART]],
@@ -1402,7 +1404,7 @@ planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, new Unit(
     ]
     , "labUnit", "labs", "", "purple", {type : "distanceSum", objects : [STRUCTURE_SPAWN], subjects : [STRUCTURE_LAB]}, {avoidOverLapRoad : true}));
 
-planer.RegisterUnit(ROOM_TYPE_NORMAL_CONTROLLED_ROOM, new Unit(
+planner.RegisterUnit("normal", new Unit(
     [
         [STRUCTURE_EXTENSION]
     ]
@@ -1422,21 +1424,9 @@ class Map {
      * @param {string} roomName
      */
     updateDistanceCache(roomName) {
-        if (!this.sortedDistancesExpiration[roomName] || this.sortedDistancesExpiration[roomName] <= Game.time) {
-            this.sortedDistancesExpiration[roomName] = Game.time + getCacheExpiration(ROOM_DISTANCE_CACHE_TIMEOUT, ROOM_DISTANCE_CACHE_OFFSET);
-            this.updateAdjacentRooms(roomName, {fullDistrict : true});
-            this.updateDistanceBetweenRooms(roomName);
-            /**
-             * Only those
-             *  - presumably, "reachable"
-             *  - neutral
-             *  - controlled
-             *  - reserved
-             * rooms are added.
-             */
-            let roomNames = Object.keys(Game.rooms).filter((r) => this.disFromRoom[roomName][r].distance !== Infinity && (!Game.rooms[r].controller || (Game.rooms[r].controller.my || (Game.rooms[r].controller.reservation && Game.rooms[r].controller.reservation.username === username) || (!Game.rooms[r].controller.owner && !Game.rooms[r].controller.reservation))));
-            this.sortedDistances[roomName] = roomNames.sort((u, v) => this.disFromRoom[roomName][u].distance - this.disFromRoom[roomName][v].distance);
-        }
+        this.updateAdjacentRooms(roomName, {fullDistrict : true});
+        this.updateDistanceBetweenRooms(roomName);
+        this.sortedDistances[roomName] = Array.from(this.roomRecorded).sort((u, v) => this.disFromRoom[roomName][u].distance - this.disFromRoom[roomName][v].distance);
     }
     /**
      * @param {RoomPosition} pos
@@ -1588,12 +1578,13 @@ class Map {
     }
     /**
      * @param {string} roomName
+     * @param {boolean} [dryRun]
      * @returns {"invisible" | "visible" | "scouting"}
      */
-    EnsureVisibility(roomName) {
+    EnsureVisibility(roomName, dryRun = false) {
         if (Game.rooms[roomName]) return "visible";
         if (this.IsUnreachable(roomName)) return "invisible";
-        if (TaskConstructor.ScoutTask(roomName, {default : true}) === false) return "invisible";
+        if (TaskConstructor.ScoutTask(roomName, {default : true, dryRun}) === false) return "invisible";
         else return "scouting";
     }
     /**
@@ -1729,7 +1720,7 @@ class Map {
                 if (Memory.rooms[v].sourceAmount !== Memory.rooms[u].sourceAmount) return Memory.rooms[v].sourceAmount - Memory.rooms[u].sourceAmount;
                 return Math.min(...myRoomNames.map(myRoomName => calcRoomDistance(myRoomName, u))) - Math.min(...myRoomNames.map(myRoomName => calcRoomDistance(myRoomName, v)));
             })
-            .filter(roomName => planer.IsRoomFit(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM));
+            .filter(roomName => planner.IsRoomFit(roomName, "normal"));
         for (let i = 0, cnt = 0; cnt < amount && i < candidates.length; ++i) if (TaskConstructor.ClaimTask(candidates[i]) === false) continue; else ++cnt;
         return true;
     }
@@ -1744,98 +1735,106 @@ class Map {
     RemoteMine(roomName) {
         if (this.room2RemoteMineExpiration[roomName] && this.room2RemoteMineExpiration[roomName] > Game.time) return;
         /**
-         * Necessary Data Preparation
+         * Because we apply strict distance between rooms, it is of high possibility that
+         * chosen rooms will not found unreachable while working.
          */
-        /** @type {Array<{roomName : string, profit : number}>} */
-        let profitOfRoomNames = [];
-        /** @type {Array<{roomName : string, mineralType : MineralConstant}>} */
-        let mineralOfRoomNames = [];
+        const ENERGY_MAXIMUM_ROOM_DISTANCE  = 1;
+        const MINERAL_MAXIMUM_ROOM_DISTANCE = 2;
+        const ENERGY_MAXIMUM_ROOM           = 1;
+        const MINERAL_MAXIMUM_ROOM          = 1;
         /** Remote Energy Information */
-        if (this.room2RemoteMiningCandidates[roomName]) profitOfRoomNames = this.room2RemoteMiningCandidates[roomName];
-        else {
-            this.updateAdjacentRooms(roomName, {fullDistrict : true});
-            this.updateDistanceBetweenRooms(roomName);
-            const adjacentRoomNames = [].concat(Array.from(this.NormalRoomRecorded), Array.from(this.SKRoomRecorded), Array.from(this.PortalRoomRecorded)).filter((roomName) => !isMyRoom(roomName));
-            let isThereAnyInformationLacking = 0;
-            for (const targetRoomName of adjacentRoomNames) {
-                const ret = this.IsExploitRoomProfitable(roomName, targetRoomName, "energy");
-                if (ret === null) isThereAnyInformationLacking++;
-                else profitOfRoomNames.push({roomName : targetRoomName,  profit : ret});
+        if (!this.room2RemoteMiningCandidates[roomName]) {
+            if (Game.rooms[roomName].memory.room2RemoteMiningCandidates) this.room2RemoteMiningCandidates[roomName] = Game.rooms[roomName].memory.room2RemoteMiningCandidates;
+            else {
+                /** @type {Array<{roomName : string, profit : number}>} */
+                let profitOfRoomNames = [];
+                this.updateAdjacentRooms(roomName, {fullDistrict : true});
+                this.updateDistanceBetweenRooms(roomName);
+                /**
+                 * @shard3
+                 * It is not profitable to harvest energy in a central room in shard 3
+                 */
+                /** @type {Array<string>} */
+                const adjacentRoomNames = Array.from(this.NormalRoomRecorded).filter(r => !isMyRoom(r) && calcRoomDistance(r, roomName) <= ENERGY_MAXIMUM_ROOM_DISTANCE);
+                let isThereAnyInformationLacking = 0;
+                for (const targetRoomName of adjacentRoomNames) {
+                    const ret = this.IsExploitRoomProfitable(roomName, targetRoomName, "energy");
+                    if (ret === null) ++isThereAnyInformationLacking;
+                    else profitOfRoomNames.push({roomName : targetRoomName,  profit : ret});
+                }
+                if (isThereAnyInformationLacking > 0) return this.room2RemoteMineExpiration[roomName] = Game.time + getCacheExpiration(isThereAnyInformationLacking * 50, 50);
+                profitOfRoomNames = profitOfRoomNames
+                    .filter((info) => info["profit"] > 0)
+                    /** Hostile Rooms are avoided and My Reservation Rooms are included */
+                    .filter(({roomName}) => !Memory.rooms[roomName].avoid && (!Memory.rooms[roomName].owner || Memory.rooms[roomName].owner === username))
+                    /** Passing Through Hostile Rooms are forbidden */
+                    .filter(value => this.DescribeRoute(roomName, value.roomName).filter(r => !isMyRoom(r) && Memory.rooms[r] && (Memory.rooms[r].avoid || (Memory.rooms[r].owner && Memory.rooms[r].owner !== username && Memory.rooms[r].owner !== "Invader")) && this.EnsureVisibility(r, true) !== "invisible").length === 0)
+                    /** Rooms as target for others are avoided */
+                    .filter(value => !Memory.rooms[value.roomName].asRemoteMiningRoom || Memory.rooms[value.roomName].asRemoteMiningRoom === roomName)
+                    .sort((u, v) => v["profit"] - u["profit"]);
+                this.room2RemoteMiningCandidates[roomName] = profitOfRoomNames.slice(0, ENERGY_MAXIMUM_ROOM);
+                Game.rooms[roomName].memory.room2RemoteMiningCandidates = this.room2RemoteMiningCandidates[roomName];
             }
-            if (isThereAnyInformationLacking > 0) return this.room2RemoteMineExpiration[roomName] = Game.time + isThereAnyInformationLacking * 50;
-            profitOfRoomNames = profitOfRoomNames.filter((info) => info["profit"] > 0).sort((u, v) => v["profit"] - u["profit"]);
-            this.room2RemoteMiningCandidates[roomName] = profitOfRoomNames;
+            this.room2RemoteMiningCandidates[roomName].forEach(v => {
+                Notifier.register(roomName, `Remote Mining`, v.roomName, () => `🟡`);
+                _.set(Memory.rooms, [v.roomName, "asRemoteMiningRoom"], roomName);
+            });
         }
         /** Remote Mineral Information */
-        if (this.room2RemoteMineral[roomName]) mineralOfRoomNames = this.room2RemoteMineral[roomName];
-        else {
-            this.updateAdjacentRooms(roomName, {fullDistrict : true});
-            this.updateDistanceBetweenRooms(roomName);
-            const adjacentRoomNames = Array.from(this.SKRoomRecorded).filter((roomName) => !isMyRoom(roomName));
-            let isThereAnyInformationLacking = 0;
-            for (const targetRoomName of adjacentRoomNames) {
-                const ret = this.IsExploitRoomProfitable(roomName, targetRoomName, "mineral");
-                if (ret === null) isThereAnyInformationLacking++;
-                else if (ret === true) mineralOfRoomNames.push({roomName : targetRoomName, mineralType : Memory.rooms[targetRoomName].mineralType});
+        if (!this.room2RemoteMineralCandidates[roomName]) {
+            if (Game.rooms[roomName].memory.room2RemoteMineralCandidates) this.room2RemoteMineralCandidates[roomName] = Game.rooms[roomName].memory.room2RemoteMineralCandidates;
+            else {
+                /** @type {Array<{roomName : string, mineralType : MineralConstant}>} */
+                let mineralOfRoomNames = [];
+                this.updateAdjacentRooms(roomName, {fullDistrict : true});
+                this.updateDistanceBetweenRooms(roomName);
+                const adjacentRoomNames = Array.from(this.SKRoomRecorded).filter(r => calcRoomDistance(r, roomName) <= MINERAL_MAXIMUM_ROOM_DISTANCE);
+                let isThereAnyInformationLacking = 0;
+                for (const targetRoomName of adjacentRoomNames) {
+                    const ret = this.IsExploitRoomProfitable(roomName, targetRoomName, "mineral");
+                    if (ret === null) isThereAnyInformationLacking++;
+                    else if (ret === true) mineralOfRoomNames.push({roomName : targetRoomName, mineralType : Memory.rooms[targetRoomName].mineralType});
+                }
+                if (isThereAnyInformationLacking > 0) return this.room2RemoteMineExpiration[roomName] = Game.time + isThereAnyInformationLacking * 50;
+                mineralOfRoomNames = mineralOfRoomNames
+                    /** Only want those possessing minerals we do not have */
+                    .filter(({mineralType}) => !Object.values(Game.rooms).filter(r => isMyRoom(r)).map(r => r.mineral.mineralType).includes(mineralType))
+                    /** Passing Through Hostile Rooms are forbidden */
+                    .filter(value => this.DescribeRoute(roomName, value.roomName).filter(r => !isMyRoom(r) && Memory.rooms[r] && (Memory.rooms[r].owner && Memory.rooms[r].owner !== username && Memory.rooms[r].owner !== "Invader") && this.EnsureVisibility(r, true) !== "invisible").length === 0)
+                    /** Rooms as target for others are avoided */
+                    .filter(value => !Memory.rooms[value.roomName].asRemoteMineralRoom || Memory.rooms[value.roomName].asRemoteMineralRoom === roomName)
+                    .sort((u, v) => calcRoomDistance(roomName, u.roomName) - calcRoomDistance(roomName, v.roomName));
+                this.room2RemoteMineralCandidates[roomName] = mineralOfRoomNames.slice(0, MINERAL_MAXIMUM_ROOM);
+                Game.rooms[roomName].memory.room2RemoteMineralCandidates = this.room2RemoteMineralCandidates[roomName];
             }
-            if (isThereAnyInformationLacking > 0) return this.room2RemoteMineExpiration[roomName] = Game.time + isThereAnyInformationLacking * 50;
-            this.room2RemoteMineral[roomName] = mineralOfRoomNames;
+            this.room2RemoteMineralCandidates[roomName].forEach(v => {
+                Notifier.register(roomName, `Remote Mining`, v.roomName, () => v.mineralType);
+                _.set(Memory.rooms, [v.roomName, "asRemoteMineralRoom"], roomName);
+            });
         }
         /**
-         * 0. Decision Options & Constants
+         * Remote Energy : Start from Level 4
          */
-        let options = {
-            controllerUpgrade : false
-        };
-        profitOfRoomNames = profitOfRoomNames
-            /** It is not profitable to harvest energy in a central room in shard 3 */
-            .filter(({roomName, profit}) => Memory.rooms[roomName].sourceAmount <= 2)
-            /** Hostile Rooms are avoided and My Reservation Rooms are included */
-            .filter(({roomName, profit}) => !Memory.rooms[roomName].avoid && (!Memory.rooms[roomName].owner || Memory.rooms[roomName].owner === username))
-            /** Passing Through Hostile Rooms are forbidden */
-            .filter(value => this.DescribeRoute(roomName, value.roomName).filter(r => !isMyRoom(r) && Memory.rooms[r] && (Memory.rooms[r].avoid || (Memory.rooms[r].owner && Memory.rooms[r].owner !== username))).length === 0)
-            /** Rooms as target for others are avoided */
-            .filter(value => !Memory.rooms[value.roomName].asRemoteMiningRoom || Memory.rooms[value.roomName].asRemoteMiningRoom === roomName);
-        // console.log(roomName, JSON.stringify(profitOfRoomNames));
-        /**
-         * No Candidates -> Break and Wait until some changes may be made.
-         */
-        if (profitOfRoomNames.length === 0) return this.room2RemoteMineExpiration[roomName] = Game.time + getCacheExpiration(CREEP_LIFE_TIME, CREEP_LIFE_TIME / 10);
-        const level = Game.rooms[roomName].controller.level;
-        /**
-         * 1. Prepare Configuration for Room : roomName
-         */
-        if (!this.remoteMineCache[roomName]) {
-            this.remoteMineCache[roomName] = {
-                controllerLevel : Game.rooms[roomName].controller.level,
-                remoteRoomNum : 0
-            };
-            options.controllerUpgrade = true;
+        if (Game.rooms[roomName].controller.level >= 4) {
+            /** Ensure Visibility */
+            this.room2RemoteMiningCandidates[roomName].forEach(v => {
+                if (!this[`_remote_mining_energy_${roomName}=>${v.roomName}`]) {
+                    this.DescribeRoute(roomName, v.roomName).forEach(r => {
+                        this.EnsureVisibility(r);
+                        _.set(Memory.rooms, [r, "isResponsible"], true);
+                    });
+                    TaskConstructor.ReserveTask(v.roomName);
+                    this[`_remote_mining_energy_${roomName}=>${v.roomName}`] = true;
+                }
+            });
         }
         /**
-         * 2. Update Decision Options
+         * Remote Mineral : Start from Level 7
+         * @TODO
          */
-        if (Game.rooms[roomName].controller.level !== this.remoteMineCache[roomName].controllerLevel) {
-            options.controllerUpgrade = true;
-            this.remoteMineCache[roomName].controllerLevel = Game.rooms[roomName].controller.level;
+        if (Game.rooms[roomName].controller.level >= 7) {
+
         }
-        if (options.controllerUpgrade) {
-            /** In shard 3, one remote mining room is appropriate considering the constraint of CPU. */
-            if (level >= 4) {
-                this.remoteMineCache[roomName].remoteRoomNum = 1;
-            }
-        }
-        /**
-         * 3. Ensure Visibility
-         */
-        for (let i = 0; i < this.remoteMineCache[roomName].remoteRoomNum && i < profitOfRoomNames.length; ++i) {
-            const targetRoomName = profitOfRoomNames[i].roomName;
-            const route = this.DescribeRoute(roomName, targetRoomName);
-            
-        }
-        /**
-         * 4. Build Infrastructure
-         */
     }
     /**
      * Query returns an array of roomName sorted by distance.
@@ -1846,9 +1845,11 @@ class Map {
         return this.sortedDistances[roomName];
     }
     /**
+     * @param {"normal" | "remoteMining_energy" | "remoteMining_mineral"} roomType
      * @param {string} roomName
+     * @param {string} [fromRoomName] Used when `roomType` is `remoteMining_energy` or `remoteMining_mineral`.
      */
-    AutoPlan(roomName) {
+    AutoPlan(roomType, roomName, fromRoomName) {
         const _cpuUsed = Game.cpu.getUsed();
         /** Initialize some Variables */
         if (!Memory.autoPlan) Memory.autoPlan = {};
@@ -1861,6 +1862,9 @@ class Map {
             objectDestroy : false,
             structureConstruct : false
         };
+        // NOTICE: remove Of ConstructionSite is not counted by EVENT_OBJECT_DESTROYED.
+        if (Game.rooms[roomName].getEventLog().filter(e => e.event === EVENT_OBJECT_DESTROYED && e.data.type !== "creep").length > 0 || global.signals.IsConstructionSiteCancel[roomName] || global.signals.IsStructureDestroy[roomName]) options.objectDestroy = true;
+        if (global.signals.IsNewStructure[roomName]) options.structureConstruct = true;
         /**
          * @param {Response} response
          */
@@ -1870,39 +1874,36 @@ class Map {
             if (response.value === response.WAIT_UNTIL_TIMEOUT && Game.time >= response.timeout) return true;
             return false;
         };
-        /**
-         * 1. Prepare Configuration for Room : roomName
-         */
-        if (!this.planCache[roomName]) {
-            this.planCache[roomName] = {
-                roomType : ROOM_TYPE_NORMAL_CONTROLLED_ROOM,
-                controllerLevel : Game.rooms[roomName].controller.level,
-                feedbacks : {}
-            };
-            options.controllerUpgrade = true;
-        }
-        /**
-         * 2. Update Decision Options and Adjust Settings
-         */
-        if (this.planCache[roomName].roomType === ROOM_TYPE_NORMAL_CONTROLLED_ROOM && Game.rooms[roomName].controller.level !== this.planCache[roomName].controllerLevel) {
-            options.controllerUpgrade = true;
-            this.planCache[roomName].controllerLevel = Game.rooms[roomName].controller.level;
-        }
-        // NOTICE: remove Of ConstructionSite is not counted by EVENT_OBJECT_DESTROYED.
-        if (Game.rooms[roomName].getEventLog().filter(e => e.event === EVENT_OBJECT_DESTROYED && e.data.type !== "creep").length > 0 || global.signals.IsConstructionSiteCancel[roomName] || global.signals.IsStructureDestroy[roomName]) options.objectDestroy = true;
-        if (global.signals.IsNewStructure[roomName]) options.structureConstruct = true;
-        if (DEBUG) {
-            console.log(`AutoPlan(${roomName})->Init consumes ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}.`);
-        }
-        /**
-         * 3. Calling Planner
-         */
-        if (this.planCache[roomName].roomType === ROOM_TYPE_NORMAL_CONTROLLED_ROOM) {
+        if (roomType === "normal") {
+            /**
+             * 1. Prepare Configuration for Room : roomName
+             */
+            if (!this.planCache[roomName]) {
+                this.planCache[roomName] = {
+                    roomType : "normal",
+                    controllerLevel : Game.rooms[roomName].controller.level,
+                    feedbacks : {}
+                };
+                options.controllerUpgrade = true;
+            }
+            /**
+             * 2. Update Decision Options and Adjust Settings
+             */
+            if (this.planCache[roomName].roomType === "normal" && Game.rooms[roomName].controller.level !== this.planCache[roomName].controllerLevel) {
+                options.controllerUpgrade = true;
+                this.planCache[roomName].controllerLevel = Game.rooms[roomName].controller.level;
+            }
+            if (DEBUG) {
+                console.log(`AutoPlan(${roomName})->Init consumes ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}.`);
+            }
+            /**
+             * 3. Calling Planner
+             */
             const level = this.planCache[roomName].controllerLevel;
             if (level >= 1) {
                 /* Plan For StructureController's Link */
                 if (!this.planCache[roomName].feedbacks["controllerLink"]) this.planCache[roomName].feedbacks["controllerLink"] = new Response(Response.prototype.PLACE_HOLDER);
-                if (parseResponse(this.planCache[roomName].feedbacks["controllerLink"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["controllerLink"].Feed(planer.PlanForAroundLink(Game.rooms[roomName].controller, global.Lucy.Rules.arrangements.UPGRADE_ONLY));
+                if (parseResponse(this.planCache[roomName].feedbacks["controllerLink"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["controllerLink"].Feed(planner.PlanForAroundLink(Game.rooms[roomName].controller, global.Lucy.Rules.arrangements.UPGRADE_ONLY));
                 /* Plan For Harvest Unit */
                 if (!this.planCache[roomName].feedbacks["harvestEnergy"]) this.planCache[roomName].feedbacks["harvestEnergy"] = {};
                 for (const source of Game.rooms[roomName].energies) {
@@ -1910,19 +1911,19 @@ class Map {
                      * Container
                      */
                     if (!this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "container"]) this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "container"] = new Response(Response.prototype.PLACE_HOLDER);
-                    if (parseResponse(this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "container"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "container"].Feed(planer.PlanForAroundOverlapContainer(source, "forSource", true));
+                    if (parseResponse(this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "container"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "container"].Feed(planner.PlanForAroundOverlapContainer(source, "forSource", true));
                     /**
                      * Link
                      */
                     if (!this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "link"]) this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "link"] = new Response(Response.prototype.PLACE_HOLDER);
-                    if (parseResponse(this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "link"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "link"].Feed(planer.PlanForAroundLink(source, "forSource"));
+                    if (parseResponse(this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "link"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "link"].Feed(planner.PlanForAroundLink(source, "forSource"));
                 }
                 /* Plan For CentralSpawn Unit */
                 if (!this.planCache[roomName].feedbacks["centralSpawn"]) this.planCache[roomName].feedbacks["centralSpawn"] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
                 if (DEBUG) {
                     console.log(roomName, JSON.stringify(this.planCache[roomName].feedbacks["centralSpawn"]));
                 }
-                this.planCache[roomName].feedbacks["centralSpawn"].Merge(planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "centralSpawn", {
+                this.planCache[roomName].feedbacks["centralSpawn"].Merge(planner.Plan(roomName, "normal", "centralSpawn", {
                     display : true,
                     tag : parseResponse(this.planCache[roomName].feedbacks["centralSpawn"].Pick("tag")) || options.structureConstruct,
                     build : parseResponse(this.planCache[roomName].feedbacks["centralSpawn"].Pick("build")) || options.objectDestroy,
@@ -1943,7 +1944,7 @@ class Map {
             if (level >= 3) {
                 /* Plan For CentralTransfer Unit */
                 if (!this.planCache[roomName].feedbacks["centralTransfer"]) this.planCache[roomName].feedbacks["centralTransfer"] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
-                this.planCache[roomName].feedbacks["centralTransfer"].Merge(planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "centralTransfer", {
+                this.planCache[roomName].feedbacks["centralTransfer"].Merge(planner.Plan(roomName, "normal", "centralTransfer", {
                     display : true,
                     tag : parseResponse(this.planCache[roomName].feedbacks["centralTransfer"].Pick("tag")) || options.structureConstruct,
                     build : parseResponse(this.planCache[roomName].feedbacks["centralTransfer"].Pick("build")) || options.objectDestroy,
@@ -1955,7 +1956,7 @@ class Map {
                 }));
                 /* Plan For Tower Unit */
                 if (!this.planCache[roomName].feedbacks["towers"]) this.planCache[roomName].feedbacks["towers"] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
-                this.planCache[roomName].feedbacks["towers"].Merge(planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "towers", {
+                this.planCache[roomName].feedbacks["towers"].Merge(planner.Plan(roomName, "normal", "towers", {
                     display : true,
                     tag : parseResponse(this.planCache[roomName].feedbacks["towers"].Pick("tag")) || options.structureConstruct,
                     build : parseResponse(this.planCache[roomName].feedbacks["towers"].Pick("build")) || (options.objectDestroy),
@@ -1968,7 +1969,7 @@ class Map {
             if (level >= 4) {
                 /* Preplan for Central Lab (Reserve Space) */
                 if (!this.planCache[roomName].feedbacks["labUnit"]) this.planCache[roomName].feedbacks["labUnit"] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
-                this.planCache[roomName].feedbacks["labUnit"].Merge(planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "labUnit", {
+                this.planCache[roomName].feedbacks["labUnit"].Merge(planner.Plan(roomName, "normal", "labUnit", {
                     tag : parseResponse(this.planCache[roomName].feedbacks["labUnit"].Pick("tag")) || options.structureConstruct,
                     build : parseResponse(this.planCache[roomName].feedbacks["labUnit"].Pick("build")) || options.objectDestroy,
                     road : parseResponse(this.planCache[roomName].feedbacks["labUnit"].Pick("road")) || options.objectDestroy,
@@ -1979,7 +1980,7 @@ class Map {
                 }));
                 /* Plan for Extensions */
                 if (!this.planCache[roomName].feedbacks[`extensionUnit_${0}`]) this.planCache[roomName].feedbacks[`extensionUnit_${0}`] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
-                this.planCache[roomName].feedbacks[`extensionUnit_${0}`].Merge(planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "extensionUnit", {
+                this.planCache[roomName].feedbacks[`extensionUnit_${0}`].Merge(planner.Plan(roomName, "normal", "extensionUnit", {
                     tag : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${0}`].Pick("tag")) || options.structureConstruct,
                     build : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${0}`].Pick("build")) || options.objectDestroy,
                     road : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${0}`].Pick("road")) || options.objectDestroy,
@@ -1993,7 +1994,7 @@ class Map {
             if (level >= 5) {
                 /* Plan for Extensions */
                 if (!this.planCache[roomName].feedbacks[`extensionUnit_${1}`]) this.planCache[roomName].feedbacks[`extensionUnit_${1}`] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
-                this.planCache[roomName].feedbacks[`extensionUnit_${1}`].Merge(planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "extensionUnit", {
+                this.planCache[roomName].feedbacks[`extensionUnit_${1}`].Merge(planner.Plan(roomName, "normal", "extensionUnit", {
                     tag : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${1}`].Pick("tag")) || options.structureConstruct,
                     build : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${1}`].Pick("build")) || options.objectDestroy,
                     road : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${1}`].Pick("road")) || options.objectDestroy,
@@ -2005,10 +2006,10 @@ class Map {
                 }));
                 /* Plan for Container of Mineral */
                 if (!this.planCache[roomName].feedbacks["harvestMineral"]) this.planCache[roomName].feedbacks["harvestMineral"] = new Response(Response.prototype.PLACE_HOLDER);
-                if (parseResponse(this.planCache[roomName].feedbacks["harvestMineral"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["harvestMineral"].Feed(planer.PlanForAroundOverlapContainer(Game.rooms[roomName].mineral, "forMineral", true));
+                if (parseResponse(this.planCache[roomName].feedbacks["harvestMineral"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["harvestMineral"].Feed(planner.PlanForAroundOverlapContainer(Game.rooms[roomName].mineral, "forMineral", true));
                 /* Plan for Extensions */
                 if (!this.planCache[roomName].feedbacks[`extensionUnit_${2}`]) this.planCache[roomName].feedbacks[`extensionUnit_${2}`] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
-                this.planCache[roomName].feedbacks[`extensionUnit_${2}`].Merge(planer.Plan(roomName, ROOM_TYPE_NORMAL_CONTROLLED_ROOM, "extensions", {
+                this.planCache[roomName].feedbacks[`extensionUnit_${2}`].Merge(planner.Plan(roomName, "normal", "extensions", {
                     tag : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${2}`].Pick("tag")) || options.structureConstruct,
                     build : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${2}`].Pick("build")) || options.objectDestroy,
                     road : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${2}`].Pick("road")) || options.objectDestroy,
@@ -2019,7 +2020,7 @@ class Map {
                 }));
                 /* Plan for Protected Ramparts */
                 if (!this.planCache[roomName].feedbacks["protectedRamparts"]) this.planCache[roomName].feedbacks["protectedRamparts"] = new Response(Response.prototype.PLACE_HOLDER);
-                this.planCache[roomName].feedbacks["protectedRamparts"].Feed(planer.PlanForProtectedRamparts(roomName, ["centralSpawn", "centralTransfer", "towers", "labUnit", `extensionUnit_${0}`, `extensionUnit_${1}`, `extensionUnit_${2}`], {
+                this.planCache[roomName].feedbacks["protectedRamparts"].Feed(planner.PlanForProtectedRamparts(roomName, ["centralSpawn", "centralTransfer", "towers", "labUnit", `extensionUnit_${0}`, `extensionUnit_${1}`, `extensionUnit_${2}`], {
                     display : true,
                     build : parseResponse(this.planCache[roomName].feedbacks["protectedRamparts"]) || options.objectDestroy,
                     readFromMemory : true,
@@ -2040,6 +2041,34 @@ class Map {
             if (DEBUG) {
                 console.log(`AutoPlan(${roomName})->Total consumes ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}.`);
             }
+        } else if (roomType === "remoteMining_energy") {
+            /**
+             * 1. Prepare Configuration for Room : roomName
+             */
+            if (!this.planCache[roomName]) {
+                this.planCache[roomName] = {
+                    roomType : "remoteMining_energy",
+                    feedbacks : {}
+                };
+            }
+            /**
+             * 2. Calling Planner
+             */
+            for (const source of Game.rooms[roomName].memory.sources) {
+                /** Plan for Road */
+                if (!this.planCache[roomName].feedbacks[`roads_${source.id}`]) this.planCache[roomName].feedbacks[`roads_${source.id}`] = new Response(Response.prototype.PLACE_HOLDER);
+                this.planCache[roomName].feedbacks[`roads_${source.id}`].Feed(planner.Link(fromRoomName, new RoomPosition(source.pos.x, source.pos.y, source.pos.roomName), {
+                    display : true,
+                    road : parseResponse(this.planCache[roomName].feedbacks[`roads_${source.id}`]) || options.objectDestroy,
+                    maxRooms : 2
+                }));
+                // console.log(`[roads_${source.id}]=>${JSON.stringify(this.planCache[roomName].feedbacks[`roads_${source.id}`])}`);
+                /** Plan for Container */
+                if (!this.planCache[roomName].feedbacks[`container_${source.id}`]) this.planCache[roomName].feedbacks[`container_${source.id}`] = new Response(Response.prototype.PLACE_HOLDER);
+                if (parseResponse(this.planCache[roomName].feedbacks[`container_${source.id}`]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks[`container_${source.id}`].Feed(planner.PlanForAroundOverlapContainer(Game.getObjectById(source.id), "remoteSource", false));
+            }
+        } else if (roomType === "remoteMining_mineral") {
+            
         }
     }
     LinkMyRooms() {
@@ -2066,7 +2095,7 @@ class Map {
         }
         for (const {rooms, feedback} of this.controlledRoomLinkCache.links) {
             const objectDestroy = (roomName) => Game.rooms[roomName].getEventLog().filter(e => e.event === EVENT_OBJECT_DESTROYED && e.data.type !== "creep").length > 0 || global.signals.IsConstructionSiteCancel[roomName] || global.signals.IsStructureDestroy[roomName];
-            feedback.Feed(planer.Link(rooms[0], rooms[1], {
+            feedback.Feed(planner.Link(rooms[0], rooms[1], {
                 display : true,
                 road : parseResponse(feedback) || objectDestroy(rooms[0]) || objectDestroy(rooms[1])
             }));
@@ -2101,54 +2130,54 @@ class Map {
     }
     constructor() {
         /** @type { {[roomName : string] : Array<string>} } */
-        this.sortedDistances            = {};
+        this.sortedDistances                = {};
         /** @type { {[roomName : string] : number} } */
-        this.sortedDistancesExpiration  = {};
+        this.sortedDistancesExpiration      = {};
         /**
          * @type { {[roomName : string] : { roomType : string, controllerLevel : number, feedbacks : { [unitName : string] : {[module : string] : Response} | ResponsePatch} }} }
          */
-        this.planCache                  = {};
+        this.planCache                      = {};
         /** @type { {amount : number, links: Array<{rooms : [string, string], feedback : Response}>} } */
-        this.controlledRoomLinkCache    = {amount : 0, links : []};
+        this.controlledRoomLinkCache        = {amount : 0, links : []};
         /** @type { {[roomName : string] : {controllerLevel : number, remoteRoomNum : number}} } */
-        this.remoteMineCache            = {};
+        this.remoteMineCache                = {};
         /** @type { {[roomName : string] : Array<Array<number>>} } */
-        this.room2distanceFromCenter    = {};
+        this.room2distanceFromCenter        = {};
         /** @type { {[roomName : string] : RoomPosition} } */
-        this.room2center                = {};
+        this.room2center                    = {};
         /** @type { {[roomName : string] : Array<string>} } */
-        this.roomEdges                  = {};
+        this.roomEdges                      = {};
         /** @type { {[roomName : string] : boolean} } */
-        this.roomVisited                = {};
+        this.roomVisited                    = {};
         /** @type { Set<string> } */
-        this.roomRecorded               = new Set();
+        this.roomRecorded                   = new Set();
         /** @type { Set<string> } */
-        this.highwayRoomRecorded        = new Set();
+        this.highwayRoomRecorded            = new Set();
         /** @type { Set<string> } */
-        this.SKRoomRecorded             = new Set();
+        this.SKRoomRecorded                 = new Set();
         /** @type { Set<string> } */
-        this.PortalRoomRecorded         = new Set();
+        this.PortalRoomRecorded             = new Set();
         /** @type { Set<string> } */
-        this.NormalRoomRecorded         = new Set();
+        this.NormalRoomRecorded             = new Set();
         /** @type { {[origin : string] : {[roomName : string] : {distance : number, fromRoomName : string}}} } */
-        this.disFromRoom                = {};
+        this.disFromRoom                    = {};
         /** @type { {[origin : string] : number} } */
-        this.disFromRoomTotalRooms      = {};
+        this.disFromRoomTotalRooms          = {};
         /** @type { {[roomName : string] : Array<{roomName : string, profit : number}>} } */
-        this.room2RemoteMiningCandidates = {};
+        this.room2RemoteMiningCandidates    = {};
         /** @type { {[roomName : string] : Array<{roomName : string, mineralType : MineralConstant}>} } */
-        this.room2RemoteMineral          = {};
+        this.room2RemoteMineralCandidates   = {};
         /** @type { {[roomName : string] : number} } */
-        this.room2RemoteMineExpiration   = {};
+        this.room2RemoteMineExpiration      = {};
         /** @type { {[roomName : string] : {[roomName : string] : Array<string>}} } */
-        this.routes                      = {};
+        this.routes                         = {};
     }
 };
 const _Map = new Map();
 
 profiler.registerClass(Unit, "Unit");
 profiler.registerClass(MapMonitor, "MapMonitor");
-profiler.registerClass(Planer, "Planer");
+profiler.registerClass(Planner, "Planner");
 profiler.registerClass(Map, "Map");
 
 /** @type {import("./lucy.app").AppLifecycleCallbacks} */
@@ -2160,7 +2189,7 @@ const MapPlugin = {
         if (!Memory._unreachableRooms) Memory._unreachableRooms = {};
         global.Map = _Map;
         global.MapMonitorManager = mapMonitor;
-        global.Planer = planer;
+        global.Planner = planner;
     },
     tickStart: () => {
         // global.Map.ScoutingRooms();

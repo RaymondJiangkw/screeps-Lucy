@@ -556,17 +556,14 @@ class MyRoom extends Room {
         this.centralTransfer;
     }
     Detect() {
-        console.log(`<p style="display:inline;color:red;">[Detect]</p> ${this.name}`);
         this.memory._lastCheckingTick = Game.time;
         this.memory.owner = this.controller ? this.controller.owner ? this.controller.owner.username : this.controller.reservation? this.controller.reservation.username : null : null;
-        /** Detect InvaderCore */
-        this.memory.hostileStructures = this.find(FIND_HOSTILE_STRUCTURES).map(s => s.id);
         /** Avoid Room */
         if (this.find(FIND_HOSTILE_STRUCTURES, {filter : {structureType : STRUCTURE_TOWER}}).length > 0) this.memory.avoid = true;
         else delete this.memory.avoid;
         /** Detect Sources */
         if (!this.memory.sourceAmount) this.memory.sourceAmount = this.find(FIND_SOURCES).length;
-        if (!this.memory.sourcePoses) this.memory.sourcePoses = this.find(FIND_SOURCES).map(s => s.pos);
+        if (!this.memory.sources) this.memory.sources = this.find(FIND_SOURCES).map(s => {return {id : s.id, pos : s.pos}});
         if (!this.memory.sourceCapacities) this.memory.sourceCapacities = this.find(FIND_SOURCES).map(s => s.energyCapacity > SOURCE_ENERGY_CAPACITY ? s.energyCapacity : SOURCE_ENERGY_CAPACITY);
         /** Detect Mineral */
         if (!this.memory.mineralType) this.memory.mineralType = this.mineral ? this.mineral.mineralType : null;
@@ -630,24 +627,24 @@ const ticks = {};
 const RoomPlugin = {
     reset : () => {
         for (const roomName in Game.rooms) {
-            if (isMyRoom(Game.rooms[roomName])) global.Map.AutoPlan(roomName);
+            if (isMyRoom(Game.rooms[roomName])) global.Map.AutoPlan("normal", roomName);
         }
     },
     tickStart : () => {
-        
         for (const roomName in Game.rooms) {
             const _cpuUsed = Game.cpu.getUsed();
             if (isMyRoom(Game.rooms[roomName])) {
                 Game.rooms[roomName].init();
-                global.Map.AutoPlan(roomName);
-                /** @TODO */
-                // global.Map.RemoteMine(roomName);
+                global.Map.AutoPlan("normal", roomName);
+                global.Map.RemoteMine(roomName);
                 if (!ticks[roomName]) Notifier.register(roomName, `Ticks Consumption`, `Room`, () => `${ticks[roomName] || 0.00}`);
                 ticks[roomName] = `${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`;
             } else {
-                /** Trigger Tasks in Neutral Room */
                 if (Game.rooms[roomName].becomeVisible && Game.rooms[roomName].isResponsible) Game.rooms[roomName].NeutralTrigger();
                 Game.rooms[roomName].Detect();
+                if (Game.rooms[roomName].memory.asRemoteMiningRoom) global.Map.AutoPlan("remoteMining_energy", roomName, Game.rooms[roomName].memory.asRemoteMiningRoom);
+                // else if (Game.rooms[roomName].memory.asRemoteMineralRoom) global.Map.AutoPlan("remoteMining_mineral", roomName, Game.rooms[roomName].memory.asRemoteMineralRoom);
+                /** Trigger Tasks in Neutral Room */
             }
         }
         global.Map.LinkMyRooms();

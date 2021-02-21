@@ -272,8 +272,8 @@ class Visualizer {
                     table[index][1] = value.value();
                     valueLength = Math.max(valueLength, table[index][1].length);
                 });
-                this.infoBox(title, table, {x : 1, y : y + offset, roomName}, Math.max(11, 1.2 * CHAR_WIDTH * (4 + keyLength + valueLength)));
-                offset += monitoredValues[roomName][title].length + 1;
+                this.infoBox(title, table, {x : 1, y : y + offset * TEXT_SIZE, roomName}, Math.max(11, 1.2 * CHAR_WIDTH * (4 + keyLength + valueLength)));
+                offset += monitoredValues[roomName][title].length + 1 + 0.5;
             }
         }
     }
@@ -382,5 +382,7 @@ global.Lucy.App.on(VisualPlugin);
 
 module.exports = {
     Notifier            : _notifier,
-    NotifierPriority    : NotifierPriority
+    NotifierPriority    : NotifierPriority,
+    CHAR_HEIGHT         : CHAR_HEIGHT,
+    CHAR_WIDTH          : CHAR_WIDTH
 };

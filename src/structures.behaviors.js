@@ -451,13 +451,13 @@ function giveConstructionSiteBehaviors() {
     };
 }
 function giveRoadBehaviors() {
-    const NEXT_REPAIR_TIMEOUT = 500;
+    const NEXT_REPAIR_TIMEOUT = 500; // Lose 2 %
     const NEXT_REPAIR_OFFSET  = 50;
     StructureRoad.prototype.trigger = function() {
         this.triggerRepairing();
     };
     StructureRoad.prototype.triggerRepairing = function() {
-        const allowableHitsDiff = this.hitsMax * 0.1;
+        const allowableHitsDiff = this.hitsMax * (isMyRoom(this.room)? 0.1 : 0.45);
         /**
          * Postpone Checking
          * In order to reduce the frequency of repairing, REPAIR employees the divergence-between-threshold-and-target policy. 
@@ -471,7 +471,7 @@ function giveRoadBehaviors() {
     }
 }
 function giveContainerBehaviors() {
-    const NEXT_REPAIR_TIMEOUT = 500;
+    const NEXT_REPAIR_TIMEOUT = 500; // Lose 2 %
     const NEXT_REPAIR_OFFSET  = 50;
     StructureContainer.prototype.trigger = function() {
         this.triggerRepairing();
@@ -479,7 +479,7 @@ function giveContainerBehaviors() {
         this.triggerFillingEnergy();
     };
     StructureContainer.prototype.triggerRepairing = function() {
-        const allowableHitsDiff = this.hitsMax * 0.1;
+        const allowableHitsDiff = this.hitsMax * (isMyRoom(this.room)? 0.1 : 0.45);
         /**
          * Postpone Checking
          * In order to reduce the frequency of repairing, REPAIR employees the divergence-between-threshold-and-target policy. 
@@ -497,7 +497,7 @@ function giveContainerBehaviors() {
      */
     StructureContainer.prototype.triggerHarvesting = function() {
         let target = null;
-        if (Game.getTagById(this.id) === "forSource") {
+        if (Game.getTagById(this.id) === "forSource" || Game.getTagById(this.id) === "remoteSource") {
             target = this.room.energies.filter(e => e.pos.getRangeTo(this.pos) === 1)[0] || null;
         } else if (Game.getTagById(this.id) === "forMineral") {
             if (!this.room[STRUCTURE_EXTRACTOR]) return;
@@ -507,75 +507,80 @@ function giveContainerBehaviors() {
             console.log(`<p style="display:inline;color:red;">Error:</p> Can't find matched target for container ${this} whose tag is ${Game.getTagById(this.id)}`);
             return;
         }
-        /**
-         * For Mineral, maximum WORK part is hard-coded into 5, which is usually enough.
-         * For Source, it is important to ensure Source is exhausted in 300 ticks so as to achieve maximum efficiency.
-         * However, since energy is most fundamental resource to operate the whole empire, "weak" creep is allowed to spawn, when
-         * availableEnergy is not enough to support "full" version.
-         */
-        const workBodyParts = isMineral(target) ? 5 : (evaluateSource(target) / 300 / 2);
-        /* No Transaction should be dealt here */
-        new Task(`[${this.room.name}:${Game.getTagById(this.id)}Harvest]`, this.room.name, target, new TaskDescriptor("default", {
-            worker : {
-                minimumNumber : 1,
-                maximumNumber : 1,
-                estimateWorkingTicks : (object) => object.ticksToLive,
-                estimateProfitPerTurn : (object) => evaluateAbility(object, "harvest") * getPrice(target.mineralType || RESOURCE_ENERGY),
-                tag : `harvester-${target.id}`,
-                bodyMinimumRequirements : {
-                    [WORK] : workBodyParts,
-                    [CARRY] : 1,
-                    [MOVE] : Math.min(Math.floor((workBodyParts + 1) / 2), 50 - workBodyParts - 1)
-                },
-                mode : "shrinkToEnergyAvailable",
-                workingPos : this.pos
-            }
-        }), {
-            selfCheck : function() {
-                /** @type {StructureContainer} */
-                const container = Game.getObjectById(this.taskData.containerId);
-                if (!container) return "dead";
-                /**
-                 * For Sources, since its regeneration is relatively quick.
-                 * It is plausible to keep task run.
-                 */
-                /** @type {Source} */
-                /*const source = this.mountObj;
-                if (isSource(source)) {
-                    if (source.energy === 0) {
-                        Lucy.Timer.add(Game.time + source.ticksToRegeneration, container.triggerHarvesting, container.id, [], `Harvesting in room ${source.room.name} for ${source}`);
-                        console.log(`<p style="color:gray;display:inline;">[Log]</p> "Harvest ${source}" task in ${source.room.name} finished. New one is scheduled at ${Game.time + source.ticksToRegeneration}.`);
-                        return "dead";
-                    }
-                }*/
-                /** @type {Mineral} */
-                const mineral = this.mountObj;
-                if (isMineral(mineral)) {
-                    if (mineral.mineralAmount === 0) {
-                        Lucy.Timer.add(Game.time + mineral.ticksToRegeneration, container.triggerHarvesting, container.id, [], `Harvesting in room ${mineral.room.name} for ${mineral}`);
-                        console.log(`<p style="color:gray;display:inline;">[Log]</p> "Harvest ${mineral}" task in ${mineral.room.name} finished. New one is scheduled at ${Game.time + mineral.ticksToRegeneration}.`);
-                        return "dead";
-                    }
+        console.log(`${this}->${target} : ${Game.getTagById(this.id)}`);
+        if (Game.getTagById(this.id) !== "remoteSource" && Game.getTagById(this.id) !== "remoteMineral") {
+            /**
+             * For Mineral, maximum WORK part is hard-coded into 5, which is usually enough.
+             * For Source, it is important to ensure Source is exhausted in 300 ticks so as to achieve maximum efficiency.
+             * However, since energy is most fundamental resource to operate the whole empire, "weak" creep is allowed to spawn, when
+             * availableEnergy is not enough to support "full" version.
+             */
+            const workBodyParts = isMineral(target) ? 5 : (evaluateSource(target) / 300 / 2);
+            /* No Transaction should be dealt here */
+            new Task(`[${this.room.name}:${Game.getTagById(this.id)}Harvest]`, this.room.name, target, new TaskDescriptor("default", {
+                worker : {
+                    minimumNumber : 1,
+                    maximumNumber : 1,
+                    estimateWorkingTicks : (object) => object.ticksToLive,
+                    estimateProfitPerTurn : (object) => evaluateAbility(object, "harvest") * getPrice(target.mineralType || RESOURCE_ENERGY),
+                    tag : `harvester-${target.id}`,
+                    bodyMinimumRequirements : {
+                        [WORK] : workBodyParts,
+                        [CARRY] : 1,
+                        [MOVE] : Math.min(Math.floor((workBodyParts + 1) / 2), 50 - workBodyParts - 1)
+                    },
+                    mode : "shrinkToEnergyAvailable",
+                    workingPos : this.pos
                 }
-                return "working";
-            },
-            run : // Because of StructureLink, function is used here.
-                function() {
-                    /** @type {Creep} */
-                    const worker = this.FetchEmployees("worker")[0];
-                    if (!worker) return [];
+            }), {
+                selfCheck : function() {
                     /** @type {StructureContainer} */
                     const container = Game.getObjectById(this.taskData.containerId);
-                    /** @type {Source | Mineral} */
-                    const target = Game.getObjectById(this.taskData.targetId);
-                    /** @type {StructureLink | null} */
-                    const link = this.taskData.tag === "forSource" ? global.MapMonitorManager.FetchStructureWithTag(container.pos.roomName, "forSource", STRUCTURE_LINK).filter(l => l.pos.getRangeTo(container) === 1)[0] || null : null;
-                    if (worker.pos.getRangeTo(container) !== 0) worker.travelTo(container);
-                    if (link && worker.store.getFreeCapacity() === 0 && link.store.getFreeCapacity(RESOURCE_ENERGY) > 0) worker.transfer(link, RESOURCE_ENERGY);
-                    if (container.store.getFreeCapacity(RESOURCE_ENERGY) > 0 || worker.store.getFreeCapacity(RESOURCE_ENERGY) > 0) worker.harvest(target);
-                    return [];
-                }
-        }, { containerId : this.id, targetId : target.id, tag : Game.getTagById(this.id) });
+                    if (!container) return "dead";
+                    /**
+                     * For Sources, since its regeneration is relatively quick.
+                     * It is plausible to keep task run.
+                     */
+                    /** @type {Source} */
+                    /*const source = this.mountObj;
+                    if (isSource(source)) {
+                        if (source.energy === 0) {
+                            Lucy.Timer.add(Game.time + source.ticksToRegeneration, container.triggerHarvesting, container.id, [], `Harvesting in room ${source.room.name} for ${source}`);
+                            console.log(`<p style="color:gray;display:inline;">[Log]</p> "Harvest ${source}" task in ${source.room.name} finished. New one is scheduled at ${Game.time + source.ticksToRegeneration}.`);
+                            return "dead";
+                        }
+                    }*/
+                    /** @type {Mineral} */
+                    const mineral = this.mountObj;
+                    if (isMineral(mineral)) {
+                        if (mineral.mineralAmount === 0) {
+                            Lucy.Timer.add(Game.time + mineral.ticksToRegeneration, container.triggerHarvesting, container.id, [], `Harvesting in room ${mineral.room.name} for ${mineral}`);
+                            console.log(`<p style="color:gray;display:inline;">[Log]</p> "Harvest ${mineral}" task in ${mineral.room.name} finished. New one is scheduled at ${Game.time + mineral.ticksToRegeneration}.`);
+                            return "dead";
+                        }
+                    }
+                    return "working";
+                },
+                run : // Because of StructureLink, function is used here.
+                    function() {
+                        /** @type {Creep} */
+                        const worker = this.FetchEmployees("worker")[0];
+                        if (!worker) return [];
+                        /** @type {StructureContainer} */
+                        const container = Game.getObjectById(this.taskData.containerId);
+                        /** @type {Source | Mineral} */
+                        const target = Game.getObjectById(this.taskData.targetId);
+                        /** @type {StructureLink | null} */
+                        const link = this.taskData.tag === "forSource" ? global.MapMonitorManager.FetchStructureWithTag(container.pos.roomName, "forSource", STRUCTURE_LINK).filter(l => l.pos.getRangeTo(container) === 1)[0] || null : null;
+                        if (worker.pos.getRangeTo(container) !== 0) worker.travelTo(container);
+                        if (link && worker.store.getFreeCapacity() === 0 && link.store.getFreeCapacity(RESOURCE_ENERGY) > 0) worker.transfer(link, RESOURCE_ENERGY);
+                        if (container.store.getFreeCapacity(RESOURCE_ENERGY) > 0 || worker.store.getFreeCapacity(RESOURCE_ENERGY) > 0) worker.harvest(target);
+                        return [];
+                    }
+            }, { containerId : this.id, targetId : target.id, tag : Game.getTagById(this.id) });
+        } else if (Game.getTagById(this.id) === "remoteSource") {
+
+        }
     };
     StructureContainer.prototype.triggerFillingEnergy = function() {
         if (Game.getTagById(this.id) !== "forSpawn") return;
@@ -824,7 +829,7 @@ const RoomResetTriggerPlugin = {
                 if (room.storage) room.storage.trigger();
                 room["links"].forEach(l => l.trigger());
                 room["ramparts"].forEach(r => r.trigger());
-            }
+            } else if (Game.rooms[roomName].isResponsible) Game.rooms[roomName].NeutralTrigger();
         }
     }
 };

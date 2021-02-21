@@ -1,0 +1,3 @@
+/**
+ * @module manager.defend
+ */

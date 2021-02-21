@@ -111,7 +111,13 @@ class Traveler {
                 // uncommenting this is a great way to diagnose creep behavior issues
                 // console.log(`TRAVELER: incomplete path for ${creep.name}`);
                 color = "red";
-                if (options.forbidInComplete) return ERR_NO_PATH;
+                /**
+                 * Modified by `RaymondJiangkw`.
+                 * Since `incomplete` could be the outcome of long distance and limited ops, it is meaningful to allow for discontinuous marching.
+                 * 
+                 * However, the case that `incomplete` is resulted from obstacles should still be avoided.
+                 */
+                if (options.forbidInComplete && ret.path.length <= 5) return ERR_NO_PATH;
             }
             if (options.returnData) {
                 options.returnData.pathfinderReturn = ret;

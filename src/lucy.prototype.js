@@ -8,6 +8,8 @@ const Lucy = {
     App     : new App()
 };
 global.Lucy = Lucy;
+/** Mount Console SVG */
+require("./screeps-svg");
 /** Mount Visual Prototype */
 require("./visual.prototype");
 /** Mount Visual Notifier */
@@ -50,5 +52,7 @@ require("./manager.tasks");
 require("./manager.creeps");
 require("./manager.terminals");
 require("./manager.labs");
+require("./manager.observers");
 require("./manager.attack");
+require("./manager.defend");
 require("./manager.deposits");
