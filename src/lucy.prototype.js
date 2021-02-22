@@ -1,15 +1,19 @@
 const { App }       = require("./lucy.app");
 const { Timer }     = require("./lucy.timer");
 const { LogPool }   = require("./lucy.log");
+const { Collector } = require("./lucy.collector");
 const Lucy = {
     Rules   : require("./lucy.rules"),
     Timer   : new Timer(),
     Logs    : new LogPool(),
-    App     : new App()
+    App     : new App(),
+    Collector : new Collector()
 };
 global.Lucy = Lucy;
 /** Mount Console SVG */
 require("./screeps-svg");
+/** Mount Pretty Log */
+require("./log.prototype");
 /** Mount Visual Prototype */
 require("./visual.prototype");
 /** Mount Visual Notifier */

@@ -8,6 +8,7 @@
 const Task                  = require('./task.prototype').Task;
 const TaskDescriptor        = require('./task.prototype').TaskDescriptor;
 const Transaction           = require('./money.prototype').Transaction;
+const icon                  = require('./util').icon;
 const getPrice              = require('./util').getPrice;
 const checkForStore         = require('./util').checkForStore;
 const checkForFreeStore     = require('./util').checkForFreeStore;
@@ -310,7 +311,7 @@ class CentralTransferUnit {
                     if (room.terminal) ret[CARRY] = 20;
                     if (room.factory) ret[CARRY] = 32;
                     if (room.powerSpawn) ret[CARRY] = 49;
-                    ret[CARRY] = Math.min(ret[CARRY], Math.floor((room.energyAvailable - BODYPART_COST[MOVE] * ret[MOVE]) / BODYPART_COST[CARRY]));
+                    ret[CARRY] = Math.max(Math.min(ret[CARRY], Math.floor((room.energyAvailable - BODYPART_COST[MOVE] * ret[MOVE]) / BODYPART_COST[CARRY])), 1);
                     return ret;
                 },
                 workingPos : pos,
@@ -508,7 +509,9 @@ class CentralTransferUnit {
      */
     PushOrder(order) {
         this.orderQueue.push(order);
-        console.log(`<p style="display:inline;color:gray;">[Log]</p> CentralTransfer of ${this.room.name} receives Order from ${order.from} to ${order.to} with resourceType ${order.resourceType} and amount ${order.amount}`);
+        const from = order.from === "any"? order.from : this.GetStructure(order.from) && this.GetStructure(order.from).getSVG ? this.GetStructure(order.from).getSVG(20) : order.from;
+        const to = order.to === "any" ? order.to : this.GetStructure(order.to) && this.GetStructure(order.to).getSVG ? this.GetStructure(order.to).getSVG(20) : order.to;
+        global.Log.room(this.room.name, `CentralTransfer receives order from "${from}" to "${to}" with ${order.amount} ${icon(order.resourceType)}`);
     }
     /**
      * @returns {TransferOrder} 
@@ -572,18 +575,24 @@ class MyRoom extends Room {
         /** Detect Deposits */
         this.find(FIND_DEPOSITS).forEach(d => global.DepositManager.Register(d));
         /** Add to global.Map */
-        global.Map.updateAdjacentRooms(this.name);
+        // global.Map.updateAdjacentRooms(this.name);
     }
     NeutralTrigger() {
         this["roads"].forEach(r => r.triggerRepairing());
-        this["containers"].forEach(c => c.triggerRepairing());
+        this["containers"].forEach(c => c.trigger());
         this.find(FIND_CONSTRUCTION_SITES).forEach(c => c.triggerBuilding());
+    }
+    NeutralRegister() {
+        this.sources.forEach(s => s.register());
     }
     CheckSpawnIndependent() {
         if (this.controller.level >= 3 && this.spawns.length > 0 && global.MapMonitorManager.FetchStructureWithTag(this.name, "forSource", STRUCTURE_CONTAINER).length > 0) this.memory.rejectHelp = true;
     }
 }
+let _mounted = false;
 function mount() {
+    if (_mounted) return;
+    _mounted = true;
     Object.defineProperty(Room.prototype, "centralSpawn", {
         get() {
             if (centralSpawnUnits[this.name]) return centralSpawnUnits[this.name];
@@ -628,6 +637,7 @@ const RoomPlugin = {
     reset : () => {
         for (const roomName in Game.rooms) {
             if (isMyRoom(Game.rooms[roomName])) global.Map.AutoPlan("normal", roomName);
+            else if (Game.rooms[roomName].memory.asRemoteMiningRoom) global.Map.AutoPlan("remoteMining_energy", roomName, Game.rooms[roomName].memory.asRemoteMiningRoom, true);
         }
     },
     tickStart : () => {
@@ -640,9 +650,13 @@ const RoomPlugin = {
                 if (!ticks[roomName]) Notifier.register(roomName, `Ticks Consumption`, `Room`, () => `${ticks[roomName] || 0.00}`);
                 ticks[roomName] = `${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`;
             } else {
-                if (Game.rooms[roomName].becomeVisible && Game.rooms[roomName].isResponsible) Game.rooms[roomName].NeutralTrigger();
+                const becomeVisible = Game.rooms[roomName].becomeVisible;
+                if (becomeVisible && Game.rooms[roomName].isResponsible) {
+                    Game.rooms[roomName].NeutralTrigger();
+                    Game.rooms[roomName].NeutralRegister();
+                }
                 Game.rooms[roomName].Detect();
-                if (Game.rooms[roomName].memory.asRemoteMiningRoom) global.Map.AutoPlan("remoteMining_energy", roomName, Game.rooms[roomName].memory.asRemoteMiningRoom);
+                if (Game.rooms[roomName].memory.asRemoteMiningRoom) global.Map.AutoPlan("remoteMining_energy", roomName, Game.rooms[roomName].memory.asRemoteMiningRoom, becomeVisible);
                 // else if (Game.rooms[roomName].memory.asRemoteMineralRoom) global.Map.AutoPlan("remoteMining_mineral", roomName, Game.rooms[roomName].memory.asRemoteMineralRoom);
                 /** Trigger Tasks in Neutral Room */
             }
@@ -655,4 +669,4 @@ global.Lucy.App.on(RoomPlugin);
 /**
  * Monitor Controller Upgrade
  */
-Object.values(Game.rooms).filter(r => isMyRoom(r)).forEach(r => global.Lucy.App.monitor({label : `${r.name}.controller.level`, init : 0, fetch : (roomName) => Game.rooms[roomName] && Game.rooms[roomName].controller.level, fetchParams : [r.name], func : (newNumber, oldNumber, roomName) => Game.rooms[roomName] && Game.rooms[roomName].CheckSpawnIndependent(), funcParams : [r.name]}));
+global.Lucy.Collector.colonies.forEach(r => global.Lucy.App.monitor({label : `${r.name}.controller.level`, init : 0, fetch : (roomName) => Game.rooms[roomName] && Game.rooms[roomName].controller.level, fetchParams : [r.name], func : (newNumber, oldNumber, roomName) => Game.rooms[roomName] && Game.rooms[roomName].CheckSpawnIndependent(), funcParams : [r.name]}));

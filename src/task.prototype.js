@@ -45,47 +45,12 @@ function CleanTaskById(id) {
  * @typedef {{[body in BodyPartConstant]? : {boostCompound : MineralBoostConstant, ratio : number, mode : "stubborn" | "once"}[] }} BoostRequirements
  * Support abstract task-taken objects.
  * @typedef {"static" | "expand" | "shrinkToEnergyAvailable" | "shrinkToEnergyCapacity"} CreepSpawnMode Notice that in "expand" mode, only `tag` will be considered.
- * @typedef { { minimumNumber : number, maximumNumber : number, estimateProfitPerTurn : (object : GameObject) => number, estimateWorkingTicks : (object : GameObject) => number, tag ? : string, groupTag ? : string, allowEmptyTag ? : boolean, allowOtherTags ? : Array<string>} } CommonRoleDescription `tag` is used for hiring specific `creep`. Those creeps with defined tag will not be hired into `role` without tag. `groupTag` is used to control the spawning of creeps.
+ * @typedef { { minimumNumber : number, maximumNumber : number, estimateProfitPerTurn : (object : GameObject) => number, estimateWorkingTicks : (object : GameObject) => number, tag : string, groupTag ? : string, allowEmptyTag ? : boolean, allowOtherTags ? : Array<string>} } CommonRoleDescription `tag` is used for hiring specific `creep`. Those creeps with defined tag will not be hired into `role` without tag. `groupTag` is used to control the spawning of creeps.
  * @typedef { { bodyMinimumRequirements : {[body in BodyPartConstant]? : number}, bodyBoostRequirements? : BoostRequirements, expandFunction? : (room : Room) => {[body in BodyPartConstant]? : number}, mode? : CreepSpawnMode, confinedInRoom? : boolean, workingPos? : RoomPosition } & CommonRoleDescription } CreepRoleDescription
  * `expandFunction` allows much more flexibility into the setup for bodies of creeps, since it sets up the upper line instead of the bottom line and can adjust the body settings according to instant condition in the room. NOTICE : `move` parts should be specified. Values in `bodyBoostRequirements` are interpreted as ratio between satisfied bodyparts and total bodyparts. Higher level compound is calculated at higher priority, while bodypart with higher level compound is compatible with requirement of lower level compound, if it is not counted.
- * @typedef { { isSatisfied : (object : GameObject) => Boolean} & CommonRoleDescription } ObjectRoleDescription - Exclude Creep
- * @typedef { {[role : string] : CreepRoleDescription | ObjectRoleDescription } } RoleDescription
+ * @typedef { {[role : string] : CreepRoleDescription | CommonRoleDescription } } RoleDescription
  */
 class TaskDescriptor {
-    /**
-     * Check whether the setup for bodies of creep satisfies the requirements of `role`.
-     * @param {Creep} creep
-     * @param {string} role
-     * @param {boolean} [loose = false]
-     * @private
-     * @returns {Boolean}
-     */
-    isBodySatisfied(creep, role, loose = false) {
-        if (!this.roleDescription[role] || !this.roleDescription[role].bodyMinimumRequirements) return false;
-        const bodyCounts = _.countBy(creep.body, 'type');
-        const boostCounts = calcBoost(creep);
-        const boostCompounds = {};
-        if (this.roleDescription[role].bodyBoostRequirements) Object.keys(this.roleDescription[role].bodyBoostRequirements).forEach(v => boostCompounds[v] = this.roleDescription[role].bodyBoostRequirements[v].map(v => v.boostCompound));
-        for (const body in this.roleDescription[role].bodyMinimumRequirements) {
-            if (!loose) {
-                if (this.roleDescription[role].bodyMinimumRequirements[body] > (bodyCounts[body] || 0)) return false;
-            } else {
-                if (bodyCounts[body] === undefined) return false;
-            }
-            /**
-             * Check whether conditions for boosting are satisfied.
-             *  1. There shouldn't be any minerals which are not allowed.
-             *  2. The ratio should not exceeds the limitation.
-             */
-            if (boostCompounds[body] && boostCounts[body]) {
-                if (boostCounts[body].filter(m => !boostCompounds[body].includes(m)).length > 0) return false;
-                for (const v of this.roleDescription[role].bodyBoostRequirements[body]) {
-                    if (boostCounts[body].filter(m => m === v.boostCompound).length / bodyCounts[body] > v.ratio) return false;
-                }
-            }
-        }
-        return true;
-    }
     /**
      * Check whether `object` is qualified for role.
      * @param {GameObject} object
@@ -94,39 +59,9 @@ class TaskDescriptor {
      * @returns {Boolean}
      */
     isRoleQualified(object, role) {
-        if (!this.roleDescription[role]) return false;
         if (this.boundTask.FetchEmployees(role).length >= this.roleDescription[role].maximumNumber) return false;
         /* Checking Tags */
-        if ((object.memory.tag && !this.roleDescription[role].tag) || (!object.memory.tag && this.roleDescription[role].tag && !this.roleDescription[role].allowEmptyTag)) return false;
-        if ((object.memory.tag && this.roleDescription[role].tag) && object.memory.tag !== this.roleDescription[role].tag && (this.roleDescription[role].allowOtherTags || []).indexOf(object.memory.tag) === -1) return false;
-        if (isCreep(object)) {
-            /**
-             * If role is in "shrink*" mode, it is impossible to ensure so-called "minimumRequirement". Thus, in this case, `tag`
-             * is the only way to distinguish desired creep from others (while it could be overrided by allowEmptyTag).
-             * However, in order to allow more flexibility (duplicate tag corresponds to different roles), basic requirements of bodypart
-             * should be satisfied, namely, for each bodypart in minimumRequirement, creep should possess at least one.
-             */
-            if (this.roleDescription[role].mode && this.roleDescription[role].mode.startsWith("shrink")) {
-                if (!this.roleDescription[role].tag) {
-                    console.log(`<p style="display:inline;color:red;">Error:</p> For role "${role}" whose mode is "shrink*", the tag of it could not be empty.`);
-                    return false;
-                }
-                if (!((object.memory.tag === undefined && this.roleDescription[role].allowEmptyTag) || object.memory.tag === this.roleDescription[role].tag || (this.roleDescription[role].allowOtherTags || []).indexOf(object.memory.tag) !== -1) || !this.isBodySatisfied(object, role, true)) return false;
-            } else if (this.roleDescription[role].mode && this.roleDescription[role].mode === "expand") {
-                if (!this.roleDescription[role].tag) {
-                    console.log(`<p style="display:inline;color:red;">Error:</p> For role "${role}" whose mode is "expand", the tag of it could not be empty.`);
-                    return false;
-                }
-                if (object.memory.tag === this.roleDescription[role].tag) return true;
-                else return false;
-            } else {
-                // Checking whether `role` is intended to be taken by creep is incorporated in `isBodySatisfied`
-                if (!this.isBodySatisfied(object, role)) return false;
-            }
-        } else {
-            if (!this.roleDescription[role].isSatisfied) return false; // Case : `role` not intended to be taken by general object
-            if (!this.roleDescription[role].isSatisfied(object)) return false; // Case : `object` not satisfied
-        }
+        if (object.memory.tag !== this.roleDescription[role].tag && (this.roleDescription[role].allowOtherTags || []).indexOf(object.memory.tag) === -1) return false;
         return true;
     }
     /**
@@ -174,7 +109,7 @@ class TaskDescriptor {
     }
     /**
      * @param { string } [type = "default"] identifier for Task Type
-     * @param { RoleDescription } [roleDescription = {}] `isSatisfied` is not required to implement the checking for tag.
+     * @param { RoleDescription } [roleDescription = {}]
      * @param { {taskKey : string} } [descriptions = {}] If `taskKey` is provided, this kind of tasks will be recorded based on mountObj's id and Key, which in turn will enable amount-checking.
      */
     constructor(type = "default", roleDescription = {}, descriptions = {}) {
@@ -182,10 +117,7 @@ class TaskDescriptor {
         this.type = type;
         /** @private */
         this.roleDescription = roleDescription;
-        /**
-         * @type {Task | null}
-         * @private
-         */
+        /** @type {Task | null} @private */
         this.boundTask = null;
         /** @private */
         this.descriptions = descriptions;
@@ -237,23 +169,14 @@ class TaskCreepDescriptor {
      * @param {string | undefined} groupTag
      */
     constructor(task, role, groupTag) {
-        /**
-         * @private
-         */
+        /** @private */
         this.boundTask = task;
         if (!this.boundTask.Descriptor.RoleDescription[role] || (!this.boundTask.Descriptor.RoleDescription[role].bodyMinimumRequirements && !this.boundTask.Descriptor.RoleDescription[role].expandFunction)) console.log(`<p style="color:red;display:inline;">Fail to create creep descriptor for Role : ${role} of Task : ${task}</p>`);
-        /**
-         * @private
-         */
+        /** @private */
         this.role = role;
-        /**
-         * @type {CreepRoleDescription}
-         * @private
-         */
+        /** @type {CreepRoleDescription} @private */
         this.roleDescription = this.boundTask.Descriptor.RoleDescription[role];
-        /**
-         * @private
-         */
+        /** @private */
         this.groupTag = groupTag;
     }
 }
@@ -267,7 +190,7 @@ class TaskCreepDescriptor {
  * 
  * Task needs to delete those died creeps and finish those transactions.
  * 
- * @typedef { "working" | "waiting" | "dead" } TaskStatus
+ * @typedef { ("working" | "waiting" | "dead") } TaskStatus
  * @typedef { {commutingTicks: number, workingTicks: number, moneyPerTurn: number} } ProfitInfo
  * @typedef { {"role" : string | null, info : ProfitInfo} } EmployeeIdentity
  */
@@ -281,17 +204,10 @@ class Task {
      */
     get State() {
         /* "dead" state is cached so that duplicate triggered tasks are checked. */
-        if (this._isDead) return "dead";
+        if (this._status === "dead") return "dead";
         /* "dead" has a higher priority */
-        if (this.selfCheck() === "dead") {
-            this._isDead = true;
-            return "dead";
-        }
-        /* Check for whether every role has sufficient employees */
-        if (this._numOfEmployees > 0) { // Since lots of tasks are not taken by any objects, this check will speed up the process.
-            for (const role in this.descriptor.RoleDescription) if (this.descriptor.RoleDescription[role].minimumNumber > 0 && (!this.roles[role] || !this.roles[role].sufficient)) return "waiting";
-            return "working";
-        } else return "waiting";
+        if (this.selfCheck() === "dead") this._status = "dead";
+        return this._status;
     }
     get EmployeeAmount() {
         return this._numOfEmployees;
@@ -312,10 +228,14 @@ class Task {
         if (indicater in this.employee2role) {
             const role = this.employee2role[indicater];
             Lucy.Logs.Push(new EventTaskStatusChange("fire", this, {employer: this.mountObj, role: role}));
-            _.remove(this.roles[role], v => v === indicater);
+            _.remove(this.role2creepIds[role], v => v === indicater);
             /* Check whether MinimumAmount of `role` is still satisfied */
-            if (this.roles[role].sufficient) {
-                if (this.roles[role].length < this.descriptor.RoleDescription[role].minimumNumber) this.roles[role].sufficient = false;
+            if (this.sufficientRoles.indexOf(role) !== -1) {
+                if (this.role2creepIds[role].length < this.descriptor.RoleDescription[role].minimumNumber) {
+                    this.sufficientRoles.splice(this.sufficientRoles.indexOf(role), 1);
+                    global.TaskManager.Switch(this.index, "waiting");
+                    this._status = "waiting";
+                }
             }
             delete this.employee2role[indicater];
             delete this.employee2boost[indicater];
@@ -343,11 +263,18 @@ class Task {
         this.employee2role[indicater] = role;
         this.employee2boost[indicater] = {};
         if (this.Descriptor.RoleDescription[role].bodyBoostRequirements) Object.keys(this.Descriptor.RoleDescription[role].bodyBoostRequirements).forEach(body => this.Descriptor.RoleDescription[role].bodyBoostRequirements[body].forEach(description => this.employee2boost[indicater][description.boostCompound] = {completed : false, targetLabId : null}));
-        if (!this.roles[role]) this.roles[role] = [];
-        this.roles[role].push(indicater);
+        if (!this.role2creepIds[role]) this.role2creepIds[role] = [];
+        this.role2creepIds[role].push(indicater);
         /* Check whether MinimumAmount of `role` becomes satisfied */
-        if (!this.roles[role].sufficient) {
-            if (this.roles[role].length >= this.descriptor.RoleDescription[role].minimumNumber) this.roles[role].sufficient = true;
+        if (this.sufficientRoles.indexOf(role) === -1) {
+            if (this.role2creepIds[role].length >= this.descriptor.RoleDescription[role].minimumNumber) {
+                this.sufficientRoles.push(role);
+                if (this.sufficientRoles.length === this.roles.length) {
+                    // Switch to Working State
+                    global.TaskManager.Switch(this.index, "working");
+                    this._status = "working";
+                }
+            }
         }
         ++this._numOfEmployees;
         return true;
@@ -448,9 +375,6 @@ class Task {
             return this._mountObj = Game.getObjectById(this.mountObjId);
         } else return this._mountObj;
     }
-    get mountRoomName() {
-        return this._mountRoomName;
-    }
     /**
      * Returned Values should be valid.
      * @param {string} role
@@ -458,70 +382,50 @@ class Task {
      */
     FetchEmployees(role) {
         if (!this[`_employees_${role}_tick`] || this[`_employees_${role}_tick`] < Game.time) {
-            if (!this.roles[role]) return this[`_employees_${role}`] = [];
-            return this[`_employees_${role}`] = this.roles[role].map(Game.getObjectById).filter(c => this.Boost(c)); 
+            if (!this.role2creepIds[role]) return this[`_employees_${role}`] = [];
+            return this[`_employees_${role}`] = this.role2creepIds[role].map(Game.getObjectById).filter(c => this.Boost(c)); 
         } else return this[`_employees_${role}`];
     }
     /**
+     * @template T
      * @param { string } name
      * @param { string } mountRoomName
      * @param { GameObject } mountObj
      * @param { TaskDescriptor } descriptor
-     * @param { {selfCheck: () => "working" | "dead", run: import("./task.modules").Project | {[role : string] : import("./task.modules").Project} | () => Array<GameObject>, calcCommutingTicks? : (obj : GameObject) => number } } [funcs] calcCommutingTicks will only be used when !`mountObj` or !`mountObj.pos` or !`obj` or `obj.pos`
-     * @param { {} } data
+     * @param { {selfCheck: () => "working" | "dead", run: import("./task.modules").Project | {[role : string] : import("./task.modules").Project} | () => Array<GameObject> } } [funcs]
+     * @param { T } data
      */
     constructor(name, mountRoomName, mountObj, descriptor, funcs, data = {}) {
         _.defaults(funcs, {
             selfCheck: () => "dead",
-            run : () => [],
-            calcCommutingTicks: () => Infinity
+            run : () => []
         });
         if (typeof funcs.run === "function") funcs.run = profiler.registerFN(funcs.run, name);
         this.name = name;
-        /**
-         * @private
-         * Double-Bind
-         */
         this.descriptor = descriptor;
         this.descriptor.BindTask(this);
-        /**
-         * @private
-         */
-        this._mountRoomName = mountRoomName;
-        /**
-         * @private
-         */
+        /** @type { Array<string> } */
+        this.spawnTags = Object.values(this.descriptor.RoleDescription).map(c => c.tag || "");
+        /** @type { Array<string> } @private */
+        this.sufficientRoles = [];
+        /** @type { Array<string> } */
+        this.roles = Object.keys(this.descriptor.RoleDescription);
+        this.mountRoomName = mountRoomName;
+        /** @type {TaskStatus} */
+        this._status = "waiting";
+        /** @private */
         this._numOfEmployees = 0;
-        /**
-         * @type { {[indicater: string]: string} }
-         * @private
-         */
+        /** @type { {[indicater: string]: string} } @private */
         this.employee2role = {};
-        /**
-         * @type { {[indicater : string] : {[mineralType : string] : {completed : boolean, targetLabId : Id<StructureLab>}, total : boolean}} }
-         * @private
-         */
+        /** @type { {[indicater : string] : {[mineralType : string] : {completed : boolean, targetLabId : Id<StructureLab>}, total : boolean}} } @private */
         this.employee2boost = {};
-        /**
-         * @type { {[role: string]: Array<string>} }
-         * @private
-         */
-        this.roles = {};
-        /**
-         * @private
-         * @type { string | null }
-         */
+        /** @type { {[role: string]: Array<string>} } @private */
+        this.role2creepIds = {};
+        /** @type { string | null } @private*/
         this.mountObjId = (mountObj && mountObj.id) || null;
-        /**
-         * @type { () => "working" | "dead" }
-         * @private
-         * Original `selfCheck` with adjusted `this`.
-         */
+        /** @type { () => "working" | "dead" } @private */
         this._selfCheck = funcs.selfCheck.bind(this);
-        /**
-         * @type {{[id : string] : import("./money.prototype").Transaction}}
-         * Record all involved transactions
-         */
+        /** @type {{[id : string] : import("./money.prototype").Transaction}} */
         this.transactions = {};
         this.taskData = data;
         /**
@@ -541,17 +445,13 @@ class Task {
          * @type {(obj : GameObject) => number}
          */
         this._calcCommutingTicks = function (obj) {
-            if (!this.mountObj || !this.mountObj.pos || !obj || !obj.pos) return funcs.calcCommutingTicks.call(this, obj);
-            /**
-             * @type {RoomPosition}
-             */
+            if (!this.mountObj) return obj.pos.roomName === this.mountRoomName ? Math.min(Math.abs(obj.pos.x - 25), Math.abs(obj.pos.y - 25)) : calcRoomDistance(obj.pos.roomName, this.mountRoomName) * 50;
+            /** @type {RoomPosition} */
             const mountPos = this.mountObj.pos;
-            /**
-             * @type {RoomPosition}
-             */
+            /** @type {RoomPosition} */
             const objPos = obj.pos;
             if (mountPos.roomName === objPos.roomName) return calcInRoomDistance(mountPos, objPos, mountPos.roomName);
-            else return calcRoomDistance(mountPos, objPos);
+            else return calcRoomDistance(mountPos, objPos) * 50;
         }.bind(this);
         /**
          * @type { (obj: GameObject) => EmployeeIdentity }
@@ -560,15 +460,14 @@ class Task {
          * `allocRoleFunc` uses just-in-tick cache to speed up.
          */
         this.allocRoleFunc = function(obj) {
-            if (!this._allocRoleFuncCacheTick || this._allocRoleFuncCacheTick < Game.time) {
-                this._allocRoleFuncCacheTick = Game.time;
-                this._allocRoleFuncCache = {};
-            }
-            if (this._allocRoleFuncCache[obj.id]) return this._allocRoleFuncCache[obj.id];
-            let ret = this.descriptor.DetermineBestRole(obj);
-            if (!ret["role"]) ret["info"] = null;
-            else ret["info"]["commutingTicks"] = this._calcCommutingTicks(obj);
-            return this._allocRoleFuncCache[obj.id] = ret;
+            const key = `_allocRoleFunc_${obj.id}`;
+            if (!this[key + "_tick"] || this[key + "_tick"] < Game.time) {
+                this[key + "_tick"] = Game.time;
+                const ret = this.descriptor.DetermineBestRole(obj);
+                if (ret["role"]) ret["info"]["commutingTicks"] = this._calcCommutingTicks(obj);
+                else ret["info"] = null;
+                return this[key] = ret;
+            } else return this[key];
         }.bind(this);
         if (typeof funcs.run === "function") this._run = funcs.run.bind(this);
         else this._run = funcs.run;
@@ -580,18 +479,12 @@ class Task {
         this.run = function() {
             if (this.State === "dead") return [];
             if (typeof this._run === "function") return this._run();
-            /**
-             * @type {import("./task.modules").Project | {[role : string] : import("./task.modules").Project}
-             */
+            /** @type {import("./task.modules").Project | {[role : string] : import("./task.modules").Project} */
             const project = this._run;
-            /**
-             * @type {Array<GameObject>}
-             */
+            /** @type {Array<GameObject>} */
             const firedEmployees = [];
             for (const id in this.employee2role) {
-                /**
-                 * @type {GameObject}
-                 */
+                /** @type {GameObject} */
                 const object = Game.getObjectById(id);
                 if (!object) console.log(`<p style="display:inline;color:red;">Error: </p>${id} in Task is invalid!`);
                 if (!this.Boost(object)) continue;
@@ -617,14 +510,18 @@ class Task {
         /**
          * Register this into global.TaskManager
          */
-        global.TaskManager.Register(this.mountRoomName, this);
+        this.index = global.TaskManager.Register(this.mountRoomName, this);
     }
 }
 
 profiler.registerClass(Task, "Task");
 profiler.registerClass(TaskDescriptor, "TaskDescriptor");
 profiler.registerClass(TaskCreepDescriptor, "TaskCreepDescriptor");
+
+let _mounted = false;
 function mount() {
+    if (_mounted) return;
+    _mounted = true;
     Object.defineProperty(Object.prototype, "task", {
         configurable : false,
         enumerable : false,
@@ -652,20 +549,16 @@ function mount() {
 global.Lucy.App.mount(mount);
 /** @type {import("./lucy.app").AppLifecycleCallbacks} */
 const TaskPlugin = {
-    beforeTickStart : () => {
+    resetEveryTick : () => {
         /**
          * @template T
          * @param {Id<T>} id property of GameObject
          * Task doesn't have id.
          */
         Game.getTaskById = function(id) {
-            // If State == "dead", `id` will automatically be fired and events will be issued appropriately.
-            if (tasks[id]) tasks[id].State;
             return tasks[id] || null;
         }
         Game.cleanTaskById = function(id) {
-            // If State == "dead", `id` will automatically be fired and events will be issued appropriately.
-            if (tasks[id]) tasks[id].State;
             // If task still exists, clean it by hand.
             if (tasks[id]) CleanTaskById(id);
         }

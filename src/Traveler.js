@@ -4,9 +4,9 @@
  * 
  * @typedef {{path: RoomPosition[], ops: number, cost: number, incomplete: boolean}} PathfinderReturn
  * @typedef {{nextPos?: RoomPosition, pathfinderReturn?: PathfinderReturn, state?: TravelState, path?: string}} TravelToReturnData
- * @typedef {{ignoreRoads?: boolean,ignoreCreeps?: boolean,ignoreStructures?: boolean,preferHighway?: boolean,highwayBias?: number,allowHostile?: boolean,allowSK?: boolean,range?: number,obstacles?: {pos: RoomPosition}[],roomCallback?: (roomName: string, matrix: CostMatrix) => CostMatrix | boolean,routeCallback?: (roomName: string) => number,returnData?: TravelToReturnData,restrictDistance?: number,useFindRoute?: boolean,maxOps?: number,movingTarget?: boolean,freshMatrix?: boolean,offRoad?: boolean,stuckValue?: number,maxRooms?: number,repath?: number,route?: {[roomName: string]: boolean},ensurePath?: boolean}} TravelToOptions
+ * @typedef {{ignoreRoads?: boolean,ignoreCreeps?: boolean,ignoreStructures?: boolean,preferHighway?: boolean,highwayBias?: number,allowHostile?: boolean,allowSK?: boolean,range?: number,obstacles?: {pos: RoomPosition}[],roomCallback?: (roomName: string, matrix: CostMatrix) => CostMatrix | boolean,routeCallback?: (roomName: string) => number,returnData?: TravelToReturnData,restrictDistance?: number,useFindRoute?: boolean,maxOps?: number,movingTarget?: boolean,freshMatrix?: boolean,offRoad?: boolean,stuckValue?: number,maxRooms?: number,repath?: number,route?: {[roomName: string]: boolean},ensurePath?: boolean,flee? : boolean}} TravelToOptions
  * @typedef {{x: number, y: number}} Coord
- * @typedef {pos : RoomPosition} HasPos
+ * @typedef {{pos : RoomPosition}} HasPos
  */
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
@@ -31,10 +31,13 @@ class Traveler {
         destination = this.normalizePos(destination);
         // manage case where creep is nearby destination
         let rangeToDestination = creep.pos.getRangeTo(destination);
-        if (options.range && rangeToDestination <= options.range) {
+        if (options.range && rangeToDestination <= options.range && !options.flee) {
             return OK;
         }
-        else if (rangeToDestination <= 1) {
+        else if (options.range && rangeToDestination >= options.range && options.flee) {
+            return OK;
+        }
+        else if (rangeToDestination <= 1 && !options.flee) {
             if (rangeToDestination === 1 && !options.range) {
                 let direction = creep.pos.getDirectionTo(destination);
                 if (options.returnData) {
@@ -48,7 +51,7 @@ class Traveler {
         // initialize data object
         if (!creep.memory._trav) {
             delete creep.memory._travel;
-            creep.memory._trav = {};
+            creep.memory._trav = { flee : options.flee || false };
         }
         let travelData = creep.memory._trav;
         let state = this.deserializeState(travelData, destination);
@@ -77,13 +80,14 @@ class Traveler {
         }
         // TODO:handle case where creep moved by some other function, but destination is still the same
         // delete path cache if destination is different
-        if (!this.samePos(state.destination, destination)) {
-            if (options.movingTarget && state.destination.isNearTo(destination)) {
+        if (!this.samePos(state.destination, destination) || (options.flee || false) !== travelData.flee) {
+            if ((options.flee || false) === travelData.flee && options.movingTarget && state.destination.isNearTo(destination)) {
                 travelData.path += state.destination.getDirectionTo(destination);
                 state.destination = destination;
             }
             else {
                 delete travelData.path;
+                travelData.flee = options.flee || false;
             }
         }
         if (options.repath && Math.random() < options.repath) {
@@ -231,6 +235,7 @@ class Traveler {
             ignoreCreeps: false,
             maxOps: DEFAULT_MAXOPS,
             range: 1,
+            flee : false
         });
         if (options.movingTarget) {
             options.range = 0;
@@ -303,6 +308,7 @@ class Traveler {
             plainCost: options.offRoad ? 1 : options.ignoreRoads ? 1 : 2,
             swampCost: options.offRoad ? 1 : options.ignoreRoads ? 5 : 10,
             roomCallback: callback,
+            flee : options.flee
         });
         if (ret.incomplete && options.ensurePath) {
             if (options.useFindRoute === undefined) {

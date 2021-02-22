@@ -199,7 +199,7 @@ class TaskConstructor {
             .set("worker", {key : "spawnConstraint", value : {mountRoomSpawnOnly : false}})
             .set("worker", {key : "number", value : [1, Infinity]})
             .set("worker", {key : "profit", value : function (object) {
-                if (this.EmployeeAmount === 0) return 5 * getPrice("energy") * object.store.getCapacity() + object.store.getCapacity() * (this.mountObj.progress / this.mountObj.progressTotal) * getPrice("energy");
+                if (this.EmployeeAmount === 0) return 5 * getPrice("energy") * object.store.getCapacity() + object.store.getCapacity() * (this.mountObj? this.mountObj.progress / this.mountObj.progressTotal : 0) * getPrice("energy");
                 /* Serve as a collect-up task, but with least privilege */
                 else return -Infinity;
             }});
@@ -227,7 +227,13 @@ class TaskConstructor {
         this.Construct({taskName : `[${constructionSitePos.roomName}:ConstructionSitesBuild]`, taskType : "Construct"}, {mountRoomName : constructionSitePos.roomName, mountObj : {pos : constructionSitePos, id : constructionSiteId}}, roleDescriptor, {
             funcs : {
                 selfCheck : function() {
-                    if (Game.rooms[this.taskData.constructionSitePos.roomName] && (!this.mountObj || this.mountObj.progress === this.mountObj.progressTotal)) return "dead";
+                    if (Game.rooms[this.taskData.constructionSitePos.roomName] && (!this.mountObj || this.mountObj.progress === this.mountObj.progressTotal)) {
+                        global.Lucy.Timer.add(Game.time + 1, (roomName) => {
+                            global.signals.IsConstructionSiteCancel[roomName] = true;
+                            global.signals.IsAnyConstructionSiteCancel = true;
+                        }, undefined, [this.taskData.constructionSitePos.roomName], `Signal ConstructionSite disappears`);
+                        return "dead";
+                    }
                     /** Lacking Resources @TODO */
                     return "working";
                 },
@@ -253,7 +259,7 @@ class TaskConstructor {
             .set("worker", {key : "spawnConstraint", value : {mountRoomSpawnOnly : false}})
             .set("worker", {key : "number", value : [1, 1]})
             .set("worker", {key : "profit", value : function (object) {
-                return getPrice("energy") * object.store.getCapacity() * (1 + 1 - this.mountObj.hits / this.mountObj.hitsMax);
+                return getPrice("energy") * object.store.getCapacity() * (1 + 1 - (this.mountObj ? this.mountObj.hits / this.mountObj.hitsMax : 1));
             }});
         /**
          * @type {(amount : number) => Source | StructureContainer | StructureStorage | StructureLink}
@@ -618,6 +624,7 @@ class TaskConstructor {
      */
     ReserveTask(targetRoom) {
         if (global.TaskManager.Fetch("default", `Reserve_${targetRoom}`).length > 0) return true;
+        global.Log.room(targetRoom, global.Dye.blue("Reservation starts"));
         console.log(`<p style="color:gray;display:inline;">[Log]</p> Reserving ${targetRoom}`);
         const roleDescriptor = new RoleConstructor();
         roleDescriptor.Register("worker", "creep");
@@ -643,11 +650,19 @@ class TaskConstructor {
                     if (!worker) return [];
                     if (worker.room.name === this.taskData.targetRoom) {
                         if (worker.reserveController(worker.room.controller) === ERR_NOT_IN_RANGE) worker.moveTo(worker.room.controller);
+                        /** Trigger Attack if InvaderCore is found */
                         if (!this.taskData[FIND_HOSTILE_STRUCTURES] && Game.time % 17 === 0 && worker.room.find(FIND_HOSTILE_STRUCTURES).length > 0) {
-                            // global.AttackManager.Add(worker.room.name, "Stronghold", 0);
+                            global.AttackManager.Add(worker.room.name, "Stronghold", 0);
                             this.taskData[FIND_HOSTILE_STRUCTURES] = true;
                         } else if (this.taskData[FIND_HOSTILE_STRUCTURES] && global.AttackManager.Query(worker.room.name) === "completed") {
                             this.taskData[FIND_HOSTILE_STRUCTURES] = false;
+                        }
+                        /** Trigger Defend if NPC or other player's hostile creeps are found */
+                        if (!this.taskData[FIND_HOSTILE_CREEPS] && Game.time % 31 === 0 && worker.room.find(FIND_HOSTILE_CREEPS, {filter : (creep) => _.some(creep.body, y => [ATTACK, WORK, RANGED_ATTACK, CARRY].includes(y.type))}).length > 0) {
+                            global.DefendManager.Add(worker.room.name, "Remote", 0);
+                            this.taskData[FIND_HOSTILE_CREEPS] = true;
+                        } else if (this.taskData[FIND_HOSTILE_CREEPS] && global.DefendManager.Query(worker.room.name) === "completed") {
+                            this.taskData[FIND_HOSTILE_CREEPS] = false;
                         }
                     } else {
                         if (worker.travelTo(new RoomPosition(25, 25, this.taskData.targetRoom), {forbidInComplete : true}) === ERR_NO_PATH) {
@@ -659,7 +674,7 @@ class TaskConstructor {
                     return [];
                 }
             },
-            taskData : {targetRoom : targetRoom, fromRoom : null, [ERR_NO_PATH] : false, [FIND_HOSTILE_STRUCTURES] : false},
+            taskData : {targetRoom : targetRoom, fromRoom : null, [ERR_NO_PATH] : false, [FIND_HOSTILE_STRUCTURES] : false, [FIND_HOSTILE_CREEPS] : false},
             taskKey : `RESERVE_${targetRoom}`
         })
     }
@@ -748,28 +763,53 @@ class TaskConstructor {
 }
 /**
  * Class Representation for TaskManager
+ * @TODO Double-Selection
  */
 class TaskManager {
     /**
-     * @param {string} roomName
-     * @param {string} tag
+     * @private
      */
-    updateTasks(roomName, tag) {
-        if (!this.room2tag2tasks[roomName] || !this.room2tag2tasks[roomName][tag]) return;
-        if (!this.room2tag2tasks[roomName][tag]._lastCheckingTick || this.room2tag2tasks[roomName][tag]._lastCheckingTick < Game.time) {
-            this.room2tag2tasks[roomName][tag] = _.filter(this.room2tag2tasks[roomName][tag], task => task.State !== "dead");
-            this.room2tag2tasks[roomName][tag]._lastCheckingTick = Game.time;
-        }
+    getIndex() {
+        return `${this.taskIndex++}`;
     }
     /**
-     * @param {string} id
-     * @param {key}
+     * @private
+     * @param {string} index
      */
-    updateIdTasks(id, key) {
-        if (!this.id2key2tasks[id] || !this.id2key2tasks[id][key]) return;
-        if (!this.id2key2tasks[id][key]._lastCheckingTick || this.id2key2tasks[id][key]._lastCheckingTick < Game.time) {
-            this.id2key2tasks[id][key] = _.filter(this.id2key2tasks[id][key], task => task.State !== "dead");
-            this.id2key2tasks[id][key]._lastCheckingTick = Game.time;
+    remove(index) {
+        // console.log(`Remove ${index}->${this.index2status[index].status}`);
+        if (this.index2status[index].id && this.index2status[index].key) {
+            const idTaskPools = this.id2key2tasks[this.index2status[index].id][this.index2status[index].key];
+            idTaskPools.splice(idTaskPools.indexOf(index), 1);
+        }
+        --this.roomName2information[this.index2status[index].roomName].tags[this.index2status[index].tag].total;
+        this.taskPools[index].spawnTags.forEach(v => --this.roomName2information[this.index2status[index].roomName].tags[this.index2status[index].tag].spawnTags[v]);
+        const statusTaskPools = this.roomName2information[this.index2status[index].roomName].tags[this.index2status[index].tag][this.index2status[index].status];
+        // console.log(statusTaskPools, index, statusTaskPools.indexOf(index));
+        statusTaskPools.splice(statusTaskPools.indexOf(index), 1);
+        // console.log(statusTaskPools);
+        delete this.index2status[index];
+        delete this.taskPools[index];
+    }
+    /**
+     * @param {string} index
+     * @param {"working" | "waiting"} status
+     */
+    Switch(index, status) {
+        const originalStatus = this.index2status[index].status;
+        if (originalStatus === status) return;
+        const pool = this.roomName2information[this.index2status[index].roomName].tags[this.index2status[index].tag];
+        pool[originalStatus].splice(pool[originalStatus].indexOf(index), 1);
+        pool[status].push(index);
+        this.index2status[index].status = status;
+    }
+    /**
+     * `Check` checks validity of all tasks, which should be run at the start of `Task` module.
+     */
+    Check() {
+        for (const index in this.taskPools) {
+            const state = this.taskPools[index].State;
+            if (state === "dead") this.remove(index);
         }
     }
     /**
@@ -777,47 +817,34 @@ class TaskManager {
      * @param {import("./task.prototype").Task} task
      */
     Register(roomName, task) {
-        if (!this.room2tag2tasks[roomName]) {
-            this.room2tag2tasks[roomName] = {};
+        if (!this.roomName2information[roomName]) {
+            this.roomName2information[roomName] = {tags : {}};
+            /** Visual */
             this.room2tag2ticks[roomName] = {};
             Notifier.register(roomName, `Grouped Tasks`, "Total", () => `${this.room2ticks[roomName] || 0.00}`);
         }
-        if (!this.room2tag2tasks[roomName][task.Type]) {
-            this.room2tag2tasks[roomName][task.Type] = [];
-            Notifier.register(roomName, `Grouped Tasks`, task.Type, () => `[${this.room2tag2tasks[roomName][task.Type].length || 0}] ${_.sum(this.room2tag2tasks[roomName][task.Type].map(t => t.EmployeeAmount)) || 0} => ${this.room2tag2ticks[roomName][task.Type] || 0.00}`);
+        if (!this.roomName2information[roomName].tags[task.Type]) {
+            this.roomName2information[roomName].tags[task.Type] = {total : 0, working : [], waiting : [], spawnTags : {}};
+            /** Visual */
+            this.room2tag2ticks[roomName][task.Type] = 0.00;
+            Notifier.register(roomName, `Grouped Tasks`, task.Type, () => `[${this.roomName2information[roomName].tags[task.Type].total}] ${_.sum(this.roomName2information[roomName].tags[task.Type].working.map(i => this.taskPools[i].EmployeeAmount)) || 0} => ${this.room2tag2ticks[roomName][task.Type]}`);
         }
-        this.room2tag2tasks[roomName][task.Type].push(task);
+        const index = this.getIndex();
+        this.taskPools[index] = task;
+        ++this.roomName2information[roomName].tags[task.Type].total;
+        this.roomName2information[roomName].tags[task.Type].waiting.push(index);
+        task.spawnTags.forEach(v => this.roomName2information[roomName].tags[task.Type].spawnTags[v] = (this.roomName2information[roomName].tags[task.Type].spawnTags[v] || 0) + 1);
+        this.index2status[index] = {roomName : roomName, tag : task.Type, status : "waiting"};
         /** Register into Id Controller */
         if (task.Descriptor.Key) {
-            if (task.mountObj) {
-                if (!this.id2key2tasks[task.mountObj.id]) this.id2key2tasks[task.mountObj.id] = {};
-                if (!this.id2key2tasks[task.mountObj.id][task.Descriptor.Key]) this.id2key2tasks[task.mountObj.id][task.Descriptor.Key] = [];
-                this.id2key2tasks[task.mountObj.id][task.Descriptor.Key].push(task);
-            } else {
-                if (!this.id2key2tasks["default"]) this.id2key2tasks["default"] = {};
-                if (!this.id2key2tasks["default"][task.Descriptor.Key]) this.id2key2tasks["default"][task.Descriptor.Key] = [];
-                // console.log(`Register default ${task.Descriptor.Key}`);
-                this.id2key2tasks["default"][task.Descriptor.Key].push(task);
-            }
+            const id = task.mountObj ? task.mountObj.id : "default";
+            this.index2status[index].id = id;
+            this.index2status[index].key = task.Descriptor.Key;
+            if (!this.id2key2tasks[id]) this.id2key2tasks[id] = {};
+            if (!this.id2key2tasks[id][task.Descriptor.Key]) this.id2key2tasks[id][task.Descriptor.Key] = [];
+            this.id2key2tasks[id][task.Descriptor.Key].push(index);
         }
-    }
-    /**
-     * @param {string} roomName
-     * @param {string} tag
-     * @returns {Array<import("./task.prototype").Task>}
-     */
-    fetchTasks(roomName, tag) {
-        this.updateTasks(roomName, tag);
-        if (!this.room2tag2tasks[roomName] || !this.room2tag2tasks[roomName][tag]) return [];
-        return this.room2tag2tasks[roomName][tag];
-    }
-    /**
-     * @param {string} roomName
-     * @returns {Array<string>}
-     */
-    fetchTags(roomName) {
-        if (!this.room2tag2tasks[roomName]) return [];
-        return Object.keys(this.room2tag2tasks[roomName]);
+        return index;
     }
     /**
      * Ensure that under the same tag, only a portion of total tasks could be active.
@@ -828,16 +855,16 @@ class TaskManager {
      * @returns {boolean}
      */
     IsSaturated(roomName, tag) {
-        const tasks = this.fetchTasks(roomName, tag);
-        if (tasks.length === 0) return true;
+        const tasks = this.roomName2information[roomName].tags[tag];
+        if (tasks.total === 0) return true;
         /**
          * I expect the following property :
          *  - expectedNum should be logorithm-like.
          *  - When # working tasks = 1, expectedNum should be 1.
          *  - When # working tasks = e^2, expectedNum should be 2.
          */
-        const expectedNum = Math.floor(Math.log(tasks.length) * 0.5 + 1);
-        const workingNum = tasks.filter(task => task.State === "working").length;
+        const expectedNum = Math.floor(Math.log(tasks.total) * 0.5 + 1);
+        const workingNum = tasks.working.length;
         /**
          * NOTICE : For a group of Task, there could be the case that some of them still needs more workers and, when
          * they employee more workers, the total workingNum remains the same.
@@ -851,9 +878,7 @@ class TaskManager {
      * @returns {Array<import("./task.prototype").Task>}
      */
     Fetch(id, key) {
-        this.updateIdTasks(id, key);
-        if (!this.id2key2tasks[id] || !this.id2key2tasks[id][key]) return [];
-        return this.id2key2tasks[id][key];
+        return _.get(this.id2key2tasks, [id, key], []).map(i => this.taskPools[i]);
     }
     /**
      * Query returns the best task to be chosen.
@@ -867,80 +892,65 @@ class TaskManager {
          *      - Profit.
          *      - Location.
          */
-        /** Subject with physical position */
-        if (subject.pos && subject.pos.roomName) {
-            /**
-             * @type {RoomPosition}
-             */
-            const pos = subject.pos;
-            const roomName = pos.roomName;
-            /**
-             * @type {Array<string>}
-             * NOTICE : Neutral or Hostile rooms are also included in `adjacentRooms`.
-             * Thus, as long as the tasks from those rooms are registered, they could be accessed, which allowing for much more flexibility.
-             */
-            const adjacentRooms = global.Map.Query(roomName).filter(roomName => this.room2tag2tasks[roomName]);
-            /**
-             * @type { import("./task.prototype").Task | null}
-             */
-            let chosen = null;
-            for (const room of adjacentRooms) {
-                if (room !== roomName && Memory.rooms[room] && Memory.rooms[room].rejectHelp) continue;
-                /**
-                 * @type {Array<import("./task.prototype").Task>}
-                 */
-                let totalTasks = [];
-                for (const tag of this.fetchTags(room)) {
-                    this.updateTasks(room, tag);
-                    /* Saturated Tasks are excluded, since there could be much more important tasks in other rooms */
-                    if (tag === DEFAULT || !this.IsSaturated(room, tag)) totalTasks = totalTasks.concat(this.fetchTasks(room, tag).select(o => (-(o.commutingTicks + o.workingTicks) * getPrice("cpu") + o.moneyPerTurn), t => t.Identity(subject)["info"]) || []);
-                }
-                if (totalTasks.length === 0) continue;
-                // console.log(`${subject} -> ${totalTasks.map(t => `${t.mountObj}-${-(t.Identity(subject)["info"].commutingTicks + t.Identity(subject)["info"].workingTicks) * getPrice("cpu") + t.Identity(subject)["info"].moneyPerTurn}`)}`);
-                chosen = totalTasks.select(o => (-(o.commutingTicks + o.workingTicks) * getPrice("cpu") + o.moneyPerTurn), t => t.Identity(subject)["info"]);
-                break;
+        const roomName = subject.pos.roomName;
+        const adjacentRooms = Object.keys(this.roomName2information).sort((u, v) => calcRoomDistance(roomName, u) - calcRoomDistance(roomName, v));
+        /** @type {number | null} */
+        let chosen = null;
+        for (const roomName of adjacentRooms) {
+            if (roomName !== subject.pos.roomName && Memory.rooms[roomName] && Memory.rooms[roomName].rejectHelp) continue;
+            /** @type {number[]} */
+            let totalTasks = [];
+            for (const tag in this.roomName2information[roomName].tags) {
+                /* Saturated Tasks are excluded, since there could be much more important tasks in other rooms */
+                if (tag === DEFAULT || !this.IsSaturated(roomName, tag))
+                    if (this.roomName2information[roomName].tags[tag].spawnTags[subject.memory.tag || ""]) {
+                        // console.log(`${roomName}->${tag}->${this.roomName2information[roomName].tags[tag].waiting}`);
+                        totalTasks = totalTasks
+                                        .concat(
+                                            this.roomName2information[roomName].tags[tag].waiting
+                                                .select(
+                                                    o =>
+                                                        (-(o.commutingTicks + o.workingTicks) * getPrice("cpu") + o.moneyPerTurn),
+                                                    i =>
+                                                        this.taskPools[i].Identity(subject)["info"]
+                                                )
+                                            || []);
+                    }
             }
-            return chosen;
+            chosen = totalTasks.select(o => (-(o.commutingTicks + o.workingTicks) * getPrice("cpu") + o.moneyPerTurn), i => this.taskPools[i].Identity(subject)["info"]);
+            if (chosen) break;
         }
+        return this.taskPools[chosen] || null;
     }
     /**
      * Run all the Tasks
      */
     Run() {
-        for (const roomName in this.room2tag2tasks) {
-            // console.log(`[${roomName}]`);
+        for (const roomName in this.roomName2information) {
             const _cpuUsed = Game.cpu.getUsed();
-            for (const tag in this.room2tag2tasks[roomName]) {
+            for (const tag in this.roomName2information[roomName].tags) {
                 const _cpuUsed = Game.cpu.getUsed();
-                // console.log(`\t-[${tag}][${this.room2tag2tasks[roomName][tag].length}]`);
-                // this.updateTasks is cancelled here.
-                // this.updateTasks(roomName, tag);
-                /* `waiting` task still could Run. */
-                for (const task of this.room2tag2tasks[roomName][tag]) {
-                    // const _cpuUsed = Game.cpu.getUsed();
-                    task.Run();
-                    // console.log(`\t\t-${task.name}[${task.EmployeeAmount}] : ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`);
-                }
-                _.set(this.room2tag2ticks, [roomName, tag], `${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`);
+                for (const index of this.roomName2information[roomName].tags[tag].working) this.taskPools[index].Run();
+                this.room2tag2ticks[roomName][tag] = `${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`;
             }
             this.room2ticks[roomName] = `${(Game.cpu.getUsed() - _cpuUsed).toFixed(3)}`;
-            // console.log(`Total: ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`);
         }
     }
     constructor() {
-        /**
-         * @private
-         * @type { {[roomName : string] : {[tag : string] : Array<import("./task.prototype").Task>}} }
-         */
-        this.room2tag2tasks = {};
-        /**
-         * @private
-         * @type { {[id : string] : {[key : string] : Array<import("./task.prototype").Task>}} }
-         */
+        /** @type { {[id : string] : {[key : string] : Array<string>}} } @private */
         this.id2key2tasks = {};
-        /** @type { {[roomName : string] : number} } */
+        /** @private */
+        this.taskIndex = 0;
+        /** @type { {[index : string] : {roomName : string, tag : string, id? : string, key? : string, status : "working" | "waiting"}} } */
+        this.index2status = {};
+        /** @type { {[roomName : string] : {tags : {[tag : string] : {total : number, waiting : Array<string>, working : Array<string>, spawnTags : {[spawnTag : string] : number}}}}} } @private */
+        this.roomName2information = {};
+        /** @type {{[index : string] : Task}} @private*/
+        this.taskPools = {};
+        /** Used for Calculation of Ticks */
+        /** @type { {[roomName : string] : number} } @private */
         this.room2ticks = {};
-        /** @type { {[roomName : string] : {[tag : string] : number}} } */
+        /** @type { {[roomName : string] : {[tag : string] : number}} } @private */
         this.room2tag2ticks = {};
     }
 };
@@ -950,6 +960,7 @@ const _taskConstructor = new TaskConstructor();
 /** @type {import("./lucy.app").AppLifecycleCallbacks} */
 const TaskManagerPlugin = {
     init: () => global.TaskManager = _taskManager,
+    beforeTickStart : () => global.TaskManager.Check(),
     tickStart : () => {
         const _cpuUsed = Game.cpu.getUsed();
         /* Creep */
@@ -964,7 +975,7 @@ const TaskManagerPlugin = {
                 }
             }
         }
-        console.log(`Creep's Tasks -> ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`);
+        // console.log(`Creep's Tasks -> ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`);
         global.TaskManager.Run();
     }
 };

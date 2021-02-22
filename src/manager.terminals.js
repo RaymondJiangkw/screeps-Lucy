@@ -4,6 +4,7 @@
  * @typedef { {resourceType : ResourceConstant, amount : number, destination : string} } SendOrder
  * @typedef { {resourceType : ResourceConstant, amount : number} } BuyOrder
  * @typedef { {resourceType : ResourceConstant, amount : number} } SellOrder
+ * @typedef {TerminalManager} TerminalManager
  */
 const TaskConstructor = require('./manager.tasks').TaskConstructor;
 const Response        = require("./util").Response;

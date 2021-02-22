@@ -16,10 +16,9 @@ function giveContainerBehaviors() {
         let storingResourceTypes = [];
         // console.log(JSON.stringify(this.memory));
         if (Game.getTagById(this.id) === global.Lucy.Rules.arrangements.SPAWN_ONLY) storingResourceTypes = [RESOURCE_ENERGY];
-        else if (Game.getTagById(this.id) === "forSource") storingResourceTypes = [RESOURCE_ENERGY];
+        else if (Game.getTagById(this.id) === "forSource" || Game.getTagById(this.id) === "remoteSource") storingResourceTypes = [RESOURCE_ENERGY];
         else if (Game.getTagById(this.id) === "forMineral") storingResourceTypes = [this.room.mineral.mineralType];
         else if (Game.getTagById(this.id) === "labs") storingResourceTypes = Object.keys(REACTION_TIME);
-        else console.log(`<p style="display:inline;color:red;">Error:</p> Unable to recognize container ${this} whose tag is ${Game.getTagById(this.id)}`);
         if (storingResourceTypes.length > 0) {
             for (const storingResourceType of storingResourceTypes) {
                 global.ResourceManager.Register(new ResourceDescriptor(this, RESOURCE_POSSESSING_TYPES.STORING, storingResourceType, Game.getTagById(this.id) === global.Lucy.Rules.arrangements.SPAWN_ONLY? global.Lucy.Rules.arrangements.SPAWN_ONLY : "default", function(container) {
@@ -110,7 +109,7 @@ const RoomResetTriggerPlugin = {
         for (const roomName in Game.rooms) {
             const room = Game.rooms[roomName];
             if (isMyRoom(room)) {
-                room.energies.forEach(source => source.register());
+                room.sources.forEach(source => source.register());
                 /**
                  * NOTICE : Mineral should only be harvested by specific `harvest` task.
                  * If other tasks require usage of some mineral, they must wait until some storage/container/terminal/... in room possess them.
@@ -123,6 +122,8 @@ const RoomResetTriggerPlugin = {
                 room["labs"].forEach(l => l.register());
                 /** Register into LabManager should be put after registering labs into ResourceManager */
                 if (room["labs"].length > 0) global.LabManager.Update(room.name);
+            } else {
+                if (Game.rooms[roomName].isResponsible) room.NeutralRegister();
             }
         }
     }

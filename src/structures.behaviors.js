@@ -15,6 +15,7 @@ const evaluateSource                =   require('./util').evaluateSource;
 const calcInRoomDistance            =   require('./util').calcInRoomDistance;
 const getCacheExpiration            =   require('./util').getCacheExpiration;
 const bodyPartDetermination         =   require('./util').bodyPartDetermination;
+const constructRoomPosition         =   require('./util').constructRoomPosition;
 const Task                          =   require('./task.prototype').Task;
 const TaskDescriptor                =   require('./task.prototype').TaskDescriptor;
 const Transaction                   =   require('./money.prototype').Transaction;
@@ -416,7 +417,7 @@ function giveControllerBehaviors() {
                 estimateWorkingTicks :
                     (object) => object.store.getCapacity() / (evaluateAbility(object, "upgradeController")),
                 expandFunction : (room) => bodyPartDetermination({type : "exhuastEnergy", availableEnergy : global.ResourceManager.Sum(room.name, RESOURCE_ENERGY, {type : "retrieve", allowToHarvest : false, key : Lucy.Rules.arrangements.UPGRADE_ONLY}), energyConsumptionPerUnitPerTick : 1, sustainTick : global.MapMonitorManager.FetchStructureWithTag(room.name, "forController", STRUCTURE_LINK).length > 0 ? 1 : undefined}),
-                tag : `${energyConsumptionPerUnitPerTick}-worker`,
+                tag : `upgrader`, // Considering the existence of link, the setup for `upgrader` is slightly different from `1-worker`.
                 allowEmptyTag : true,
                 mode : "expand",
                 workingPos : this.pos,
@@ -451,28 +452,24 @@ function giveConstructionSiteBehaviors() {
     };
 }
 function giveRoadBehaviors() {
-    const NEXT_REPAIR_TIMEOUT = 500; // Lose 2 %
-    const NEXT_REPAIR_OFFSET  = 50;
     StructureRoad.prototype.trigger = function() {
         this.triggerRepairing();
     };
     StructureRoad.prototype.triggerRepairing = function() {
         const allowableHitsDiff = this.hitsMax * (isMyRoom(this.room)? 0.1 : 0.45);
+        const randomAllowableHitsDiff = (Math.random() + 1) * allowableHitsDiff;
         /**
          * Postpone Checking
          * In order to reduce the frequency of repairing, REPAIR employees the divergence-between-threshold-and-target policy. 
          */
-        if (this.hitsMax - this.hits <= (Math.random() + 1) * allowableHitsDiff) {
-            const nextTaskStartedTick = Game.time + getCacheExpiration(NEXT_REPAIR_TIMEOUT, NEXT_REPAIR_OFFSET);
-            Lucy.Timer.add(nextTaskStartedTick, this.triggerRepairing, this.id, [], `Repair ${this} of Room ${this.room.name}`);
+        if (this.hitsMax - this.hits <= randomAllowableHitsDiff) {
+            Lucy.Timer.add(Game.time + (randomAllowableHitsDiff - this.hitsMax + this.hits) / this.hitsMax * 3000, TaskConstructor.RepairTask, TaskConstructor, [this.id, this.pos], `Repair ${this} of Room ${this.room.name}`);
             return;
         }
         TaskConstructor.RepairTask(this.id, this.pos);
     }
 }
 function giveContainerBehaviors() {
-    const NEXT_REPAIR_TIMEOUT = 500; // Lose 2 %
-    const NEXT_REPAIR_OFFSET  = 50;
     StructureContainer.prototype.trigger = function() {
         this.triggerRepairing();
         this.triggerHarvesting();
@@ -480,13 +477,13 @@ function giveContainerBehaviors() {
     };
     StructureContainer.prototype.triggerRepairing = function() {
         const allowableHitsDiff = this.hitsMax * (isMyRoom(this.room)? 0.1 : 0.45);
+        const randomAllowableHitsDiff = (Math.random() + 1) * allowableHitsDiff;
         /**
          * Postpone Checking
          * In order to reduce the frequency of repairing, REPAIR employees the divergence-between-threshold-and-target policy. 
          */
-        if (this.hitsMax - this.hits <= (Math.random() + 1) * allowableHitsDiff) {
-            const nextTaskStartedTick = Game.time + getCacheExpiration(NEXT_REPAIR_TIMEOUT, NEXT_REPAIR_OFFSET);
-            Lucy.Timer.add(nextTaskStartedTick, this.triggerRepairing, this.id, [], `Repair ${this} of Room ${this.room.name}`);
+        if (this.hitsMax - this.hits <= randomAllowableHitsDiff) {
+            Lucy.Timer.add(Game.time + (randomAllowableHitsDiff - this.hitsMax + this.hits) / this.hitsMax * (isMyRoom(this.room)? 25000 : 5000), TaskConstructor.RepairTask, TaskConstructor, [this.id, this.pos], `Repair ${this} of Room ${this.room.name}`);
             return;
         }
         TaskConstructor.RepairTask(this.id, this.pos);
@@ -496,9 +493,10 @@ function giveContainerBehaviors() {
      * @function
      */
     StructureContainer.prototype.triggerHarvesting = function() {
+        /** @type {import("./task.prototype").GameObject} */
         let target = null;
         if (Game.getTagById(this.id) === "forSource" || Game.getTagById(this.id) === "remoteSource") {
-            target = this.room.energies.filter(e => e.pos.getRangeTo(this.pos) === 1)[0] || null;
+            target = this.room.sources.filter(e => e.pos.getRangeTo(this.pos) === 1)[0] || null;
         } else if (Game.getTagById(this.id) === "forMineral") {
             if (!this.room[STRUCTURE_EXTRACTOR]) return;
             target = this.room.mineral;
@@ -507,7 +505,6 @@ function giveContainerBehaviors() {
             console.log(`<p style="display:inline;color:red;">Error:</p> Can't find matched target for container ${this} whose tag is ${Game.getTagById(this.id)}`);
             return;
         }
-        console.log(`${this}->${target} : ${Game.getTagById(this.id)}`);
         if (Game.getTagById(this.id) !== "remoteSource" && Game.getTagById(this.id) !== "remoteMineral") {
             /**
              * For Mineral, maximum WORK part is hard-coded into 5, which is usually enough.
@@ -579,7 +576,129 @@ function giveContainerBehaviors() {
                     }
             }, { containerId : this.id, targetId : target.id, tag : Game.getTagById(this.id) });
         } else if (Game.getTagById(this.id) === "remoteSource") {
-
+            /**
+             * The Reason for using `wrapper` is that visibility could be lost.
+             * @param {Id<StructureContainer>} containerId
+             * @param {RoomPosition} containerPos
+             * @param {Id<Source>} targetId
+             * @param {RoomPosition} targetPos
+             * @param {string} fromRoomName
+             */
+            const wrapper = function(containerId, containerPos, targetId, targetPos, fromRoomName) {
+                if (global.TaskManager.Fetch(containerId, `HARVEST_${targetId}`).length > 0) return;
+                // Ensure it is necessary to conduct remote mining
+                const storage = Game.rooms[fromRoomName].storage;
+                if (!storage || storage.store.getUsedCapacity(RESOURCE_ENERGY) / storage.store.getCapacity() >= global.Lucy.Rules.storage[RESOURCE_ENERGY] || storage.store.getFreeCapacity() <= global.Lucy.Rules.storage["collectSpareCapacity"]) {
+                    global.Lucy.Timer.add(Game.time + getCacheExpiration(500, 50), wrapper, wrapper, [containerId, containerPos, targetId, targetPos, fromRoomName], `Remote Mining Energy for ${fromRoomName}`);
+                    return;
+                }
+                new Task(`[${containerPos.roomName}:${Game.getTagById(containerId)}Harvest]`, containerPos.roomName, {id : containerId, pos : containerPos}, new TaskDescriptor("default", {
+                    harvester : {
+                        minimumNumber : 1,
+                        maximumNumber : 1,
+                        estimateWorkingTicks : (object) => object.ticksToLive,
+                        estimateProfitPerTurn : (object) => evaluateAbility(object, "harvest") * getPrice("energy"),
+                        tag : `harvester-${targetId}`,
+                        bodyMinimumRequirements : {
+                            [WORK] : 10,
+                            [CARRY] : 2,
+                            [MOVE] : 6
+                        },
+                        mode : "static",
+                        workingPos : containerPos,
+                        confinedInRoom : false
+                    },
+                    transferer : {
+                        minimumNumber : 1,
+                        maximumNumber : 1,
+                        estimateWorkingTicks : () => 1,
+                        estimateProfitPerTurn : (object) => object.store.getCapacity(RESOURCE_ENERGY) * getPrice("energy"),
+                        tag : `remoteTransferer-${targetId}`, // Specific instead of General Tag here to simplify problem
+                        groupTag : `remoteTransferPatch`,
+                        confinedInRoom : false,
+                        mode : "shrinkToEnergyAvailable",
+                        bodyMinimumRequirements : bodyPartDetermination({type : "transfer", transferAmount : CONTAINER_CAPACITY / 2}),
+                        workingPos : containerPos
+                    }
+                }, {taskKey : `HARVEST_${targetId}`}), {
+                    selfCheck : function() {
+                        /** @type {Id<StructureContainer>} */
+                        const containerId = this.taskData.containerId;
+                        /** @type {RoomPosition} */
+                        const containerPos = this.taskData.containerPos;
+                        if (Game.rooms[containerPos.roomName] && !Game.getObjectById(containerId)) return "dead";
+                        /** @type {string} */
+                        const fromRoomName = this.taskData.fromRoomName;
+                        const storage = Game.rooms[fromRoomName].storage;
+                        if (!storage || storage.store.getUsedCapacity(RESOURCE_ENERGY) / storage.store.getCapacity() >= global.Lucy.Rules.storage[RESOURCE_ENERGY] || storage.store.getFreeCapacity() <= global.Lucy.Rules.storage["collectSpareCapacity"]) {
+                            global.Lucy.Timer.add(Game.time + getCacheExpiration(500, 50), this.taskData.wrapper, this.taskData.wrapper, [containerId, containerPos, targetId, targetPos, fromRoomName], `Remote Mining Energy for ${fromRoomName}`);
+                            return;
+                        }
+                        return "working";
+                    },
+                    run : function() {
+                        /** @type {Id<StructureContainer>} */
+                        const containerId = this.taskData.containerId;
+                        /** @type {RoomPosition} */
+                        const containerPos = this.taskData.containerPos;
+                        /** @type {Id<Source>} */
+                        const targetId = this.taskData.targetId;
+                        /** @type {RoomPosition} */
+                        const targetPos = this.taskData.targetPos;
+                        /** @type {Creep[]} */
+                        const harvesters = this.FetchEmployees("harvester");
+                        /** @type {Creep[]} */
+                        const transferers = this.FetchEmployees("transferer");
+                        /** @type {string} */
+                        const fromRoomName = this.taskData.fromRoomName;
+                        /** @type {Creep[]} */
+                        const firedCreeps = [];
+                        harvesters.forEach(harvester => {
+                            if (harvester.pos.roomName !== containerPos.roomName || harvester.pos.getRangeTo(containerPos) !== 0) return harvester.travelTo(containerPos);
+                            const container = Game.getObjectById(containerId);
+                            const source = Game.getObjectById(targetId);
+                            if ((container.store.getFreeCapacity(RESOURCE_ENERGY) > 0 || harvester.store.getFreeCapacity(RESOURCE_ENERGY) > 0) && source.energy > 0) harvester.harvest(source);
+                            else if (container.hits < container.hitsMax) {
+                                if (harvester.store[RESOURCE_ENERGY] > 0) harvester.repair(container);
+                                else harvester.withdraw(container, RESOURCE_ENERGY);
+                            }
+                        });
+                        transferers.forEach(transferer => {
+                            if (!transferer.memory.flags) transferer.memory.flags = {};
+                            if (transferer.memory.flags.working && transferer.store[RESOURCE_ENERGY] === 0) {
+                                /** Refresh Memory */
+                                transferer.memory.flags = {};
+                                transferer.memory.flags.working = false;
+                            }
+                            if (!transferer.memory.flags.working && (transferer.store.getFreeCapacity(RESOURCE_ENERGY) === 0 || (transferer.store[RESOURCE_ENERGY] > 0 && Game.rooms[containerPos.roomName] && Game.getObjectById(containerId).store[RESOURCE_ENERGY] === 0))) transferer.memory.flags.working = true;
+                            if (!transferer.memory.flags.working) {
+                                if (transferer.pos.roomName !== containerPos.roomName || transferer.pos.getRangeTo(containerPos) > 1) return transferer.travelTo(containerPos);
+                                const container = Game.getObjectById(containerId);
+                                if (container.store[RESOURCE_ENERGY] > 0) transferer.withdraw(container, RESOURCE_ENERGY);
+                            }
+                            if (transferer.memory.flags.working) {
+                                /** Refresh Target */
+                                if (transferer.memory.flags.targetId && transferer.memory.flags.targetPos && Game.rooms[transferer.memory.flags.targetPos.roomName] && (!Game.getObjectById(transferer.memory.flags.targetId) || Game.getObjectById(transferer.memory.flags.targetId).store.getFreeCapacity(RESOURCE_ENERGY) === 0)) transferer.memory.flags = {working : true};
+                                if (!transferer.memory.flags.targetId || !transferer.memory.flags.targetPos) {
+                                    const target = global.ResourceManager.Query(new RoomPosition(25, 25, fromRoomName), RESOURCE_ENERGY, transferer.store[RESOURCE_ENERGY], {type : "store", ensureAmount : false, confinedInRoom : true});
+                                    if (!target) {
+                                        firedCreeps.push(transferer);
+                                        return;
+                                    }
+                                    transferer.memory.flags.targetId = target.id;
+                                    transferer.memory.flags.targetPos = target.pos;
+                                }
+                                const targetPos = constructRoomPosition(transferer.memory.flags.targetPos);
+                                if (transferer.pos.roomName !== transferer.memory.flags.targetPos.roomName || transferer.pos.getRangeTo(targetPos) > 1) return transferer.travelTo(targetPos);
+                                const target = Game.getObjectById(transferer.memory.flags.targetId);
+                                transferer.transfer(target, RESOURCE_ENERGY);
+                            }
+                        });
+                        return firedCreeps;
+                    }
+                }, { containerId, containerPos, targetId, targetPos, fromRoomName, wrapper });
+            };
+            wrapper(this.id, this.pos, target.id, target.pos, this.room.memory.asRemoteMiningRoom);
         }
     };
     StructureContainer.prototype.triggerFillingEnergy = function() {

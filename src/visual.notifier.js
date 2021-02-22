@@ -346,7 +346,7 @@ class Notifier {
         this.clearByTick();
         const groupedNotifications = _.groupBy(this.notifications, notification => notification.roomName);
         Object.keys(groupedNotifications).forEach(roomName => groupedNotifications[roomName] = _.sortBy(groupedNotifications[roomName], notification => notification.priority));
-        Object.values(Game.rooms).filter(r => r.controller && r.controller.my).forEach(r => groupedNotifications[r.name] = groupedNotifications[r.name] || []);
+        global.Lucy.Collector.colonies.forEach(r => groupedNotifications[r.name] = groupedNotifications[r.name] || []);
         return groupedNotifications;
     }
     visuals() {
@@ -374,7 +374,7 @@ const VisualPlugin = {
         const _cpuUsed = Game.cpu.getUsed();
         _notifier.visuals();
         Visualizer.visuals();
-        console.log(`<p style="display:inline;color:green;">[Ticks]</p> Visual consumes ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`);
+        // console.log(`<p style="display:inline;color:green;">[Ticks]</p> Visual consumes ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`);
     }
 };
 

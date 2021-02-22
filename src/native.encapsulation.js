@@ -61,7 +61,7 @@ function mount() {
                 const room = Game.rooms[roomName];
                 room.find(FIND_HOSTILE_CONSTRUCTION_SITES).forEach(c => c.remove());
                 room.find(FIND_STRUCTURES).forEach(s => s.destroy());
-                room.energies.forEach(source => source.register());
+                room.sources.forEach(source => source.register());
             }, undefined, [target.room.name], `Cleaning Remained Structures`);
             /** Monitor Controller Upgrade */
             const r = target.room;
@@ -152,7 +152,7 @@ global.Lucy.App.mount(mount);
 const id2tag = {};
 /** @type {import("./lucy.app").AppLifecycleCallbacks} */
 const NativeEncapsulationPlugin = {
-    beforeTickStart : () => {
+    resetEveryTick : () => {
         const getObjectById = Game.getObjectById;
         Game.getObjectById = function(id) {
             if (typeof id === "string" && id.substring(0, FLAG_ID_INDICATOR.length) === FLAG_ID_INDICATOR) return Game.flags[id.substring(FLAG_ID_INDICATOR.length)];

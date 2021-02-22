@@ -36,7 +36,7 @@ Room.prototype._checkRoomResourceCache = function _checkRoomResourceCache() {
 };
 resourceMultipleList.forEach(function (type) {
     let pluralForm = type + "s";
-    if (pluralForm === "energys") pluralForm = "energies";
+    if (pluralForm === "energys") pluralForm = "sources";
     else if (pluralForm === "biomasss") pluralForm = "biomasses";
 	Object.defineProperty(Room.prototype, pluralForm, {
 		get: function () {

@@ -165,6 +165,7 @@ class ResourceManager {
      * updateRoomCache updates caching for Retrieving and Storing.
      */
     updateRoomCache(roomName, resourceType) {
+        if (!Game.rooms[roomName]) return;
         /* Init Expiration */
         if (!this.room2resourceTypesExpiration[roomName]) this.room2resourceTypesExpiration[roomName] = {};
         if (!this.room2StoringResourceTypesExpiration[roomName]) this.room2StoringResourceTypesExpiration[roomName] = {};
@@ -192,17 +193,14 @@ class ResourceManager {
     }
     /**
      * Register self into ResourceManager
+     * Allow for Duplication
      * @param {ResourceDescriptor | StoringDescriptor} descriptor
      */
     Register(descriptor) {
-        // const descriptorType = descriptor instanceof ResourceDescriptor ? "Provider" : "Receiver";
-        // console.log(`<p style="color:lightblue;display:inline;">[Register]</p> Registering ${descriptor.Obj}'s ${descriptor.ResourceType} into ResourceManager...`);
         if (descriptor instanceof ResourceDescriptor) {
-            this.resourceType2Resources[descriptor.ResourceType] = this.resourceType2Resources[descriptor.ResourceType] || {};
-            this.resourceType2Resources[descriptor.ResourceType][descriptor.Obj.id] = descriptor;
+            _.set(this.resourceType2Resources, [descriptor.ResourceType, descriptor.Obj.id], descriptor);
         } else if (descriptor instanceof StoringDescriptor) {
-            this.resourceType2StoringResources[descriptor.ResourceType] = this.resourceType2StoringResources[descriptor.ResourceType] || {};
-            this.resourceType2StoringResources[descriptor.ResourceType][descriptor.Obj.id] = descriptor;
+            _.set(this.resourceType2StoringResources, [descriptor.ResourceType, descriptor.Obj.id], descriptor);
         }
     }
     /**
@@ -251,76 +249,74 @@ class ResourceManager {
          * Query implements caching to speed up process of finding available resources / storing objects within a give room.
          * Query takes care about the target to choose, so that `subject` will not get `subject` itself.
          */
-        /** Subject with physical position */
-        if (subject.pos || subject instanceof RoomPosition) {
-            /** @type {RoomPosition} */
-            const pos = subject instanceof RoomPosition ? subject : subject.pos;
-            const id = subject instanceof RoomPosition ? null : subject.id;
-            const roomName = pos.roomName;
+        /** @type {RoomPosition} */
+        const pos = subject instanceof RoomPosition ? subject : subject.pos;
+        const id = subject instanceof RoomPosition ? null : subject.id;
+        const roomName = pos.roomName;
+        /**
+         * Only if the distance between rooms satisfies a requirement, resources in another room is attainable from
+         * base room, since long distance is not preferred.
+         */
+        const ALLOWED_DISTANCE = 1;
+        this.updateRoomCache(roomName, resourceType);
+        /**
+         * @type {Array<string>}
+         * NOTICE : Neutral or Hostile rooms are also included in `adjacentRooms`.
+         * Thus, as long as the resources from those rooms are registered, they could be accessed, which allowing for
+         * much more flexibility.
+         */
+        const adjacentRooms = global.Map.Query(roomName);
+        /**
+         * @type {import("./task.prototype").GameObject | null}
+         */
+        let chosen = null;
+        /**
+         * Used to identity the penalty designed for registered resources with distinctive tag while options.key === "default"
+         * @param {ResourceDescriptor | StoringDescriptor} des
+         * @returns {number} Positive Number
+         */
+        const calcKeyPenalty = function(des) {
+            if (options.key !== des.Key) {
+                /* Calc the distance again */
+                return Infinity; // calcInRoomDistance(des.Obj.pos, pos) * 2 * getPrice("cpu") / 5;
+            } else return 0;
+        };
+        for (const room of adjacentRooms) {
+            if (options.type === "retrieve" && (!this.room2resourceTypes[room] || !this.room2resourceTypes[room][resourceType])) continue;
+            if (options.type === 'store' && (!this.room2StoringResourceTypes[room] || !this.room2StoringResourceTypes[room][resourceType])) continue;
+            if ((options.confinedInRoom && room !== roomName) || Game.map.getRoomLinearDistance(room, roomName) > ALLOWED_DISTANCE) continue;
             /**
-             * Only if the distance between rooms satisfies a requirement, resources in another room is attainable from
-             * base room, since long distance is not preferred.
+             * @type {Array<ResourceDescriptor> | Array<StoringDescriptor>}
              */
-            const ALLOWED_DISTANCE = 1;
-            this.updateRoomCache(roomName, resourceType);
-            /**
-             * @type {Array<string>}
-             * NOTICE : Neutral or Hostile rooms are also included in `adjacentRooms`.
-             * Thus, as long as the resources from those rooms are registered, they could be accessed, which allowing for
-             * much more flexibility.
-             */
-            const adjacentRooms = global.Map.Query(roomName);
-            /**
-             * @type {import("./task.prototype").GameObject | null}
-             */
-            let chosen = null;
-            /**
-             * Used to identity the penalty designed for registered resources with distinctive tag while options.key === "default"
-             * @param {ResourceDescriptor | StoringDescriptor} des
-             * @returns {number} Positive Number
-             */
-            const calcKeyPenalty = function(des) {
-                if (options.key !== des.Key) {
-                    /* Calc the distance again */
-                    return Infinity; // calcInRoomDistance(des.Obj.pos, pos) * 2 * getPrice("cpu") / 5;
-                } else return 0;
-            };
-            for (const room of adjacentRooms) {
-                if (options.type === "retrieve" && (!this.room2resourceTypes[room] || !this.room2resourceTypes[room][resourceType])) continue;
-                if (options.type === 'store' && (!this.room2StoringResourceTypes[room] || !this.room2StoringResourceTypes[room][resourceType])) continue;
-                if ((options.confinedInRoom && room !== roomName) || Game.map.getRoomLinearDistance(room, roomName) > ALLOWED_DISTANCE) continue;
-                /**
-                 * @type {Array<ResourceDescriptor> | Array<StoringDescriptor>}
-                 */
-                let totalAvailableResourceObjects = [];
-                if (options.type === "retrieve") totalAvailableResourceObjects = (this.room2resourceTypes[room][resourceType] || [])
-                    .filter(a => a.Obj.id !== id && a.Amount > 0)
-                    .filter(a => !a.Obj.structureType || options.allowStructureTypes.length === 0 || options.allowStructureTypes.indexOf(a.Obj.structureType) !== -1)
-                    .filter(a => (a.Key === "default" && !options.excludeDefault) || a.Key === options.key)
-                    .filter(a => (options.allowStore && a.Obj.store !== undefined) || (options.allowToHarvest && isHarvestable(a.Obj))) // I suppose there is nothing which is harvestable and also has `store`
-                    .sort((a,b) => a.Obj.pos.getRangeTo(pos) * 2 * getPrice("cpu") / 5 + (amount - a.Amount) * getPrice(resourceType) / 1000 + calcKeyPenalty(a) - b.Obj.pos.getRangeTo(pos) * 2 * getPrice("cpu") / 5 - (amount - b.Amount) * getPrice(resourceType) / 1000 - calcKeyPenalty(b));
-                else if (options.type === 'store') totalAvailableResourceObjects = (this.room2StoringResourceTypes[room][resourceType] || [])
-                    .filter(a => a.Obj.id !== id && a.FreeAmount > 0)
-                    .filter(a => !a.Obj.structureType || options.allowStructureTypes.length === 0 || options.allowStructureTypes.indexOf(a.Obj.structureType) !== -1)
-                    .filter(a => (a.Key === "default" && !options.excludeDefault) || a.Key === options.key)
-                    .sort((a,b) => a.Obj.pos.getRangeTo(pos) * 2 * getPrice("cpu") / 5 + (amount - a.FreeAmount) * getPrice(resourceType) / 1000 + calcKeyPenalty(a) - b.Obj.pos.getRangeTo(pos) * 2 * getPrice("cpu") / 5 - (amount - b.FreeAmount) * getPrice(resourceType) / 1000 - calcKeyPenalty(b));
-                if (totalAvailableResourceObjects.length === 0) continue;
-                const adequateResourceObjects = options.ensureAmount? _.filter(totalAvailableResourceObjects, d => (options.type === "retrieve" ? d.Amount : d.FreeAmount) >= amount) : [];
-                chosen = (adequateResourceObjects[0] && adequateResourceObjects[0].Obj) || (totalAvailableResourceObjects[0] && totalAvailableResourceObjects[0].Obj);
-                break;
-            }
-            if (!chosen && options.type === "retrieve" && !options.avoidRequest && options.allowStore && !options.excludeDefault && (options.allowStructureTypes.length === 0 || options.allowStructureTypes.indexOf(STRUCTURE_TERMINAL) !== -1)) {
-                /**
-                 * In this case, some resources are wanted but in the state of shortage.
-                 */
-                global.TerminalManager.Request(roomName, resourceType, amount);
-            }
-            // console.log(`Query Resource ret ${chosen} with params ${subject} ${resourceType} ${amount} ${JSON.stringify(options)}`);
-            return chosen;
+            let totalAvailableResourceObjects = [];
+            if (options.type === "retrieve") totalAvailableResourceObjects = (this.room2resourceTypes[room][resourceType] || [])
+                .filter(a => a.Obj.id !== id && a.Amount > 0)
+                .filter(a => !a.Obj.structureType || options.allowStructureTypes.length === 0 || options.allowStructureTypes.indexOf(a.Obj.structureType) !== -1)
+                .filter(a => (a.Key === "default" && !options.excludeDefault) || a.Key === options.key)
+                .filter(a => (options.allowStore && a.Obj.store !== undefined) || (options.allowToHarvest && isHarvestable(a.Obj))) // I suppose there is nothing which is harvestable and also has `store`
+                .sort((a,b) => a.Obj.pos.getRangeTo(pos) * 2 * getPrice("cpu") / 5 + (amount - a.Amount) * getPrice(resourceType) / 1000 + calcKeyPenalty(a) - b.Obj.pos.getRangeTo(pos) * 2 * getPrice("cpu") / 5 - (amount - b.Amount) * getPrice(resourceType) / 1000 - calcKeyPenalty(b));
+            else if (options.type === 'store') totalAvailableResourceObjects = (this.room2StoringResourceTypes[room][resourceType] || [])
+                .filter(a => a.Obj.id !== id && a.FreeAmount > 0)
+                .filter(a => !a.Obj.structureType || options.allowStructureTypes.length === 0 || options.allowStructureTypes.indexOf(a.Obj.structureType) !== -1)
+                .filter(a => (a.Key === "default" && !options.excludeDefault) || a.Key === options.key)
+                .sort((a,b) => a.Obj.pos.getRangeTo(pos) * 2 * getPrice("cpu") / 5 + (amount - a.FreeAmount) * getPrice(resourceType) / 1000 + calcKeyPenalty(a) - b.Obj.pos.getRangeTo(pos) * 2 * getPrice("cpu") / 5 - (amount - b.FreeAmount) * getPrice(resourceType) / 1000 - calcKeyPenalty(b));
+            if (totalAvailableResourceObjects.length === 0) continue;
+            const adequateResourceObjects = options.ensureAmount? _.filter(totalAvailableResourceObjects, d => (options.type === "retrieve" ? d.Amount : d.FreeAmount) >= amount) : [];
+            chosen = (adequateResourceObjects[0] && adequateResourceObjects[0].Obj) || (totalAvailableResourceObjects[0] && totalAvailableResourceObjects[0].Obj);
+            break;
         }
+        if (!chosen && options.type === "retrieve" && !options.avoidRequest && options.allowStore && !options.excludeDefault && (options.allowStructureTypes.length === 0 || options.allowStructureTypes.indexOf(STRUCTURE_TERMINAL) !== -1)) {
+            /**
+             * In this case, some resources are wanted but in the state of shortage.
+             */
+            global.TerminalManager.Request(roomName, resourceType, amount);
+        }
+        // console.log(`Query Resource ret ${chosen} with params ${subject} ${resourceType} ${amount} ${JSON.stringify(options)}`);
+        return chosen;
     }
     Display() {
         for (const roomName in this.room2resourceTypes) {
+            if (!Game.rooms[roomName]) continue;
             const resourceType = RESOURCE_ENERGY;
             for (const descriptor of this.room2resourceTypes[roomName][resourceType]) {
                 new RoomVisual(descriptor.Obj.pos.roomName).text(descriptor.Amount, descriptor.Obj.pos, {color : "yellow"});

@@ -1,5 +1,6 @@
 /**
  * @module manager.link
+ * @typedef {LinkManager} LinkManager
  */
 const profiler = require("./screeps-profiler");
 const Notifier = require("./visual.notifier").Notifier;

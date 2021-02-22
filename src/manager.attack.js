@@ -3,6 +3,7 @@
  * 
  * @typedef { "Enemy" | "Stronghold" } AttackRoomType
  * @typedef { "attackable" | "unattackable" | "unreachable" } AttackReturn
+ * @typedef { AttackManager } AttackManager
  */
 const getCacheExpiration =  require("./util").getCacheExpiration;
 const Task               =  require("./task.prototype").Task;
@@ -90,6 +91,7 @@ class AttackManager {
                 this.statistics[roomName].targetPos = target.pos;
             }
         }
+        if (global.TaskManager.Fetch("default", `ATTACK_${roomName}_Stronghold_${0}`).length > 0) return;
         const hitsPerTick = INVADER_CORE_HITS / CREEP_LIFE_TIME;
         const attack = Math.floor(hitsPerTick / ATTACK_POWER);
         const move = attack;
@@ -116,7 +118,7 @@ class AttackManager {
                 mode : "shrinkToEnergyAvailable",
                 confinedInRoom : false
             }
-        }), {
+        }, {taskKey : `ATTACK_${roomName}_Stronghold_${0}`}), {
             selfCheck : function() {
                 if (this.taskData[OK]) return "dead";
                 return "working";
@@ -149,10 +151,10 @@ class AttackManager {
      */
     trigger(roomName) {
         if (this.targetRooms[roomName].type === "Stronghold" && this.targetRooms[roomName].level === 0) {
-            this.targetRoomsAttackReturn[roomName] = {return : "attackable", timeout : Game.time + ATTACK_RETURN_VALID_DURATION_TICKS};
+            this.update(roomName, "attackable");
             this.issue_Stronghold_0(roomName);
         } else {
-            this.targetRoomsAttackReturn[roomName] = {return : "unattackable", timeout : Game.time + ATTACK_RETURN_VALID_DURATION_TICKS};
+            this.update(roomName, "unattackable");
         }
     }
     /**
@@ -211,7 +213,7 @@ class AttackManager {
             if ((!this.targetRooms[roomName].type || typeof this.targetRooms[roomName].level !== "number") && Game.rooms[roomName]) {
                 this.init(roomName);
                 /**
-                 * If there isn't any signal demonstrating this room deserves attack, this room is removed (instead of being in the state of cooldown).
+                 * If there isn't any signal demonstrating this room deserves attacking, this room is removed (instead of being in the state of cooldown).
                  */
                 if (!this.targetRooms[roomName].type || typeof this.targetRooms[roomName].level !== "number") {
                     delete this.targetRooms[roomName];
@@ -224,9 +226,11 @@ class AttackManager {
             this.trigger(roomName);
         }
     }
+    /** @type {{[roomName : string] : {type : AttackRoomType | null, level : number}}} */
+    get targetRooms() {
+        return Memory._attackTargetRooms;
+    }
     constructor() {
-        /** @type {{[roomName : string] : {type : AttackRoomType | null, level : number}}} */
-        this.targetRooms = Memory._attackTargetRooms;
         /** @type {{[roomName : string] : {timeout : number, return : AttackReturn}}} */
         this.targetRoomsAttackReturn = {};
         /** @type {{[roomName : string] : {} | {targetId : Id<StructureInvaderCore>, targetPos : RoomPosition}}} */

@@ -1,5 +1,6 @@
 /**
  * @module lucy.timer
+ * @typedef {Timer} Timer
  */
 class Timer extends Array {
     /**
@@ -16,7 +17,7 @@ class Timer extends Array {
         if (!this[tick]) this[tick] = [];
         this[tick].push({ func, funcThis, params, description });
         // Notifier.notify(`Lucy.Timer.add ${description} scheduled at ${tick}`);
-        console.log(`<p style="color:gray;display:inline;">[Task]</p> Scheduled Task "${description}" at ${tick} is added at ${Game.time} ...`);
+        // console.log(`<p style="color:gray;display:inline;">[Task]</p> Scheduled Task "${description}" at ${tick} is added at ${Game.time} ...`);
     }
     /**
      * Iterate over functions scheduled at current tick.
@@ -31,6 +32,7 @@ class Timer extends Array {
                 console.log(`<p style="color:red;display:inline;">Error:</p> Scheduled Task "${info.description}" fails to execute because of failing to retrieve object with Id ${info.funcThis}`);
                 continue;
             }
+            global.Log.debug(global.Dye.grey(`Executing "${info.description}" ...`))
             func.apply(_this, info.params);
         }
         delete this[Game.time];

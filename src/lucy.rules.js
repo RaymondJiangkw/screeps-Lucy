@@ -1,8 +1,9 @@
 /**
  * @typedef { {reservedAmount : number} } SellingEntry
  * @typedef { {[resourceType : string] : SellingEntry} } SellingList
+ * @typedef { rules } Rules 
  */
-module.exports = {
+const rules = {
     transactionConfigure: {
         fineRate: 0.3
     },
@@ -58,3 +59,4 @@ module.exports = {
         }
     }
 };
+module.exports = rules;

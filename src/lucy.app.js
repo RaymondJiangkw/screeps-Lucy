@@ -9,11 +9,12 @@
  * @typedef { AnyClass } ExtensionClass 包含拓展的类
  * @typedef { () => void } MountFunction 执行挂载的函数
  * @typedef { {[key : string] : any} } AnyClass
- * @typedef { {id : number, callback : AnyCallback}[] _CallbackStore }
- * @typedef { {"born"? : _CallbackStore, "init"? : _CallbackStore , "reset"? : _CallbackStore, "beforeTickStart"? : _CallbackStore, "tickStart"? : _CallbackStore, "afterTickEnd"? : _CallbackStore, "tickEnd"? : _CallbackStore} } CallbackStore
- * @typedef { {"born"? : AnyCallback, "init"? : AnyCallback, "reset"? : AnyCallback, "beforeTickStart"? : AnyCallback, "tickStart"? : AnyCallback, "afterTickEnd"? : AnyCallback, "tickEnd"? : AnyCallback} } AppLifecycleCallbacks
+ * @typedef { {id : number, callback : AnyCallback}[] } _CallbackStore
+ * @typedef { {"born"? : _CallbackStore, "init"? : _CallbackStore , "reset"? : _CallbackStore, "resetEveryTick"? : _CallbackStore, "beforeTickStart"? : _CallbackStore, "tickStart"? : _CallbackStore, "afterTickEnd"? : _CallbackStore, "tickEnd"? : _CallbackStore} } CallbackStore
+ * @typedef { {"born"? : AnyCallback, "init"? : AnyCallback, "reset"? : AnyCallback, "resetEveryTick"? : AnyCallback, "beforeTickStart"? : AnyCallback , "tickStart"? : AnyCallback, "afterTickEnd"? : AnyCallback, "tickEnd"? : AnyCallback} } AppLifecycleCallbacks
  * @typedef { {[key : string] : any} } AnyHashMap
  * @typedef { {label : string, init : number, fetch : () => number, fetchParams? : any[], func : (newNumber : number, oldNumber : number, ...args : any[]) => void, funcParams? : any[]} } MonitorEntry 数值监视单件
+ * @typedef { App } App
  */
 const BOT_NAME_SUFFIX = 'Framework';
 const DEFAULT_BOT_NAME = `Lucy_${BOT_NAME_SUFFIX}`;
@@ -35,7 +36,7 @@ class App {
          * @private
          */
         this.lifecycleCallbacks = {
-            born : [], init : [], reset : [], beforeTickStart : [], tickStart : [], afterTickEnd : [], tickEnd: []
+            born : [], init : [], reset : [], resetEveryTick : [], beforeTickStart : [], tickStart : [], afterTickEnd : [], tickEnd: []
         };
         /**
          * 用于标识下个on所注册回调的索引 会在on执行后自增
@@ -176,32 +177,40 @@ class App {
      * @private
      */
     onGlobalReset() {
-        // 执行所有执行挂载的函数
-        this.mountFunctions.forEach(f => f());
+        console.log(String.fromCodePoint(0x231b), 'Code Reloading ...');
+        if (!global._mount) {
+            let cpuUsed = Game.cpu.getUsed();
+            // 执行所有执行挂载的函数
+            this.mountFunctions.forEach(f => f());
+            global.Log.success('Remount Done', global.Dye.grey(`cpu-cost:${(Game.cpu.getUsed() - cpuUsed).toFixed(2)}`));
+            global._mount = true;
+        }
+        let cpuUsed = Game.cpu.getUsed();
         // 执行对于 Game 的即时修改
-        this.execLifecycleCallback("beforeTickStart");
+        this.execLifecycleCallback("resetEveryTick");
         // 执行全局变量初始化
         this.execLifecycleCallback("init");
         this.execLifecycleCallback("reset");
-        global._mountComplete = Game.time;
-        console.log(`<p style="display:inline;color:red;">[mount]</p> Remount successfully.`);
         // 检查是否是第一次全局重置
         if (!Memory[this.name].notOnBorn) {
             this.execLifecycleCallback('born');
             Memory[this.name].notOnBorn = true;
         }
+        global._mountComplete = Game.time;
+        global.Log.success('Reset Done', global.Dye.grey(`cpu-cost:${(Game.cpu.getUsed() - cpuUsed).toFixed(2)}`));
     }
     /**
      * 运行 bot
      */
     run() {
         if (!global._mountComplete) this.onGlobalReset();
-        // 执行对于 Game 的即时修改, `beforeTickStart` 会在 `onGlobalReset` 中执行一次
-        else this.execLifecycleCallback("beforeTickStart");
+        // 执行对于 Game 的即时修改, `resetEveryTick` 会在 `onGlobalReset` 中执行一次
+        else this.execLifecycleCallback("resetEveryTick");
         
         // 执行数值监视事件
         this.monitorLists.forEach(entry => this.execMonitor(entry));
 
+        this.execLifecycleCallback("beforeTickStart");
         this.execLifecycleCallback("tickStart");
 
         this.execLifecycleCallback("tickEnd");

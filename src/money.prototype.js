@@ -374,7 +374,10 @@ class Bank {
         this.accountBooks = Memory.Bank.accountBooks || {};
     }
 }
+let _mounted = false;
 function mount() {
+    if (_mounted) return;
+    _mounted = true;
     Object.defineProperty(Object.prototype, "account", {
         get() {
             if (!this.id) console.log(`<p style = "color : red; display : inline;">Cannot set "account" to object ${this}, who loses "id" property!</p>`);

@@ -8,7 +8,8 @@
     - Triggered whenever `GCL` is upgraded.
     - Filter out rooms unfit for the `Automatic Plan` pattern.
     - Filter out rooms the path to which inevitably contain hostile rooms.
-- *Automatic Remote Mining (Source and Mineral)* (Under Development ⛏️)
+- Automatic Remote Mining (Source and Mineral)
+    - Beta Version, still suffering from edge cases and unable to protect itself well.
 - Automatic Market
     - Buying and Sending based on demand.
     - Selling is triggered automatically and based on demand of credits and relies on settings.
@@ -40,3 +41,5 @@
     - Extend with monitoring any `variable`.
 
     <div style="text-align:center;"><img src="./demo/notifier.PNG" alt="Notifier" /></div>
+- Pretty Console Log
+    - Adapted from `ScreepsAI` written by @canisminor1990.

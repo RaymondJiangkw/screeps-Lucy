@@ -1,8 +1,11 @@
 /**
  * @module manager.labs
+ * 
+ * @typedef {LabManager} LabManager
  */
 const TaskConstructor       = require("./manager.tasks").TaskConstructor;
 const Transaction           = require("./money.prototype").Transaction;
+const icon                  = require("./util").icon;
 const getPrice              = require("./util").getPrice;
 const checkForStore         = require("./util").checkForStore;
 const checkForFreeStore     = require("./util").checkForFreeStore;
@@ -260,7 +263,7 @@ class LabUnit {
         const currentResources = this.InputLabs.filter(l => l.mineralType).map(l => [l.mineralType, l.store[l.mineralType]]);
         if (currentResources.length === 2 && REACTIONS[currentResources[0][0]] && REACTIONS[currentResources[0][0]][currentResources[1][0]]) {
             this.recipe = currentResources.map(v => v[0]);
-            if (DEBUG) console.log(`[${this.roomName}] Recipe : Apply existing resources in Input Labs : ${this.recipe}`);
+            global.Log.room(this.roomName, global.Dye.purple(`Recipe`), global.Dye.blue(`Apply existing Resources in Input Labs`), global.Dye.white(`${icon(this.recipe[0])} + ${icon(this.recipe[1])} => ${icon(REACTIONS[this.recipe[0]][this.recipe[1]])}`));
             return;
         }
         const matches = currentResources.map(v => this.find(v[0], v[1])).filter(o => o);
@@ -268,7 +271,7 @@ class LabUnit {
             const ret = matches.length === 2 ? this.cmp(matches[0], matches[1]) : matches[0];
             if (ret.amount > 0 || isAllowedToBuy(ret.mineralTypes[1])) {
                 this.recipe = ret.mineralTypes;
-                if (DEBUG) console.log(`[${this.roomName}] Recipe : Determine based on one input lab : ${this.recipe}`);
+                global.Log.room(this.roomName, global.Dye.purple(`Recipe`), global.Dye.blue(`Determine based on one Input Lab`), global.Dye.white(`${icon(this.recipe[0])} + ${icon(this.recipe[1])} => ${icon(REACTIONS[this.recipe[0]][this.recipe[1]])}`));
                 return;
             }
         }
@@ -279,7 +282,7 @@ class LabUnit {
             let ret = ingredients[0];
             for (let i = 1; i < ingredients.length; ++i) ret = this.cmp(ret, ingredients[i]);
             this.recipe = ret.mineralTypes;
-            if (DEBUG) console.log(`[${this.roomName}] Recipe : Pure New Recipe : ${this.recipe}`);
+            global.Log.room(this.roomName, global.Dye.purple(`Recipe`), global.Dye.blue(`Pure New One`), global.Dye.white(`${icon(this.recipe[0])} + ${icon(this.recipe[1])} => ${icon(REACTIONS[this.recipe[0]][this.recipe[1]])}`));
             return;
         }
         // There isn't any existing mineralTypes

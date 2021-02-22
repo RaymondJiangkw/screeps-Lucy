@@ -1,5 +1,9 @@
 /**
  * @module manager.map
+ * 
+ * @typedef {Map} Map
+ * @typedef {MapMonitor} MapMonitor
+ * @typedef {Planner} Planner
  */
 const getCacheExpiration    =   require('./util').getCacheExpiration;
 const constructArray        =   require('./util').constructArray;
@@ -198,7 +202,7 @@ class Unit {
      * @param {string} tag used to denote all the structures belonging to this pattern
      * @param {string} pinText
      * @param {string} strokeColor
-     * @param { {type : "distanceSum", objects : Array<StructureConstant | "energies" | MineralConstant | "mineral">, subjects : Array<StructureConstant> } } metrics
+     * @param { {type : "distanceSum", objects : Array<StructureConstant | "sources" | MineralConstant | "mineral">, subjects : Array<StructureConstant> } } metrics
      * @param { {alongRoad? : boolean, avoidOverLapRoad? : boolean, avoidOtherToOverLapRoad? : boolean, primary? : boolean} } [options] specify some other specifications
      */
     constructor(pattern, unitType, tag, pinText, strokeColor, metrics, options = {}) {
@@ -243,7 +247,7 @@ class Unit {
                 let objects = [];
                 for (const key of this.metrics.objects) {
                     // if (key === STRUCTURE_SPAWN) console.log(tag, planner.FetchRoomPlannedStructures(room.name, key));
-                    if (key === "energies") objects = objects.concat(room["energies"].map(s => s.pos));
+                    if (key === "sources") objects = objects.concat(room["sources"].map(s => s.pos));
                     else if (key === "mineral") objects = objects.concat(room["mineral"].pos);
                     else if (key === STRUCTURE_CONTROLLER) objects = objects.concat(room.controller.pos);
                     else objects = objects.concat(planner.FetchRoomPlannedStructures(room.name, key));
@@ -1078,7 +1082,7 @@ class Planner {
      * Container will be placed on the road which is around `object`.
      * @param { {pos : RoomPosition} } object
      * @param { string } tag
-     * @param {boolean} [isRampart = false]
+     * @param { boolean } [isRampart = false]
      * @returns {Response}
      */
     PlanForAroundOverlapContainer(object, tag, isRampart = false) {
@@ -1369,7 +1373,7 @@ planner.RegisterUnit("normal", new Unit(
         [STRUCTURE_ROAD, STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, STRUCTURE_ROAD],
         [Unit.prototype.PLACE_ANY, STRUCTURE_ROAD, STRUCTURE_ROAD, STRUCTURE_ROAD, STRUCTURE_ROAD, STRUCTURE_ROAD, Unit.prototype.PLACE_ANY]
     ]
-    , "centralSpawn", global.Lucy.Rules.arrangements.SPAWN_ONLY, "", "red", {type:"distanceSum", objects : [STRUCTURE_CONTROLLER, "mineral", "energies"], subjects : [STRUCTURE_SPAWN]}, {avoidOtherToOverLapRoad : true, primary : true}));
+    , "centralSpawn", global.Lucy.Rules.arrangements.SPAWN_ONLY, "", "red", {type:"distanceSum", objects : [STRUCTURE_CONTROLLER, "mineral", "sources"], subjects : [STRUCTURE_SPAWN]}, {avoidOtherToOverLapRoad : true, primary : true}));
 
 planner.RegisterUnit("normal", new Unit(
     [
@@ -1680,12 +1684,13 @@ class Map {
     }
     /**
      * @param {number} amount
+     * @param {boolean} [dryRun]
      */
-    ClaimRoom(amount) {
+    ClaimRoom(amount, dryRun = false) {
         /**
          * Update Information of Rooms
          */
-        const myRoomNames = Object.keys(Game.rooms).filter(roomName => isMyRoom(roomName));
+        const myRoomNames = global.Lucy.Collector.colonies.map(r => r.name);
         myRoomNames.forEach(roomName => this.updateAdjacentRooms(roomName, {fullDistrict : true}));
         myRoomNames.forEach(roomName => this.updateDistanceBetweenRooms(roomName));
         let isThereAnyInformationLacking = 0;
@@ -1721,7 +1726,11 @@ class Map {
                 return Math.min(...myRoomNames.map(myRoomName => calcRoomDistance(myRoomName, u))) - Math.min(...myRoomNames.map(myRoomName => calcRoomDistance(myRoomName, v)));
             })
             .filter(roomName => planner.IsRoomFit(roomName, "normal"));
-        for (let i = 0, cnt = 0; cnt < amount && i < candidates.length; ++i) if (TaskConstructor.ClaimTask(candidates[i]) === false) continue; else ++cnt;
+        if (!dryRun) {
+            for (let i = 0, cnt = 0; cnt < amount && i < candidates.length; ++i)
+                if (TaskConstructor.ClaimTask(candidates[i]) === false) continue;
+                else ++cnt;
+        } else console.log(candidates);
         return true;
     }
     /**
@@ -1798,7 +1807,7 @@ class Map {
                 if (isThereAnyInformationLacking > 0) return this.room2RemoteMineExpiration[roomName] = Game.time + isThereAnyInformationLacking * 50;
                 mineralOfRoomNames = mineralOfRoomNames
                     /** Only want those possessing minerals we do not have */
-                    .filter(({mineralType}) => !Object.values(Game.rooms).filter(r => isMyRoom(r)).map(r => r.mineral.mineralType).includes(mineralType))
+                    .filter(({mineralType}) => !global.Lucy.Collector.colonies.map(r => r.mineral.mineralType).includes(mineralType))
                     /** Passing Through Hostile Rooms are forbidden */
                     .filter(value => this.DescribeRoute(roomName, value.roomName).filter(r => !isMyRoom(r) && Memory.rooms[r] && (Memory.rooms[r].owner && Memory.rooms[r].owner !== username && Memory.rooms[r].owner !== "Invader") && this.EnsureVisibility(r, true) !== "invisible").length === 0)
                     /** Rooms as target for others are avoided */
@@ -1813,9 +1822,9 @@ class Map {
             });
         }
         /**
-         * Remote Energy : Start from Level 4
+         * Remote Energy : Start from Level 5
          */
-        if (Game.rooms[roomName].controller.level >= 4) {
+        if (Game.rooms[roomName].controller.level >= 5) {
             /** Ensure Visibility */
             this.room2RemoteMiningCandidates[roomName].forEach(v => {
                 if (!this[`_remote_mining_energy_${roomName}=>${v.roomName}`]) {
@@ -1848,8 +1857,9 @@ class Map {
      * @param {"normal" | "remoteMining_energy" | "remoteMining_mineral"} roomType
      * @param {string} roomName
      * @param {string} [fromRoomName] Used when `roomType` is `remoteMining_energy` or `remoteMining_mineral`.
+     * @param {boolean} [compulsoryConstruct] Used when `room` becomes visible in which case `objectDestroy` is not able to be detected through events.
      */
-    AutoPlan(roomType, roomName, fromRoomName) {
+    AutoPlan(roomType, roomName, fromRoomName, compulsoryConstruct = false) {
         const _cpuUsed = Game.cpu.getUsed();
         /** Initialize some Variables */
         if (!Memory.autoPlan) Memory.autoPlan = {};
@@ -1863,7 +1873,7 @@ class Map {
             structureConstruct : false
         };
         // NOTICE: remove Of ConstructionSite is not counted by EVENT_OBJECT_DESTROYED.
-        if (Game.rooms[roomName].getEventLog().filter(e => e.event === EVENT_OBJECT_DESTROYED && e.data.type !== "creep").length > 0 || global.signals.IsConstructionSiteCancel[roomName] || global.signals.IsStructureDestroy[roomName]) options.objectDestroy = true;
+        if (global.signals.IsConstructionSiteCancel[roomName] || global.signals.IsStructureDestroy[roomName]) options.objectDestroy = true;
         if (global.signals.IsNewStructure[roomName]) options.structureConstruct = true;
         /**
          * @param {Response} response
@@ -1906,7 +1916,7 @@ class Map {
                 if (parseResponse(this.planCache[roomName].feedbacks["controllerLink"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["controllerLink"].Feed(planner.PlanForAroundLink(Game.rooms[roomName].controller, global.Lucy.Rules.arrangements.UPGRADE_ONLY));
                 /* Plan For Harvest Unit */
                 if (!this.planCache[roomName].feedbacks["harvestEnergy"]) this.planCache[roomName].feedbacks["harvestEnergy"] = {};
-                for (const source of Game.rooms[roomName].energies) {
+                for (const source of Game.rooms[roomName].sources) {
                     /**
                      * Container
                      */
@@ -1930,7 +1940,7 @@ class Map {
                     road : parseResponse(this.planCache[roomName].feedbacks["centralSpawn"].Pick("road")) || options.objectDestroy,
                     num : 1,
                     linkedRoomPosition : [].concat(
-                        Game.rooms[roomName]["energies"].map(s => s.pos),
+                        Game.rooms[roomName]["sources"].map(s => s.pos),
                         (Game.rooms[roomName].controller.level >= 5 ? Game.rooms[roomName]["mineral"].pos : []),
                         Game.rooms[roomName].controller.pos
                     ),
@@ -2059,13 +2069,13 @@ class Map {
                 if (!this.planCache[roomName].feedbacks[`roads_${source.id}`]) this.planCache[roomName].feedbacks[`roads_${source.id}`] = new Response(Response.prototype.PLACE_HOLDER);
                 this.planCache[roomName].feedbacks[`roads_${source.id}`].Feed(planner.Link(fromRoomName, new RoomPosition(source.pos.x, source.pos.y, source.pos.roomName), {
                     display : true,
-                    road : parseResponse(this.planCache[roomName].feedbacks[`roads_${source.id}`]) || options.objectDestroy,
+                    road : parseResponse(this.planCache[roomName].feedbacks[`roads_${source.id}`]) || options.objectDestroy || compulsoryConstruct,
                     maxRooms : 2
                 }));
                 // console.log(`[roads_${source.id}]=>${JSON.stringify(this.planCache[roomName].feedbacks[`roads_${source.id}`])}`);
                 /** Plan for Container */
                 if (!this.planCache[roomName].feedbacks[`container_${source.id}`]) this.planCache[roomName].feedbacks[`container_${source.id}`] = new Response(Response.prototype.PLACE_HOLDER);
-                if (parseResponse(this.planCache[roomName].feedbacks[`container_${source.id}`]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks[`container_${source.id}`].Feed(planner.PlanForAroundOverlapContainer(Game.getObjectById(source.id), "remoteSource", false));
+                if (parseResponse(this.planCache[roomName].feedbacks[`container_${source.id}`]) || options.objectDestroy || options.structureConstruct || compulsoryConstruct) this.planCache[roomName].feedbacks[`container_${source.id}`].Feed(planner.PlanForAroundOverlapContainer(Game.getObjectById(source.id), "remoteSource", false));
             }
         } else if (roomType === "remoteMining_mineral") {
             
@@ -2076,7 +2086,7 @@ class Map {
          * Constants & Variables
          */
         const MAXIMUM_DISTANCE = 1;
-        const myRooms = Object.values(Game.rooms).filter(room => isMyRoom(room));
+        const myRooms = global.Lucy.Collector.colonies;
         /**
          * @param {Response} response
          */
@@ -2094,7 +2104,7 @@ class Map {
             for (let i = 0; i < myRooms.length; ++i) for (let j = i + 1; j < myRooms.length; ++j) if (this.CalcRoomDistance(myRooms[i].name, myRooms[j].name) <= MAXIMUM_DISTANCE) this.controlledRoomLinkCache.links.push({rooms : [myRooms[i].name, myRooms[j].name], feedback : new Response(Response.prototype.PLACE_HOLDER)});
         }
         for (const {rooms, feedback} of this.controlledRoomLinkCache.links) {
-            const objectDestroy = (roomName) => Game.rooms[roomName].getEventLog().filter(e => e.event === EVENT_OBJECT_DESTROYED && e.data.type !== "creep").length > 0 || global.signals.IsConstructionSiteCancel[roomName] || global.signals.IsStructureDestroy[roomName];
+            const objectDestroy = (roomName) => global.signals.IsConstructionSiteCancel[roomName] || global.signals.IsStructureDestroy[roomName];
             feedback.Feed(planner.Link(rooms[0], rooms[1], {
                 display : true,
                 road : parseResponse(feedback) || objectDestroy(rooms[0]) || objectDestroy(rooms[1])
@@ -2197,4 +2207,4 @@ const MapPlugin = {
 };
 global.Lucy.App.on(MapPlugin);
 /** Register GCL Upgrading Response */
-global.Lucy.App.monitor({label : "gcl", fetch : () => Game.gcl.level, init : Object.values(Game.rooms).filter(room => isMyRoom(room)).length, func : (newNumber, oldNumber) => global.Map.ClaimRoom(newNumber - oldNumber)});
+global.Lucy.App.monitor({label : "gcl", fetch : () => Game.gcl.level, init : global.Lucy.Collector.colonies.length, func : (newNumber, oldNumber) => global.Map.ClaimRoom(newNumber - oldNumber)});
