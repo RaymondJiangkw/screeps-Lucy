@@ -446,19 +446,19 @@ class LogPool {
                         });
                     }
                 }
-                let hotEvent = null;
-                while ((hotEvent = this.HotPoolTop)) {
-                    // console.log(hotEvent.Type, hotEvent.Status, hotEvent.Obj);
-                    if (hotEvent.Type === EVENT_TYPES.TASK_OF_OBJECT_STATUS_CHANGE) {
-                        if (hotEvent.Status === "fired") {
-                            /**
-                             * `fired` objects could fetch `task` at the same tick to avoid duplicate spawning.
-                             * NOTICE : There could be reduntant such events while `fired` objects have taken some tasks. Thus, double check is compulsory.
-                             */
-                            if (!hotEvent.Obj.task) hotEvent.Obj.task = global.TaskManager.Query(hotEvent.Obj);
-                        }
-                    }
-                }
+                // let hotEvent = null;
+                // while ((hotEvent = this.HotPoolTop)) {
+                //     // console.log(hotEvent.Type, hotEvent.Status, hotEvent.Obj);
+                //     if (hotEvent.Type === EVENT_TYPES.TASK_OF_OBJECT_STATUS_CHANGE) {
+                //         if (hotEvent.Status === "fired") {
+                //             /**
+                //              * `fired` objects could fetch `task` at the same tick to avoid duplicate spawning.
+                //              * NOTICE : There could be reduntant such events while `fired` objects have taken some tasks. Thus, double check is compulsory.
+                //              */
+                //             if (!hotEvent.Obj.task) hotEvent.Obj.task = global.TaskManager.Query(hotEvent.Obj);
+                //         }
+                //     }
+                // }
                 // This step is compulsory ! Since the indicator needs to be updated.
                 this.Done();
                 // console.log(`Log -> ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`);

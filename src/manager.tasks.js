@@ -576,7 +576,7 @@ class TaskConstructor {
      */
     ClaimTask(targetRoom) {
         if (global.TaskManager.Fetch("default", `CLAIM_${targetRoom}`).length > 0) return true;
-        console.log(`<p style="color:gray;display:inline;">[Log]</p> Claiming ${targetRoom}`);
+        global.Log.room(targetRoom, global.Dye.red("Claiming starts"));
         const roleDescriptor = new RoleConstructor();
         roleDescriptor.Register("worker", "creep");
         roleDescriptor
@@ -625,16 +625,19 @@ class TaskConstructor {
     ReserveTask(targetRoom) {
         if (global.TaskManager.Fetch("default", `Reserve_${targetRoom}`).length > 0) return true;
         global.Log.room(targetRoom, global.Dye.blue("Reservation starts"));
-        console.log(`<p style="color:gray;display:inline;">[Log]</p> Reserving ${targetRoom}`);
         const roleDescriptor = new RoleConstructor();
         roleDescriptor.Register("worker", "creep");
         roleDescriptor
             .set("worker", {key : "static", value : {bodyRequirements : {[CLAIM]:2,[MOVE]:2}}}) // 2 CLAIM is the maximum based on the minimum controller level 4
-            .set("worker", {key : "memoryTag", value : {tagName : "reserver", whetherAllowEmptyTag : false}})
+            // Specific Task here considers that the distance between targetRoom and spawnRoom could be large
+            // and it would be inefficient if some creep suddenly turns its way to B while heading for A because
+            // of global reset.
+            // Additionally, `reserve` is a permanent task which is not same with `claim` or `scout`.
+            .set("worker", {key : "memoryTag", value : {tagName : `reserver-${targetRoom}`, whetherAllowEmptyTag : false}})
             .set("worker", {key : "profit", value : function (object) { return -Game.map.getRoomLinearDistance(this.taskData.targetRoom, object.pos.roomName) * 50 * getPrice("cpu"); }})
             .set("worker", {key : "workingTicks", value : () => 0})
             .set("worker", {key : "spawnConstraint", value : {tag : "default", mountRoomSpawnOnly : false}})
-            .set("worker", {key:"number", value : [1,1]});
+            .set("worker", {key:"number", value : [1, 1]}); // NOTICE : When Global Reset, `new` Creep could be hired while `old` creep is abandoned.
         this.Construct({taskName : `[Reserve:${targetRoom}]`, taskType : "default"}, {mountRoomName : targetRoom, mountObj : {id : null}}, roleDescriptor, {
             funcs : {
                 selfCheck : function() {
@@ -645,33 +648,49 @@ class TaskConstructor {
                     return "working";
                 },
                 run : function() {
-                    /** @type {Creep} */
-                    const worker = this.FetchEmployees("worker")[0];
-                    if (!worker) return [];
-                    if (worker.room.name === this.taskData.targetRoom) {
-                        if (worker.reserveController(worker.room.controller) === ERR_NOT_IN_RANGE) worker.moveTo(worker.room.controller);
-                        /** Trigger Attack if InvaderCore is found */
-                        if (!this.taskData[FIND_HOSTILE_STRUCTURES] && Game.time % 17 === 0 && worker.room.find(FIND_HOSTILE_STRUCTURES).length > 0) {
-                            global.AttackManager.Add(worker.room.name, "Stronghold", 0);
-                            this.taskData[FIND_HOSTILE_STRUCTURES] = true;
-                        } else if (this.taskData[FIND_HOSTILE_STRUCTURES] && global.AttackManager.Query(worker.room.name) === "completed") {
-                            this.taskData[FIND_HOSTILE_STRUCTURES] = false;
+                    /** @type {Creep[]} */
+                    const workers = this.FetchEmployees("worker");
+                    /** @type {Creep[]} */
+                    const firedEmployees = [];
+                    workers.forEach(worker => {
+                        if (!worker.memory.temporaryFlags) worker.memory.temporaryFlags = {};
+                        if (!worker.memory.permanentFlags) worker.memory.permanentFlags = {};
+                        if (!worker.memory.permanentFlags.employedTick) worker.memory.permanentFlags.employedTick = Game.time;
+                        if (worker.room.name === this.taskData.targetRoom) {
+                            const retCode = worker.reserveController(worker.room.controller);
+                            if (retCode === ERR_NOT_IN_RANGE) worker.moveTo(worker.room.controller);
+                            // In this case, `worker` has moved to the position of `target`
+                            else if (!worker.memory.permanentFlags.startWorkingTick && retCode === OK) worker.memory.permanentFlags.startWorkingTick = Game.time;
+                            /** Trigger Attack if InvaderCore is found */
+                            if (!this.taskData[FIND_HOSTILE_STRUCTURES] && Game.time % 17 === 0 && worker.room.find(FIND_HOSTILE_STRUCTURES).length > 0) {
+                                global.AttackManager.Add(worker.room.name, "Stronghold", 0);
+                                this.taskData[FIND_HOSTILE_STRUCTURES] = true;
+                            } else if (this.taskData[FIND_HOSTILE_STRUCTURES] && global.AttackManager.Query(worker.room.name) === "completed") {
+                                this.taskData[FIND_HOSTILE_STRUCTURES] = false;
+                            }
+                            /** Trigger Defend if NPC or other player's hostile creeps are found */
+                            if (!this.taskData[FIND_HOSTILE_CREEPS] && Game.time % 31 === 0 && worker.room.find(FIND_HOSTILE_CREEPS, {filter : (creep) => _.some(creep.body, y => [ATTACK, WORK, RANGED_ATTACK, CARRY].includes(y.type))}).length > 0) {
+                                global.DefendManager.Add(worker.room.name, "Remote", 0);
+                                this.taskData[FIND_HOSTILE_CREEPS] = true;
+                            } else if (this.taskData[FIND_HOSTILE_CREEPS] && global.DefendManager.Query(worker.room.name) === "completed") {
+                                this.taskData[FIND_HOSTILE_CREEPS] = false;
+                            }
+                            /** Issue Succession */
+                            if (!worker.memory.temporaryFlags.isSuccessionIssued && worker.memory.permanentFlags.startWorkingTick && worker.ticksToLive < (worker.memory.permanentFlags.startWorkingTick - worker.memory.permanentFlags.employedTick + worker.body.length * 3)) {
+                                worker.memory.temporaryFlags.isSuccessionIssued = true;
+                                this.SignalReplacement(worker);
+                                global.Log.room(this.taskData.targetRoom, global.Emoji.skull, global.Dye.black(`${worker.name} (${worker.memory.tag}) is near death and asks for successor ...`));
+                            }
+                        } else {
+                            if (worker.travelTo(new RoomPosition(25, 25, this.taskData.targetRoom), {forbidInComplete : true}) === ERR_NO_PATH) {
+                                this.taskData[ERR_NO_PATH] = true;
+                                this.taskData.fromRoom = worker.room.name;
+                                firedEmployees.push(worker);
+                                return;
+                            }
                         }
-                        /** Trigger Defend if NPC or other player's hostile creeps are found */
-                        if (!this.taskData[FIND_HOSTILE_CREEPS] && Game.time % 31 === 0 && worker.room.find(FIND_HOSTILE_CREEPS, {filter : (creep) => _.some(creep.body, y => [ATTACK, WORK, RANGED_ATTACK, CARRY].includes(y.type))}).length > 0) {
-                            global.DefendManager.Add(worker.room.name, "Remote", 0);
-                            this.taskData[FIND_HOSTILE_CREEPS] = true;
-                        } else if (this.taskData[FIND_HOSTILE_CREEPS] && global.DefendManager.Query(worker.room.name) === "completed") {
-                            this.taskData[FIND_HOSTILE_CREEPS] = false;
-                        }
-                    } else {
-                        if (worker.travelTo(new RoomPosition(25, 25, this.taskData.targetRoom), {forbidInComplete : true}) === ERR_NO_PATH) {
-                            this.taskData[ERR_NO_PATH] = true;
-                            this.taskData.fromRoom = worker.room.name;
-                            return [worker];
-                        }
-                    }
-                    return [];
+                    });
+                    return firedEmployees;
                 }
             },
             taskData : {targetRoom : targetRoom, fromRoom : null, [ERR_NO_PATH] : false, [FIND_HOSTILE_STRUCTURES] : false, [FIND_HOSTILE_CREEPS] : false},
@@ -712,7 +731,7 @@ class TaskConstructor {
             }
             return true;
         }
-        console.log(`<p style="color:gray;display:inline;">[Log]</p> Scouting ${targetRoom}.`);
+        global.Log.room(targetRoom, global.Dye.green("Scouting starts"));
         const roleDescriptor = new RoleConstructor();
         roleDescriptor.Register("worker", "creep");
         roleDescriptor
@@ -931,6 +950,8 @@ class TaskManager {
             for (const tag in this.roomName2information[roomName].tags) {
                 const _cpuUsed = Game.cpu.getUsed();
                 for (const index of this.roomName2information[roomName].tags[tag].working) this.taskPools[index].Run();
+                // `waiting` Task still gets chance to run.
+                for (const index of this.roomName2information[roomName].tags[tag].waiting) if (this.taskPools[index].EmployeeAmount > 0) this.taskPools[index].Run();
                 this.room2tag2ticks[roomName][tag] = `${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`;
             }
             this.room2ticks[roomName] = `${(Game.cpu.getUsed() - _cpuUsed).toFixed(3)}`;
@@ -963,7 +984,18 @@ const TaskManagerPlugin = {
     beforeTickStart : () => global.TaskManager.Check(),
     tickStart : () => {
         const _cpuUsed = Game.cpu.getUsed();
-        /* Creep */
+        /**
+         * Before `Run`
+         * It is very useful that Creeps are visited by the order of spawning, so for those seeking successors,
+         * they could still be hired!
+         */
+        for (const creepName in Game.creeps) {
+            const creep = Game.creeps[creepName];
+            if (!creep.task) creep.task = global.TaskManager.Query(creep);
+        }
+        // console.log(`Creep's Tasks -> ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`);
+        global.TaskManager.Run();
+        /** After `Run` : Deal with those fired and requested successors ... */
         for (const creepName in Game.creeps) {
             const creep = Game.creeps[creepName];
             if (!creep.task) {
@@ -975,8 +1007,6 @@ const TaskManagerPlugin = {
                 }
             }
         }
-        // console.log(`Creep's Tasks -> ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`);
-        global.TaskManager.Run();
     }
 };
 global.Lucy.App.on(TaskManagerPlugin);

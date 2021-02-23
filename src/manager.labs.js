@@ -191,30 +191,45 @@ class LabUnit {
     }
     /**
      * @private
-     * @param {{mineralTypes : [MineralCompoundConstant | MineralConstant, MineralCompoundConstant | MineralConstant], tier : number, amount : number}} a
-     * @param {{mineralTypes : [MineralCompoundConstant | MineralConstant, MineralCompoundConstant | MineralConstant], tier : number, amount : number}} b
-     * @returns {{mineralTypes : [MineralCompoundConstant | MineralConstant, MineralCompoundConstant | MineralConstant], tier : number, amount : number}}
+     * @param {{mineralTypes : [MineralCompoundConstant | MineralConstant, MineralCompoundConstant | MineralConstant], tier : number, amount : number, repo : number, product : MineralCompoundConstant}} a
+     * @param {{mineralTypes : [MineralCompoundConstant | MineralConstant, MineralCompoundConstant | MineralConstant], tier : number, amount : number, repo : number, product : MineralCompoundConstant}} b
+     * @param {boolean} ensureAllowedToBuy
+     * @returns {{mineralTypes : [MineralCompoundConstant | MineralConstant, MineralCompoundConstant | MineralConstant], tier : number, amount : number, repo : number, product : MineralCompoundConstant}}
      */
     cmp(a, b) {
-        if (a.amount === 0 && b.amount !== 0) return b;
-        if (a.amount !== 0 && b.amount === 0) return a;
+        const checkReactionAmount = global.Lucy.Rules.lab.checkReactionAmount;
         if (a.amount > 0 && b.amount > 0) {
-            if (a.tier > b.tier) return a;
-            else if (a.tier < b.tier) return b;
-            else if (a.amount >= b.amount) return a;
+            if (a.repo >= checkReactionAmount && b.repo < checkReactionAmount) return b;
+            else if (a.repo < checkReactionAmount && b.repo >= checkReactionAmount) return a;
+            else {
+                if (a.tier > b.tier) return a;
+                else if (a.tier < b.tier) return b;
+                else if (a.repo > b.repo) return b;
+                else return a;
+            }
+        }
+        if (a.amount === 0 && b.amount !== 0) {
+            if (b.repo < checkReactionAmount) return b;
+            else if (a.repo < checkReactionAmount) return a;
             else return b;
         }
+        if (a.amount !== 0 && b.amount === 0) {
+            if (a.repo < checkReactionAmount) return a;
+            else if (b.repo < checkReactionAmount) return b;
+            else return a;
+        }
         if (a.amount === 0 && b.amount === 0) {
-            // Base Tier is preferred so that only basic mineral is bought.
-            if (a.tier <= b.tier) return a;
-            else return b;
+            if (a.tier > b.tier) return a;
+            else if (a.tier < b.tier) return b;
+            else if (a.repo > b.repo) return b;
+            else return a;
         }
     }
     /**
      * @private
      * @param {MineralCompoundConstant | MineralConstant} u
      * @param {number} amountU `amountU` is guaranteed to be bigger than 0.
-     * @returns {null | {mineralTypes : [MineralCompoundConstant | MineralConstant, MineralCompoundConstant | MineralConstant], tier : number, amount : number}}
+     * @returns {null | {mineralTypes : [MineralCompoundConstant | MineralConstant, MineralCompoundConstant | MineralConstant], tier : number, amount : number, repo : number, product : MineralCompoundConstant}}
      */
     find(u, amountU) {
         if (!REACTIONS[u]) return null;
@@ -239,7 +254,7 @@ class LabUnit {
                 producedAmount = _producedAmount;
             }
         }
-        return {mineralTypes : [u, retMineralType], tier : tier, amount : amount};
+        return {mineralTypes : [u, retMineralType], tier : tier, amount : amount, repo : producedAmount, product : REACTIONS[u][retMineralType]};
     }
     /**
      * NOTICE : `fetchRecipe` assumes that
@@ -266,25 +281,32 @@ class LabUnit {
             global.Log.room(this.roomName, global.Dye.purple(`Recipe`), global.Dye.blue(`Apply existing Resources in Input Labs`), global.Dye.white(`${icon(this.recipe[0])} + ${icon(this.recipe[1])} => ${icon(REACTIONS[this.recipe[0]][this.recipe[1]])}`));
             return;
         }
-        const matches = currentResources.map(v => this.find(v[0], v[1])).filter(o => o);
+        const matches = currentResources.map(v => this.find(v[0], v[1])).filter(o => o && (o.amount > 0 || isAllowedToBuy(o.mineralTypes[1])));
         if (matches.length > 0) {
             const ret = matches.length === 2 ? this.cmp(matches[0], matches[1]) : matches[0];
-            if (ret.amount > 0 || isAllowedToBuy(ret.mineralTypes[1])) {
-                this.recipe = ret.mineralTypes;
-                global.Log.room(this.roomName, global.Dye.purple(`Recipe`), global.Dye.blue(`Determine based on one Input Lab`), global.Dye.white(`${icon(this.recipe[0])} + ${icon(this.recipe[1])} => ${icon(REACTIONS[this.recipe[0]][this.recipe[1]])}`));
-                return;
-            }
+            this.recipe = ret.mineralTypes;
+            global.Log.room(this.roomName, global.Dye.purple(`Recipe`), global.Dye.blue(`Determine based on one Input Lab`), global.Dye.white(`${icon(this.recipe[0])} + ${icon(this.recipe[1])} => ${icon(REACTIONS[this.recipe[0]][this.recipe[1]])}`));
+            return;
         }
         // Pure New Recipe
+        /** @type {[MineralCompoundConstant | MineralConstant, MineralCompoundConstant | MineralConstant][]} */
+        const pureNewCandidates = [];
         for (let i = COMPOUND_TIER_NUM - 1; i >= 0; --i) {
             const ingredients = Array.from(COMPOUND_TIERS_INGREDIENTS[i]).map(v => {return {mineralType : v, amount : this.sum(v)};}).filter(v => v.amount > 0).map(v => this.find(v.mineralType, v.amount)).filter(o => o && (o.amount > 0 || isAllowedToBuy(o.mineralTypes[1])));
             if (ingredients.length === 0) continue;
             let ret = ingredients[0];
             for (let i = 1; i < ingredients.length; ++i) ret = this.cmp(ret, ingredients[i]);
-            this.recipe = ret.mineralTypes;
-            global.Log.room(this.roomName, global.Dye.purple(`Recipe`), global.Dye.blue(`Pure New One`), global.Dye.white(`${icon(this.recipe[0])} + ${icon(this.recipe[1])} => ${icon(REACTIONS[this.recipe[0]][this.recipe[1]])}`));
-            return;
+            if (ret.repo >= global.Lucy.Rules.lab.checkReactionAmount) pureNewCandidates.push(ret.mineralTypes);
+            else {
+                this.recipe = ret.mineralTypes;
+                break;
+            }
         }
+        if (!this.recipe && pureNewCandidates.length > 0) {
+            this.recipe = pureNewCandidates[0];
+            for (let i = 1; i < pureNewCandidates.length; ++i) this.recipe = this.cmp(this.recipe, pureNewCandidates[i]);
+        }
+        if (this.recipe) global.Log.room(this.roomName, global.Dye.purple(`Recipe`), global.Dye.blue(`Pure New One`), global.Dye.white(`${icon(this.recipe[0])} + ${icon(this.recipe[1])} => ${icon(REACTIONS[this.recipe[0]][this.recipe[1]])}`));
         // There isn't any existing mineralTypes
         return;
     }

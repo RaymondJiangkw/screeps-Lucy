@@ -98,7 +98,7 @@ class CreepSpawnManager {
         };
         let chosen = {};
         for (const room of adjacentRooms) {
-            if (room !== roomName && Memory.rooms[room] && Memory.rooms[room].rejectHelp) continue;
+            if (room !== roomName && Memory.rooms[room] && Memory.rooms[room].rejectHelp && Game.rooms[room] && Game.rooms[room].spawns.length > 0) continue;
             this.updateRoomCache(room);
             /**
              * @type {Array<import("./task.prototype").TaskCreepDescriptor>}
@@ -171,6 +171,7 @@ const CreepSpawnManagerPlugin = {
             // NOTICE : In order to avoid energy-consumption-overlapping, for each tick, only one Spawn will be allowed to spawn Creep.
             const spawnedCreep = global.CreepSpawnManager.Query(roomName);
             if (!spawnedCreep.body) continue;
+            global.Log.room(roomName, global.Emoji.baby, global.Dye.yellow(`Spawning ${spawnedCreep.memory.tag}!`));
             /** Record Spawn Room Name */
             spawnedCreep.memory.spawnRoomName = roomName;
             if (spawnedCreep.workingPos) candidateSpawns.sort((a, b) => calcInRoomDistance(a.pos, spawnedCreep.workingPos) - calcInRoomDistance(b.pos, spawnedCreep.workingPos));

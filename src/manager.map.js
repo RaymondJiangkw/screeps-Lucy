@@ -316,7 +316,8 @@ class MapMonitor {
      */
     updateStructureCache() {
         if (this.needUpdate() && (!this._lastUpdatingTick || Game.time > this._lastUpdatingTick)) {
-            console.log(`<p style="color:gray;display:inline;">[Log]</p> Updating Cache of Structure.`);
+            const _cpuUsed = Game.cpu.getUsed();
+            console.log(String.fromCodePoint(0x231b), 'Structure Cache Updating ...');
             this._lastUpdatingTick = Game.time;
             /** @type { {[roomName : string] : Array<Array<Id<Structure>> >} } */
             this.structures = {};
@@ -358,6 +359,7 @@ class MapMonitor {
                 /** constructionSites need to be found instantly too. */
                 Game.rooms[roomName].find(FIND_CONSTRUCTION_SITES).forEach(c => addConstructionSite(c));
             }
+            global.Log.success('Cache Update Done', global.Dye.grey(`cpu-cost:${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`));
         }
     }
     /**
@@ -1043,12 +1045,8 @@ class Planner {
         if (!road) return new Response(Response.prototype.WAIT_UNTIL_TIMEOUT);
         const vacantPos = mapMonitor.FetchAroundVacantPos(road.pos.roomName, road.pos.y, road.pos.x, [STRUCTURE_LINK, STRUCTURE_RAMPART]).filter(pos => !planner.getPositionOccupied(roomName, pos.y, pos.x)).sort((posU, posV) => posU.getRangeTo(object) - posV.getRangeTo(object))[0];
         if (!vacantPos) {
-            console.log(`<p style="display:inline;color:red;">Error: </p>Unable to construct Link for ${object} : ${mapMonitor.FetchAroundVacantPos(road.pos.roomName, road.pos.y, road.pos.x, [STRUCTURE_LINK, STRUCTURE_RAMPART])}`);
+            global.Log.error(`Unable to construct`, global.Dye.yellow(`Link`), `for`, global.Dye.grey(`${object}`), `at`, global.Dye.grey(`${object.pos}`), `with candidates :`, global.Dye.grey(`${mapMonitor.FetchAroundVacantPos(road.pos.roomName, road.pos.y, road.pos.x, [STRUCTURE_LINK, STRUCTURE_RAMPART])}`));
             return new Response(Response.prototype.WAIT_UNTIL_TIMEOUT);
-        }
-        if (!this[`_planForAroundLink_${object.id}_${tag}`]) {
-            this[`_planForAroundLink_${object.id}_${tag}`] = true;
-            this.setPositionOccupied(object.pos.roomName, vacantPos.y, vacantPos.x, STRUCTURE_LINK);
         }
         // console.log(`${object}->${vacantPos}`);
         /** @type {StructureLink | ConstructionSite<StructureLink>} */
@@ -1061,7 +1059,7 @@ class Planner {
             if (CONTROLLER_STRUCTURES[STRUCTURE_LINK][Game.rooms[roomName].controller.level] === mapMonitor.FetchCnt(roomName, STRUCTURE_LINK)["total"]) return new Response(Response.prototype.WAIT_UNTIL_UPGRADE);
             const retCode = Game.rooms[roomName].createConstructionSite(vacantPos.x, vacantPos.y, STRUCTURE_LINK);
             if (retCode !== OK) {
-                console.log(`<p style="display:inline;color:red;">Error:</p> Unable to create StructureLink at ${vacantPos.roomName} (${vacantPos.x}, ${vacantPos.y}) with code ${retCode}`);
+                global.Log.error(`Unable to create ConstructionSite`, global.Dye.yellow(`StructureLink`), `at`, global.Dye.grey(`${vacantPos}`), `with code ${retCode}`);
             }
             return new Response(Response.prototype.WAIT_UNTIL_TIMEOUT);
         } else if (!isConstructionSite(link)) { // Structure
@@ -1910,47 +1908,6 @@ class Map {
              * 3. Calling Planner
              */
             const level = this.planCache[roomName].controllerLevel;
-            if (level >= 1) {
-                /* Plan For StructureController's Link */
-                if (!this.planCache[roomName].feedbacks["controllerLink"]) this.planCache[roomName].feedbacks["controllerLink"] = new Response(Response.prototype.PLACE_HOLDER);
-                if (parseResponse(this.planCache[roomName].feedbacks["controllerLink"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["controllerLink"].Feed(planner.PlanForAroundLink(Game.rooms[roomName].controller, global.Lucy.Rules.arrangements.UPGRADE_ONLY));
-                /* Plan For Harvest Unit */
-                if (!this.planCache[roomName].feedbacks["harvestEnergy"]) this.planCache[roomName].feedbacks["harvestEnergy"] = {};
-                for (const source of Game.rooms[roomName].sources) {
-                    /**
-                     * Container
-                     */
-                    if (!this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "container"]) this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "container"] = new Response(Response.prototype.PLACE_HOLDER);
-                    if (parseResponse(this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "container"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "container"].Feed(planner.PlanForAroundOverlapContainer(source, "forSource", true));
-                    /**
-                     * Link
-                     */
-                    if (!this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "link"]) this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "link"] = new Response(Response.prototype.PLACE_HOLDER);
-                    if (parseResponse(this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "link"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "link"].Feed(planner.PlanForAroundLink(source, "forSource"));
-                }
-                /* Plan For CentralSpawn Unit */
-                if (!this.planCache[roomName].feedbacks["centralSpawn"]) this.planCache[roomName].feedbacks["centralSpawn"] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
-                if (DEBUG) {
-                    console.log(roomName, JSON.stringify(this.planCache[roomName].feedbacks["centralSpawn"]));
-                }
-                this.planCache[roomName].feedbacks["centralSpawn"].Merge(planner.Plan(roomName, "normal", "centralSpawn", {
-                    display : true,
-                    tag : parseResponse(this.planCache[roomName].feedbacks["centralSpawn"].Pick("tag")) || options.structureConstruct,
-                    build : parseResponse(this.planCache[roomName].feedbacks["centralSpawn"].Pick("build")) || options.objectDestroy,
-                    road : parseResponse(this.planCache[roomName].feedbacks["centralSpawn"].Pick("road")) || options.objectDestroy,
-                    num : 1,
-                    linkedRoomPosition : [].concat(
-                        Game.rooms[roomName]["sources"].map(s => s.pos),
-                        (Game.rooms[roomName].controller.level >= 5 ? Game.rooms[roomName]["mineral"].pos : []),
-                        Game.rooms[roomName].controller.pos
-                    ),
-                    writeToMemory : true,
-                    readFromMemory : true
-                }));
-            }
-            if (level >= 2) {
-                
-            }
             if (level >= 3) {
                 /* Plan For CentralTransfer Unit */
                 if (!this.planCache[roomName].feedbacks["centralTransfer"]) this.planCache[roomName].feedbacks["centralTransfer"] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
@@ -1975,6 +1932,47 @@ class Map {
                     writeToMemory : true,
                     readFromMemory : true
                 }));
+            }
+            if (level >= 1) {
+                /* Plan For StructureController's Link */
+                if (!this.planCache[roomName].feedbacks["controllerLink"]) this.planCache[roomName].feedbacks["controllerLink"] = new Response(Response.prototype.PLACE_HOLDER);
+                if (parseResponse(this.planCache[roomName].feedbacks["controllerLink"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["controllerLink"].Feed(planner.PlanForAroundLink(Game.rooms[roomName].controller, global.Lucy.Rules.arrangements.UPGRADE_ONLY));
+                /* Plan For CentralSpawn Unit */
+                if (!this.planCache[roomName].feedbacks["centralSpawn"]) this.planCache[roomName].feedbacks["centralSpawn"] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
+                if (DEBUG) {
+                    console.log(roomName, JSON.stringify(this.planCache[roomName].feedbacks["centralSpawn"]));
+                }
+                this.planCache[roomName].feedbacks["centralSpawn"].Merge(planner.Plan(roomName, "normal", "centralSpawn", {
+                    display : true,
+                    tag : parseResponse(this.planCache[roomName].feedbacks["centralSpawn"].Pick("tag")) || options.structureConstruct,
+                    build : parseResponse(this.planCache[roomName].feedbacks["centralSpawn"].Pick("build")) || options.objectDestroy,
+                    road : parseResponse(this.planCache[roomName].feedbacks["centralSpawn"].Pick("road")) || options.objectDestroy,
+                    num : 1,
+                    linkedRoomPosition : [].concat(
+                        Game.rooms[roomName]["sources"].map(s => s.pos),
+                        (Game.rooms[roomName].controller.level >= 5 ? Game.rooms[roomName]["mineral"].pos : []),
+                        Game.rooms[roomName].controller.pos
+                    ),
+                    writeToMemory : true,
+                    readFromMemory : true
+                }));
+                /* Plan For Harvest Unit */
+                if (!this.planCache[roomName].feedbacks["harvestEnergy"]) this.planCache[roomName].feedbacks["harvestEnergy"] = {};
+                for (const source of Game.rooms[roomName].sources) {
+                    /**
+                     * Container
+                     */
+                    if (!this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "container"]) this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "container"] = new Response(Response.prototype.PLACE_HOLDER);
+                    if (parseResponse(this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "container"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "container"].Feed(planner.PlanForAroundOverlapContainer(source, "forSource", true));
+                    /**
+                     * Link
+                     */
+                    if (!this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "link"]) this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "link"] = new Response(Response.prototype.PLACE_HOLDER);
+                    if (parseResponse(this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "link"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "link"].Feed(planner.PlanForAroundLink(source, "forSource"));
+                }
+            }
+            if (level >= 2) {
+                
             }
             if (level >= 4) {
                 /* Preplan for Central Lab (Reserve Space) */

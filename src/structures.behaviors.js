@@ -462,8 +462,8 @@ function giveRoadBehaviors() {
          * Postpone Checking
          * In order to reduce the frequency of repairing, REPAIR employees the divergence-between-threshold-and-target policy. 
          */
-        if (this.hitsMax - this.hits <= randomAllowableHitsDiff) {
-            Lucy.Timer.add(Game.time + (randomAllowableHitsDiff - this.hitsMax + this.hits) / this.hitsMax * 3000, TaskConstructor.RepairTask, TaskConstructor, [this.id, this.pos], `Repair ${this} of Room ${this.room.name}`);
+        if (this.hitsMax - this.hits < randomAllowableHitsDiff) {
+            Lucy.Timer.add(Game.time + Math.max(Math.floor((randomAllowableHitsDiff - this.hitsMax + this.hits) / this.hitsMax * 500), getCacheExpiration(this.ticksToDecay, Math.floor(this.ticksToDecay / 10))), TaskConstructor.RepairTask, TaskConstructor, [this.id, this.pos], `Repair ${this} of Room ${this.room.name}`);
             return;
         }
         TaskConstructor.RepairTask(this.id, this.pos);
@@ -483,7 +483,7 @@ function giveContainerBehaviors() {
          * In order to reduce the frequency of repairing, REPAIR employees the divergence-between-threshold-and-target policy. 
          */
         if (this.hitsMax - this.hits <= randomAllowableHitsDiff) {
-            Lucy.Timer.add(Game.time + (randomAllowableHitsDiff - this.hitsMax + this.hits) / this.hitsMax * (isMyRoom(this.room)? 25000 : 5000), TaskConstructor.RepairTask, TaskConstructor, [this.id, this.pos], `Repair ${this} of Room ${this.room.name}`);
+            Lucy.Timer.add(Game.time + Math.max(Math.floor((randomAllowableHitsDiff - this.hitsMax + this.hits) / this.hitsMax * (isMyRoom(this.room)? 250 : 50)), getCacheExpiration(this.ticksToDecay, Math.floor(this.ticksToDecay / 10))), TaskConstructor.RepairTask, TaskConstructor, [this.id, this.pos], `Repair ${this} of Room ${this.room.name}`);
             return;
         }
         TaskConstructor.RepairTask(this.id, this.pos);
@@ -790,7 +790,7 @@ function giveStorageBehaviors() {
         /**
          * Temporary Fast-Energy-Filling will be disabled, if Link System works.
          */
-        if (global.MapMonitorManager.FetchStructureWithTag(this.room.name, "forSource", STRUCTURE_LINK).length > 0 && global.MapMonitorManager.FetchStructureWithTag(this.room.name, "forTransfer", STRUCTURE_LINK).length > 0) return;
+        if (global.MapMonitorManager.FetchStructureWithTag(this.room.name, "forSource", STRUCTURE_LINK).length === this.room.sources.length && global.MapMonitorManager.FetchStructureWithTag(this.room.name, "forTransfer", STRUCTURE_LINK).length > 0) return;
         if (global.TaskManager.Fetch(this.id, `FILLING_${RESOURCE_ENERGY}`).length > 0) return;
         if (this.store.getUsedCapacity(RESOURCE_ENERGY) / this.store.getCapacity() >= global.Lucy.Rules.storage[RESOURCE_ENERGY] || this.store.getFreeCapacity() <= global.Lucy.Rules.storage["collectSpareCapacity"]) {
             const nextTaskStartedTick = Game.time + getCacheExpiration(NEXT_FILLING_ENERGY_TIMEOUT, NEXT_FILLING_ENERGY_OFFSET);

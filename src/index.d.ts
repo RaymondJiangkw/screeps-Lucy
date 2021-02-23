@@ -102,6 +102,12 @@ interface PowerCreep {
 }
 
 interface CreepMemory {
+    /** Equivalent to Role */
+    tag? : string
+    /**
+     * `flags` will not be refreshed when `Creep` is employed by a Task.
+     * It is freshed only when `Creep` is fired or dead.
+     */
     flags? : {
         /** Usually used to indicate status of executing Task */
         working? : boolean,
@@ -109,5 +115,22 @@ interface CreepMemory {
         targetId? : Id<AnyCreep | AnyStructure>,
         /** Usually used to store `pos` of `target` */
         targetPos? : RoomPosition
+    },
+    /**
+     * `temporaryFlags` will be refreshed when `Creep` is employed by a Task.
+     * It is useful when dealing with global reset.
+     */
+    temporaryFlags? : {
+        /** Usually used to indicate whether Creep's succession has been issued */
+        isSuccessionIssued? : boolean
+    },
+    /**
+     * `permanentFlags` will never be refreshed.
+     */
+    permanentFlags? : {
+        /** Usually used to indicate the tick when Creep is employeed */
+        employedTick? : number,
+        /** Usually used to indicate the tick when Creep starts `working` */
+        startWorkingTick? : number
     }
 }

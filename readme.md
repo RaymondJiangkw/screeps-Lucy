@@ -19,6 +19,8 @@
 - Task System
     - Allow for Function or in-built `Task Module` to create high-performance, clear and easy-to-program `run` function.
     - Event-Trigger, which is used to avoid attempt of issuing all possible tasks at every tick.
+    - Seamless Succession
+    - *Pre-reject Task if `ticksToLive` is not enough and seemly Recycle* (Under Development ⛏️)
 - Money System
     - Provide standards to evaluate `Task` and, thus, choose the most profitable one.
 - Global Manager
