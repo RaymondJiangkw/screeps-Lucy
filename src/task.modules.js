@@ -347,8 +347,6 @@ function ConstructWithdrawHarvestResourceComponent(resourceType) {
         // console.log(`${object} : ${target}`);
         if (!target) return ConstructSignal(ERR_INVALID_ARGS, attachedData);
         if (!object.store) return ConstructSignal(ERR_INVALID_ARGS, attachedData);
-        const checkForFreeStore = require('./util').checkForFreeStore;
-        // if (checkForFreeStore(object) === 0) return ConstructSignal(OK, attachedData);
         if (checkForStore(target, attachedData.resourceType || resourceType) === 0) return ConstructSignal(ERR_NOT_ENOUGH_RESOURCES, attachedData);
         if (isHarvestable(target)) {
             object.harvest(target);

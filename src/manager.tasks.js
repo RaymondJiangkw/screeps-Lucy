@@ -12,6 +12,7 @@ const isHarvestable         = require('./util').isHarvestable;
 const getCacheExpiration    = require('./util').getCacheExpiration;
 const calcRoomDistance      = require('./util').calcRoomDistance;
 const isMyRoom              = require('./util').isMyRoom;
+const username              = require('./util').username;
 const Task                  = require('./task.prototype').Task;
 const TaskDescriptor        = require('./task.prototype').TaskDescriptor;
 const Constructors          = require('./task.modules').Constructors;
@@ -652,15 +653,24 @@ class TaskConstructor {
                     const workers = this.FetchEmployees("worker");
                     /** @type {Creep[]} */
                     const firedEmployees = [];
+                    /** Reserve Status Switching */
+                    if (Game.rooms[this.taskData.targetRoom]) {
+                        const room = Game.rooms[this.taskData.targetRoom];
+                        if (!this.taskData.whetherToReserve && (!room.controller.reservation || room.controller.reservation.username !== username || room.controller.reservation.ticksToEnd <= 5000 - 2500)) this.taskData.whetherToReserve = true;
+                        if (this.taskData.whetherToReserve && (room.controller.reservation && room.controller.reservation.username === username && room.controller.reservation.ticksToEnd >= 5000 - 5)) this.taskData.whetherToReserve = false;
+                    }
                     workers.forEach(worker => {
                         if (!worker.memory.temporaryFlags) worker.memory.temporaryFlags = {};
                         if (!worker.memory.permanentFlags) worker.memory.permanentFlags = {};
                         if (!worker.memory.permanentFlags.employedTick) worker.memory.permanentFlags.employedTick = Game.time;
                         if (worker.room.name === this.taskData.targetRoom) {
-                            const retCode = worker.reserveController(worker.room.controller);
-                            if (retCode === ERR_NOT_IN_RANGE) worker.moveTo(worker.room.controller);
-                            // In this case, `worker` has moved to the position of `target`
-                            else if (!worker.memory.permanentFlags.startWorkingTick && retCode === OK) worker.memory.permanentFlags.startWorkingTick = Game.time;
+                            
+                            if (worker.pos.getRangeTo(worker.room.controller) > 1) worker.moveTo(worker.room.controller);
+                            else {
+                                // In this case, `worker` has moved to the position of `target`
+                                if (!worker.memory.permanentFlags.startWorkingTick) worker.memory.permanentFlags.startWorkingTick = Game.time;
+                                if (this.taskData.whetherToReserve) worker.reserveController(worker.room.controller);
+                            }
                             /** Trigger Attack if InvaderCore is found */
                             if (!this.taskData[FIND_HOSTILE_STRUCTURES] && Game.time % 17 === 0 && worker.room.find(FIND_HOSTILE_STRUCTURES).length > 0) {
                                 global.AttackManager.Add(worker.room.name, "Stronghold", 0);
@@ -693,7 +703,7 @@ class TaskConstructor {
                     return firedEmployees;
                 }
             },
-            taskData : {targetRoom : targetRoom, fromRoom : null, [ERR_NO_PATH] : false, [FIND_HOSTILE_STRUCTURES] : false, [FIND_HOSTILE_CREEPS] : false},
+            taskData : {targetRoom : targetRoom, fromRoom : null, [ERR_NO_PATH] : false, [FIND_HOSTILE_STRUCTURES] : false, [FIND_HOSTILE_CREEPS] : false, whetherToReserve : true},
             taskKey : `RESERVE_${targetRoom}`
         })
     }
@@ -866,6 +876,7 @@ class TaskManager {
         return index;
     }
     /**
+     * @TODO Special Optimization for Controller Level 8 ?
      * Ensure that under the same tag, only a portion of total tasks could be active.
      * NOTICE : Cache is not implemented here, since, in a single tick, state of saturation
      * could change.

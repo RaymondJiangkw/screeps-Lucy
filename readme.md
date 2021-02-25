@@ -45,3 +45,6 @@
     <div style="text-align:center;"><img src="./demo/notifier.PNG" alt="Notifier" /></div>
 - Pretty Console Log
     - Adapted from `ScreepsAI` written by @canisminor1990.
+- Enhanced `Traveler`
+    - Add support for option `flee`.
+    - Add support for `byPass` which focuses on utilizing positions occupied by idle creeps.

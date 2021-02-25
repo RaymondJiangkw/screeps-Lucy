@@ -114,7 +114,11 @@ interface CreepMemory {
         /** Usually used to store `id` of `target` */
         targetId? : Id<AnyCreep | AnyStructure>,
         /** Usually used to store `pos` of `target` */
-        targetPos? : RoomPosition
+        targetPos? : RoomPosition,
+        /** Usually used to indicate whether `Creep` is in the state of renewing */
+        renew? : boolean,
+        /** Usually used to indicate whether `Creep` fails to renew */
+        failToRenew? : boolean
     },
     /**
      * `temporaryFlags` will be refreshed when `Creep` is employed by a Task.

@@ -115,7 +115,6 @@ class DefendManager {
                 const roomName = this.taskData.roomName;
                 const firedCreeps = [];
                 workers.forEach(worker => {
-                    if (worker.hits < worker.hitsMax) worker.heal(worker);
                     if (worker.pos.roomName !== roomName) return worker.travelTo(new RoomPosition(25, 25, roomName));
                     const target = worker.pos.findClosestByRange(FIND_HOSTILE_CREEPS);
                     if (!target) {
@@ -124,9 +123,11 @@ class DefendManager {
                         return;
                     }
                     this.taskData.lastNotPeaceTick = Game.time;
+                    // Permanent Heal
+                    worker.heal(worker);
                     // An Easy Kite Strategy
-                    if (worker.pos.getRangeTo(target) > 3) worker.travelTo(target, {stuckValue : 1, repath : 2});
-                    else if (worker.pos.getRangeTo(target) <= 3) worker.travelTo(target, {flee : true, stuckValue : 1, repath : 2, range : 3});
+                    if (worker.pos.getRangeTo(target) > 3) worker.travelTo(target, {stuckValue : 1, movingTarget : true, repath : 1});
+                    else if (worker.pos.getRangeTo(target) <= 3) worker.travelTo(target, {flee : true, stuckValue : 1, movingTarget : true, range : 3, repath : 1});
                     worker.rangedAttack(target);
                 });
                 return firedCreeps;

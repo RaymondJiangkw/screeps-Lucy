@@ -1,21 +1,32 @@
 /**
+ * Adapted Version.
  * To start using Traveler, require it in main.js:
  * Example: var Traveler = require('Traveler.js');
  * 
  * @typedef {{path: RoomPosition[], ops: number, cost: number, incomplete: boolean}} PathfinderReturn
  * @typedef {{nextPos?: RoomPosition, pathfinderReturn?: PathfinderReturn, state?: TravelState, path?: string}} TravelToReturnData
- * @typedef {{ignoreRoads?: boolean,ignoreCreeps?: boolean,ignoreStructures?: boolean,preferHighway?: boolean,highwayBias?: number,allowHostile?: boolean,allowSK?: boolean,range?: number,obstacles?: {pos: RoomPosition}[],roomCallback?: (roomName: string, matrix: CostMatrix) => CostMatrix | boolean,routeCallback?: (roomName: string) => number,returnData?: TravelToReturnData,restrictDistance?: number,useFindRoute?: boolean,maxOps?: number,movingTarget?: boolean,freshMatrix?: boolean,offRoad?: boolean,stuckValue?: number,maxRooms?: number,repath?: number,route?: {[roomName: string]: boolean},ensurePath?: boolean,flee? : boolean}} TravelToOptions
+ * @typedef {{ignoreRoads?: boolean,ignoreCreeps?: boolean,ignoreStructures?: boolean,preferHighway?: boolean,highwayBias?: number,allowHostile?: boolean,allowSK?: boolean,range?: number,obstacles?: {pos: RoomPosition}[],roomCallback?: (roomName: string, matrix: CostMatrix) => CostMatrix | boolean,routeCallback?: (roomName: string) => number,returnData?: TravelToReturnData,restrictDistance?: number,useFindRoute?: boolean,maxOps?: number,movingTarget?: boolean,freshMatrix?: boolean,offRoad?: boolean,stuckValue?: number,maxRooms?: number,repath?: number,route?: {[roomName: string]: boolean},ensurePath?: boolean,flee? : boolean,ignoreIdleCreeps? : boolean}} TravelToOptions
  * @typedef {{x: number, y: number}} Coord
  * @typedef {{pos : RoomPosition}} HasPos
  */
 "use strict";
+const OPPOSITE_DIRECTION = Object.freeze({
+    [TOP]           : BOTTOM,
+    [BOTTOM]        : TOP,
+    [LEFT]          : RIGHT,
+    [RIGHT]         : LEFT,
+    [TOP_LEFT]      : BOTTOM_RIGHT,
+    [TOP_RIGHT]     : BOTTOM_LEFT,
+    [BOTTOM_LEFT]   : TOP_RIGHT,
+    [BOTTOM_RIGHT]  : TOP_LEFT
+});
 Object.defineProperty(exports, "__esModule", { value: true });
 class Traveler {
     /**
      * move creep to destination
-     * @param creep
-     * @param destination
-     * @param options
+     * @param {Creep} creep
+     * @param {RoomPosition} destination
+     * @param {TravelToOptions} options
      * @returns {number}
      */
     static travelTo(creep, destination, options = {}) {
@@ -59,10 +70,6 @@ class Traveler {
         // this.circle(destination.pos, "orange");
         // check if creep is stuck
         if (this.isStuck(creep, state)) {
-            /**
-             * @TODO
-             * Position Exchange
-             */
             state.stuckCount++;
             Traveler.circle(creep.pos, "magenta", state.stuckCount * .2);
         }
@@ -75,6 +82,7 @@ class Traveler {
         }
         if (state.stuckCount >= options.stuckValue && Math.random() > .5) {
             options.ignoreCreeps = false;
+            options.ignoreIdleCreeps = false;
             options.freshMatrix = true;
             delete travelData.path;
         }
@@ -128,6 +136,15 @@ class Traveler {
             }
             travelData.path = Traveler.serializePath(creep.pos, ret.path, color);
             state.stuckCount = 0;
+        }
+        if (state.stuckCount > 0 && travelData.path && travelData.path.length > 0) {
+            /** Position Exchange */
+            let nextDirection = parseInt(travelData.path[0], 10);
+            let nextPos = Traveler.positionAtDirection(creep.pos, nextDirection);
+            if (nextPos) {
+                const obstacleCreep = creep.room.lookForAt(LOOK_CREEPS, nextPos).filter(v => v.my && !v.task)[0];
+                if (obstacleCreep && !obstacleCreep._move) obstacleCreep.move(OPPOSITE_DIRECTION[nextDirection]);
+            }
         }
         this.serializeState(creep, destination, state, travelData);
         if (!travelData.path || travelData.path.length === 0) {
@@ -233,6 +250,7 @@ class Traveler {
     static findTravelPath(origin, destination, options = {}) {
         _.defaults(options, {
             ignoreCreeps: false,
+            ignoreIdleCreeps : true,
             maxOps: DEFAULT_MAXOPS,
             range: 1,
             flee : false
@@ -271,7 +289,7 @@ class Traveler {
                 if (options.ignoreStructures) {
                     matrix = new PathFinder.CostMatrix();
                     if (!options.ignoreCreeps) {
-                        Traveler.addCreepsToMatrix(room, matrix);
+                        Traveler.addCreepsToMatrix(room, matrix, options.ignoreIdleCreeps);
                     }
                 }
                 else if (options.ignoreCreeps || roomName !== originRoomName) {
@@ -480,12 +498,13 @@ class Traveler {
     }
     /**
      * add creeps to matrix so that they will be avoided by other creeps
-     * @param room
-     * @param matrix
+     * @param {Room} room
+     * @param {CostMatrix} matrix
      * @returns {CostMatrix}
      */
-    static addCreepsToMatrix(room, matrix) {
-        room.find(FIND_CREEPS).forEach((creep) => matrix.set(creep.pos.x, creep.pos.y, 0xff));
+    static addCreepsToMatrix(room, matrix, ignoreIdleCreeps = true) {
+        /** Idle Creep could be switched. */
+        room.find(FIND_CREEPS).filter((creep) => !creep.my || !ignoreIdleCreeps || creep.task).forEach((creep) => matrix.set(creep.pos.x, creep.pos.y, 0xff));
         room.find(FIND_POWER_CREEPS).forEach((powerCreep) => matrix.set(powerCreep.pos.x, powerCreep.pos.y, 0xff));
         return matrix;
     }

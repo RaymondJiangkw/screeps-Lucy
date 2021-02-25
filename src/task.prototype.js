@@ -388,7 +388,7 @@ class Task {
     FetchEmployees(role) {
         if (!this[`_employees_${role}_tick`] || this[`_employees_${role}_tick`] < Game.time) {
             if (!this.role2creepIds[role]) return this[`_employees_${role}`] = [];
-            return this[`_employees_${role}`] = this.role2creepIds[role].map(Game.getObjectById).filter(c => this.Boost(c)); 
+            return this[`_employees_${role}`] = this.role2creepIds[role].map(Game.getObjectById).filter(c => !c.spawning && this.Boost(c)); 
         } else return this[`_employees_${role}`];
     }
     /**
@@ -514,7 +514,6 @@ class Task {
          * `run` will check whether the State is `dead`.
          */
         this.run = function() {
-            if (this.State === "dead") return [];
             if (typeof this._run === "function") return this._run();
             /** @type {import("./task.modules").Project | {[role : string] : import("./task.modules").Project} */
             const project = this._run;
@@ -570,13 +569,11 @@ function mount() {
             return Game.getTaskById(this.id);
         },
         set(_task) {
-            if (_task === null || _task.State !== "dead") {
-                CleanTaskById(this.id);
-                tasks[this.id] = _task;
-                if (_task !== null) {
-                    _task.Employ(this);
-                    Lucy.Logs.Push(new EventTaskOfObjectStatusChange("take", tasks[this.id], {obj: this}));
-                }
+            CleanTaskById(this.id);
+            tasks[this.id] = _task;
+            if (_task !== null) {
+                _task.Employ(this);
+                Lucy.Logs.Push(new EventTaskOfObjectStatusChange("take", tasks[this.id], {obj: this}));
             }
         }
     });

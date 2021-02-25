@@ -210,16 +210,17 @@ class ResourceManager {
      * all truly available resources in the future.
      * @param {string} roomName
      * @param {ResourceConstant} resourceType
-     * @param { {key ? : string, type : "retrieve" | "store", allowStore? : boolean, allowToHarvest? : boolean, confinedInRoom : boolean, excludeDefault? : boolean} } [options = {key : "default", allowStore : true, allowToHarvest : true, confinedInRoom : true, excludeDefault : false}] "default" has access to all registered resources. `allowStore` and `allowToHarvest` are useful while `type` === "retrieve".
+     * @param { {key ? : string, type : "retrieve" | "store", allowStore? : boolean, allowToHarvest? : boolean, confinedInRoom : boolean, excludeDefault? : boolean, allowStructureTypes? : Array<StructureConstant>} } [options = {key : "default", allowStore : true, allowToHarvest : true, confinedInRoom : true, excludeDefault : false}] "default" has access to all registered resources. `allowStore` and `allowToHarvest` are useful while `type` === "retrieve".
      * @returns {Number}
      */
     Sum(roomName, resourceType, options) {
-        _.defaults(options, {key : "default", allowStore : true, allowToHarvest : true, confinedInRoom : true, excludeDefault : false});
+        _.defaults(options, {key : "default", allowStore : true, allowToHarvest : true, confinedInRoom : true, excludeDefault : false, allowStructureTypes : []});
         this.updateRoomCache(roomName, resourceType);
         if (options.type === "retrieve")
             return _.sum(
                 this.room2resourceTypes[roomName][resourceType]
                     .filter(a => (a.Key === "default" && !options.excludeDefault) || a.Key === options.key)
+                    .filter(a => !a.Obj.structureType || options.allowStructureTypes.length === 0 || options.allowStructureTypes.indexOf(a.Obj.structureType) !== -1)
                     .filter(a => (options.allowStore && a.Obj.store !== undefined) || (options.allowToHarvest && isHarvestable(a.Obj)))
                     .map(a => a.Amount)
             );
@@ -227,6 +228,7 @@ class ResourceManager {
             return _.sum(
                 this.room2StoringResourceTypes[roomName][resourceType]
                     .filter(a => (a.Key === "default" && !options.excludeDefault) || a.Key === options.key)
+                    .filter(a => !a.Obj.structureType || options.allowStructureTypes.length === 0 || options.allowStructureTypes.indexOf(a.Obj.structureType) !== -1)
                     .map(a => a.FreeAmount)
             );
     }

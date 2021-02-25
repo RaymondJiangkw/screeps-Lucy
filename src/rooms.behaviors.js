@@ -58,6 +58,12 @@ class CentralSpawnUnit {
             new RoomPosition(this.LeftTopPos.x + 2, this.LeftTopPos.y + 4, this.room.name),
             new RoomPosition(this.LeftTopPos.x + 4, this.LeftTopPos.y + 4, this.room.name)
         ];
+        const spawnPoses = [
+            new RoomPosition(this.LeftTopPos.x + 3, this.LeftTopPos.y + 1, this.room.name),
+            new RoomPosition(this.LeftTopPos.x + 3, this.LeftTopPos.y + 1, this.room.name),
+            new RoomPosition(this.LeftTopPos.x + 1, this.LeftTopPos.y + 4, this.room.name),
+            new RoomPosition(this.LeftTopPos.x + 5, this.LeftTopPos.y + 4, this.room.name)
+        ];
         const containerPoses = [
             new RoomPosition(this.LeftTopPos.x + 1, this.LeftTopPos.y + 3, this.room.name),
             new RoomPosition(this.LeftTopPos.x + 5, this.LeftTopPos.y + 3, this.room.name),
@@ -148,6 +154,8 @@ class CentralSpawnUnit {
                     const extensionPoses = this.taskData.extensionPoses;
                     /** @type {RoomPosition} */
                     const linkPos = this.taskData.linkPos;
+                    /** @type {RoomPosition} */
+                    const spawnPos = this.taskData.spawnPos;
                     /** @type {StructureLink | null} */
                     // const link = global.MapMonitorManager.FetchStructure(linkPos.roomName, linkPos.y, linkPos.x)[0] || null;
                     if (worker.pos.getRangeTo(targetPos) !== 0) {
@@ -155,6 +163,14 @@ class CentralSpawnUnit {
                         return [];
                     }
                     if (!worker.memory.flags) worker.memory.flags = {};
+                    /** Renew if possible */
+                    if (!worker.memory.flags.renew && worker.ticksToLive < Math.ceil(CREEP_LIFE_TIME / Math.floor(600 / worker.body.length))) worker.memory.flags.renew = true;
+                    if (worker.memory.flags.renew && worker.ticksToLive > Math.floor(CREEP_LIFE_TIME - Math.floor(600 / worker.body.length))) worker.memory.flags.renew = false;
+                    if (!worker.memory.flags.failToRenew && worker.memory.flags.renew) {
+                        /** @type {StructureSpawn | null} */
+                        const spawn = global.MapMonitorManager.FetchStructure(spawnPos.roomName, spawnPos.y, spawnPos.x).filter(v => v.structureType === STRUCTURE_SPAWN)[0] || null;
+                        if (!spawn || spawn.renewCreep(worker) !== OK) worker.memory.flags.failToRenew = true;
+                    }
                     /** Tweak Signals */
                     let isActionDone = false;
                     if (!isActionDone && centralSpawn.GetSignal(index, "extensions") === true) { // High Priority : Exhaust Container
@@ -216,7 +232,7 @@ class CentralSpawnUnit {
                     }
                     return [];
                 }
-            }, {pos : poses[i], containerPos : containerPoses[i], linkPos : linkPos, extensionPoses : extensionPoses[i], index : i, centralSpawn : this});
+            }, {pos : poses[i], containerPos : containerPoses[i], linkPos : linkPos, extensionPoses : extensionPoses[i], spawnPos : spawnPoses[i], index : i, centralSpawn : this});
         }
     }
     /** @returns { {[TOP] : StructureSpawn | null, [BOTTOM_LEFT] : StructureSpawn | null, [BOTTOM_RIGHT] : StructureSpawn | null} } */
@@ -256,9 +272,9 @@ class CentralSpawnUnit {
     SpawnDirection(spawn) {
         if (!this[`_${spawn.id}:Direction`]) {
             const pos = spawn.pos;
-            if (pos.y === this.LeftTopPos.y + 1) this[`_${spawn.id}:Direction`] = TOP;
-            else if (pos.x === this.LeftTopPos.x + 1) this[`_${spawn.id}:Direction`] = LEFT;
-            else if (pos.x === this.RightBottomPos.x - 1) this[`_${spawn.id}:Direction`] = RIGHT;
+            if (pos.y === this.LeftTopPos.y + 1) this[`_${spawn.id}:Direction`] = [TOP, TOP_LEFT, TOP_RIGHT];
+            else if (pos.x === this.LeftTopPos.x + 1) this[`_${spawn.id}:Direction`] = [LEFT, TOP_LEFT, BOTTOM_LEFT, TOP];
+            else if (pos.x === this.RightBottomPos.x - 1) this[`_${spawn.id}:Direction`] = [RIGHT, TOP_RIGHT, BOTTOM_RIGHT, TOP];
             else {
                 console.log(`<p style="display:inline;color:red;">Error: </p>Unable to fit ${spawn} into "centralSpawn" Unit.`);
                 return undefined;
@@ -584,6 +600,7 @@ class MyRoom extends Room {
     }
     NeutralRegister() {
         this.sources.forEach(s => s.register());
+        this.containers.forEach(c => c.register());
     }
     CheckSpawnIndependent() {
         if (this.controller.level >= 3 && this.spawns.length > 0 && global.MapMonitorManager.FetchStructureWithTag(this.name, "forSource", STRUCTURE_CONTAINER).length > 0) this.memory.rejectHelp = true;

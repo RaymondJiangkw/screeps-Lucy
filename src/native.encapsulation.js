@@ -85,6 +85,14 @@ function mount() {
         }
         return ret;
     };
+    const move = Creep.prototype.move;
+    Creep.prototype.move = function() {
+        const ret = move.apply(this, arguments);
+        if (ret === OK) {
+            this._move = true;
+        }
+        return ret;
+    };
     const towerAttack = StructureTower.prototype.attack;
     const towerHeal = StructureTower.prototype.heal;
     const towerRepair = StructureTower.prototype.repair;

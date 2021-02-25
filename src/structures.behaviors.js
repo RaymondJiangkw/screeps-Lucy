@@ -24,7 +24,6 @@ const Project                       =   require('./task.modules').Project;
 const Constructors                  =   require('./task.modules').Constructors;
 const Builders                      =   require('./task.modules').Builders;
 function giveSpawnBehaviors() {
-    const spawnCreep = Spawn.prototype.spawnCreep;
     const nextFillingTIMEOUT = 10;
     const nextFillingOFFSET  = 5;
     const FILLING_ENERGY = "fillingEnergy";
@@ -329,6 +328,7 @@ function giveSpawnBehaviors() {
         issueNearSpawnEnergyFilling();
         issueFarFromSpawnEnergyFilling();
     };
+    const spawnCreep = Spawn.prototype.spawnCreep;
     /**
      * NOTICE : `Extensions` are grouped into two parts : "near-to-spawns" and "far-away-from-spawns".
      * And those "near-to-spawns" are consumed first.
@@ -354,6 +354,15 @@ function giveSpawnBehaviors() {
         }
         return ret;
     };
+    const renewCreep = Spawn.prototype.renewCreep;
+    Spawn.prototype.renewCreep = function(target) {
+        const ret = renewCreep.call(this, target);
+        if (ret === OK || ret === ERR_NOT_ENOUGH_ENERGY) {
+            // Postpone Checking into next tick.
+            Lucy.Timer.add(Game.time + 1, this.triggerFillingEnergy, this.id, [], "Filling Energies into Spawn and Extension");
+        }
+        return ret;
+    }
 }
 function giveExtensionBehaviors() {
 
@@ -456,7 +465,7 @@ function giveRoadBehaviors() {
         this.triggerRepairing();
     };
     StructureRoad.prototype.triggerRepairing = function() {
-        const allowableHitsDiff = this.hitsMax * (isMyRoom(this.room)? 0.1 : 0.45);
+        const allowableHitsDiff = this.hitsMax * (isMyRoom(this.room)? 0.3 : 0.45);
         const randomAllowableHitsDiff = (Math.random() + 1) * allowableHitsDiff;
         /**
          * Postpone Checking
@@ -476,7 +485,7 @@ function giveContainerBehaviors() {
         this.triggerFillingEnergy();
     };
     StructureContainer.prototype.triggerRepairing = function() {
-        const allowableHitsDiff = this.hitsMax * (isMyRoom(this.room)? 0.1 : 0.45);
+        const allowableHitsDiff = this.hitsMax * (isMyRoom(this.room)? 0.3 : 0.45);
         const randomAllowableHitsDiff = (Math.random() + 1) * allowableHitsDiff;
         /**
          * Postpone Checking
@@ -588,7 +597,7 @@ function giveContainerBehaviors() {
                 if (global.TaskManager.Fetch(containerId, `HARVEST_${targetId}`).length > 0) return;
                 // Ensure it is necessary to conduct remote mining
                 const storage = Game.rooms[fromRoomName].storage;
-                if (!storage || storage.store.getUsedCapacity(RESOURCE_ENERGY) / storage.store.getCapacity() >= global.Lucy.Rules.storage[RESOURCE_ENERGY] || storage.store.getFreeCapacity() <= global.Lucy.Rules.storage["collectSpareCapacity"]) {
+                if (!storage || storage.store.getUsedCapacity(RESOURCE_ENERGY) / storage.store.getCapacity() >= global.Lucy.Rules.storage[RESOURCE_ENERGY] * 0.8 || storage.store.getFreeCapacity() <= global.Lucy.Rules.storage["collectSpareCapacity"] * 1.25) {
                     global.Lucy.Timer.add(Game.time + getCacheExpiration(500, 50), wrapper, wrapper, [containerId, containerPos, targetId, targetPos, fromRoomName], `Remote Mining Energy for ${fromRoomName}`);
                     return;
                 }
@@ -769,7 +778,8 @@ function giveStorageBehaviors() {
     StructureStorage.prototype.triggerFillingMineral = function() {
         const mineralType = this.room.mineral.mineralType;
         if (global.TaskManager.Fetch(this.id, `FILLING_${mineralType}`).length > 0) return;
-        if (this.store.getUsedCapacity(this.room.mineral.mineralType) / this.store.getCapacity() >= global.Lucy.Rules.storage[mineralType] || this.store.getFreeCapacity() <= global.Lucy.Rules.storage["collectSpareCapacity"]) {
+        /** Lower Bound */
+        if (this.store.getUsedCapacity(this.room.mineral.mineralType) / this.store.getCapacity() >= global.Lucy.Rules.storage[mineralType] * 0.8 || this.store.getFreeCapacity() <= global.Lucy.Rules.storage["collectSpareCapacity"] * 1.25) {
             const nextTaskStartedTick = Game.time + getCacheExpiration(NEXT_FILLING_MINERAL_TIMEOUT, NEXT_FILLING_MINERAL_OFFSET);
             Lucy.Timer.add(nextTaskStartedTick, this.triggerFillingMineral, this.id, [], `Filling Mineral for ${this}`);
             return;
@@ -792,7 +802,8 @@ function giveStorageBehaviors() {
          */
         if (global.MapMonitorManager.FetchStructureWithTag(this.room.name, "forSource", STRUCTURE_LINK).length === this.room.sources.length && global.MapMonitorManager.FetchStructureWithTag(this.room.name, "forTransfer", STRUCTURE_LINK).length > 0) return;
         if (global.TaskManager.Fetch(this.id, `FILLING_${RESOURCE_ENERGY}`).length > 0) return;
-        if (this.store.getUsedCapacity(RESOURCE_ENERGY) / this.store.getCapacity() >= global.Lucy.Rules.storage[RESOURCE_ENERGY] || this.store.getFreeCapacity() <= global.Lucy.Rules.storage["collectSpareCapacity"]) {
+        /** Lower Bound */
+        if (this.store.getUsedCapacity(RESOURCE_ENERGY) / this.store.getCapacity() >= global.Lucy.Rules.storage[RESOURCE_ENERGY] * 0.8 || this.store.getFreeCapacity() <= global.Lucy.Rules.storage["collectSpareCapacity"] * 1.25) {
             const nextTaskStartedTick = Game.time + getCacheExpiration(NEXT_FILLING_ENERGY_TIMEOUT, NEXT_FILLING_ENERGY_OFFSET);
             Lucy.Timer.add(nextTaskStartedTick, this.triggerFillingEnergy, this.id, [], `Filling Energy for ${this}`);
             return;

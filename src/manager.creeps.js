@@ -96,9 +96,12 @@ class CreepSpawnManager {
             else if (creepDescriptor.Mode === "shrinkToEnergyCapacity") return shrinkBodyParts(creepDescriptor.BodyRequirements, room.energyCapacityAvailable);
             else if (creepDescriptor.Mode === "expand") return shrinkBodyParts( creepDescriptor.ExpandFunction(room), room.energyAvailable);
         };
+        const storedEnergy = global.ResourceManager.Sum(roomName, RESOURCE_ENERGY, {key : "default", type : "retrieve", allowStructureTypes : [STRUCTURE_STORAGE, STRUCTURE_TERMINAL, STRUCTURE_FACTORY], allowStore : true, allowToHarvest : false});
         let chosen = {};
         for (const room of adjacentRooms) {
             if (room !== roomName && Memory.rooms[room] && Memory.rooms[room].rejectHelp && Game.rooms[room] && Game.rooms[room].spawns.length > 0) continue;
+            // When energy is not enough in the `roomName`, its first priority is to sustain operations in the room.
+            if (room !== roomName && storedEnergy < Math.min(Game.rooms[roomName].energyCapacityAvailable, CONTROLLER_STRUCTURES[STRUCTURE_EXTENSION][6] * EXTENSION_ENERGY_CAPACITY[6] + CONTROLLER_STRUCTURES[STRUCTURE_SPAWN][6] * SPAWN_ENERGY_CAPACITY)) continue;
             this.updateRoomCache(room);
             /**
              * @type {Array<import("./task.prototype").TaskCreepDescriptor>}
@@ -109,6 +112,7 @@ class CreepSpawnManager {
                 .filter(a => evaluateCost(parseBodyParts(a, Game.rooms[roomName])) <= (Game.rooms[roomName].energyAvailable - Game.rooms[roomName]._instantEnergyCost));
             for (const groupTag in this.room2creepSpawnsPatch[room]) {
                 /**
+                 * @TODO Special Optimization for Controller Level 8 ?
                  * I expect the following property :
                  *  - expectedNum should be logorithm-like.
                  *  - When MinimumAmount = 1, expectedNum should be 1.
@@ -181,13 +185,11 @@ const CreepSpawnManagerPlugin = {
                 {
                     memory : spawnedCreep.memory,
                     directions:
-                        [
-                            spawnedCreep.workingPos ?
-                                (candidateSpawns[0].pos.getRangeTo(spawnedCreep.workingPos) === 1 ?
-                                    candidateSpawns[0].pos.getDirectionTo(spawnedCreep.workingPos):
-                                    candidateSpawns[0].room.centralSpawn.SpawnDirection(candidateSpawns[0])) :
-                                candidateSpawns[0].room.centralSpawn.SpawnDirection(candidateSpawns[0])
-                        ]
+                        spawnedCreep.workingPos ?
+                            (candidateSpawns[0].pos.getRangeTo(spawnedCreep.workingPos) === 1 ?
+                                [candidateSpawns[0].pos.getDirectionTo(spawnedCreep.workingPos)]:
+                                candidateSpawns[0].room.centralSpawn.SpawnDirection(candidateSpawns[0])) :
+                            candidateSpawns[0].room.centralSpawn.SpawnDirection(candidateSpawns[0])
                 }
             );
             ticks[roomName] = `${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`;
