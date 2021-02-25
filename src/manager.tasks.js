@@ -11,6 +11,7 @@ const evaluateAbility       = require('./util').evaluateAbility;
 const isHarvestable         = require('./util').isHarvestable;
 const getCacheExpiration    = require('./util').getCacheExpiration;
 const calcRoomDistance      = require('./util').calcRoomDistance;
+const calcInRoomDistance    = require('./util').calcInRoomDistance;
 const isMyRoom              = require('./util').isMyRoom;
 const username              = require('./util').username;
 const Task                  = require('./task.prototype').Task;
@@ -90,7 +91,7 @@ class RoleConstructor {
     }
     /**
      * @param {string} role
-     * @param { {key : "number", value : [number, number]} | {key : "profit", value : (object : import("./task.prototype").GameObject) => number} | {key : "workingTicks", value : (object : import("./task.prototype").GameObject) => number} | {key:"memoryTag", value : {tagName? : string, whetherAllowEmptyTag? : boolean, otherAllowedTags? : string[]}} | {key:"spawnConstraint", value : {tag?:string, mountRoomSpawnOnly?:boolean}} | {key : "static", value : {bodyRequirements : {[body in BodyPartConstant]? : number}, bodyBoostRequirements? : {[body in BodyPartConstant]? : { [compound in ResourceConstant]? : number }}}} | {key : "shrinkToEnergyAvailable" | "shrinkToEnergyCapacity", value : {bodyMaximumRequirements : {[body in BodyPartConstant]? : number}, bodyBoostRequirements? : {[body in BodyPartConstant]? : { [compound in ResourceConstant]? : number }}}} | {key : "expand", value : {expandFunction : (room : Room) => {[body in BodyPartConstant]? : number}, bodyBoostRequirements? : {[body in BodyPartConstant]? : { [compound in ResourceConstant]? : number }}}} | {key : "workingPos", value : RoomPosition} | {key : "objectRequirement", value : (object : import("./task.prototype").GameObject) => boolean}} pair
+     * @param { {key : "number", value : [number, number]} | {key : "profit", value : (object : import("./task.prototype").GameObject) => number} | {key : "workingTicks", value : (object : import("./task.prototype").GameObject) => number} | {key:"memoryTag", value : {tagName? : string, whetherAllowEmptyTag? : boolean, otherAllowedTags? : string[]}} | {key:"spawnConstraint", value : {tag?:string, mountRoomSpawnOnly?:boolean}} | {key : "static", value : {bodyRequirements : {[body in BodyPartConstant]? : number}, bodyBoostRequirements? : {[body in BodyPartConstant]? : { [compound in ResourceConstant]? : number }}}} | {key : "shrinkToEnergyAvailable" | "shrinkToEnergyCapacity", value : {bodyMaximumRequirements : {[body in BodyPartConstant]? : number}, bodyBoostRequirements? : {[body in BodyPartConstant]? : { [compound in ResourceConstant]? : number }}}} | {key : "expand", value : {expandFunction : (room : Room) => {[body in BodyPartConstant]? : number}, bodyBoostRequirements? : {[body in BodyPartConstant]? : { [compound in ResourceConstant]? : number }}}} | {key : "workingPos", value : RoomPosition} | {key : "objectRequirement", value : (object : import("./task.prototype").GameObject) => boolean} | {key : "ticksToLive", value : (object : {ticksToLive : number, pos : RoomPosition, id : string}) => number} } pair
      */
     set(role, pair) {
         const NotifyRoleKeyUnmatch = () => PrintErr(`${role} could not be set with ${pair.key}`);
@@ -137,6 +138,8 @@ class RoleConstructor {
                 if (pair.value.bodyMaximumRequirements) this.roleDescriptions[role].bodyMinimumRequirements = pair.value.bodyMaximumRequirements;
                 if (pair.value.bodyBoostRequirements) this.roleDescriptions[role].bodyBoostRequirements = pair.value.bodyBoostRequirements;
             }
+        } else if (pair.key === "ticksToLive") {
+            this.roleDescriptions[role].ticksToLive = pair.value;
         }
         return this;
     }
@@ -144,7 +147,7 @@ class RoleConstructor {
         return this.roleDescriptions;
     }
     constructor() {
-        /** @type { {[role : string] : import('./task.prototype').CreepRoleDescription | import("./task.prototype").ObjectRoleDescription} } */
+        /** @type { {[role : string] : import('./task.prototype').CreepRoleDescription} } */
         this.roleDescriptions = {};
         /** @type { {[role : string] : import("./task.prototype").RoleType} } */
         this.roleType = {};
@@ -512,7 +515,8 @@ class TaskConstructor {
                     roleDescriptor.Register("worker", "creep", {type : "transferer", transferAmount : totalTransferAmount});
                     roleDescriptor
                         .set("worker", {key : "number", value : [1, 1]})
-                        .set("worker", {key : "profit", value : (object) => Math.max(...Object.keys(list).map(getPrice)) * object.store.getCapacity()});
+                        .set("worker", {key : "profit", value : (object) => Math.max(...Object.keys(list).map(getPrice)) * object.store.getCapacity()})
+                        .set("worker", {key : "ticksToLive", value : (object) => global.Map.EstimateDistance(object.pos, fromPos) + 1 + global.Map.EstimateDistance(object.pos, toPos) + 1});
                     this.Construct({taskName : `[Transfer:${fromId},${fromPos}->${toId},${toPos}]`, taskType : "Transfer"}, {mountRoomName : roomName, mountObj : to}, roleDescriptor, {
                         funcs : {
                             selfCheck : function() {
@@ -547,10 +551,15 @@ class TaskConstructor {
             // Transfer in the different room
             const totalTransferAmount = Math.min(_.sum(Object.values(list)));
             const roleDescriptor = new RoleConstructor();
-            roleDescriptor.Register("worker", "creep", {type : "transferer", transferAmount : totalTransferAmount});
+            roleDescriptor.Register("worker", "creep");
             roleDescriptor
+                .set("worker", {key : "shrinkToEnergyAvailable", value : bodyPartDetermination({type : "transfer", transferAmount : totalTransferAmount, MOVE_COEFFICIENT : 1})})
+                .set("worker", {key : "memoryTag", value : {tagName : "remoteTransferer", whetherAllowEmptyTag : false}})
+                .set("worker", {key : "spawnConstraint", value : {tag : "remoteTransferPatch", mountRoomSpawnOnly : false}})
+                .set("worker", {key : "workingTicks", value : () => 1})
                 .set("worker", {key : "number", value : [1, 1]})
-                .set("worker", {key : "profit", value : (object) => Math.max(...Object.keys(list).map(getPrice)) * object.store.getCapacity()});
+                .set("worker", {key : "profit", value : (object) => Math.max(...Object.keys(list).map(getPrice)) * object.store.getCapacity()})
+                .set("worker", {key : "ticksToLive", value : (object) => global.Map.EstimateDistance(object.pos, fromPos) + 1 + global.Map.EstimateDistance(object.pos, toPos) + 1});
             this.Construct({taskName : `[Transfer:${fromId},${fromPos}->${toId},${toPos}]`, taskType : "CrossTransfer"}, {mountRoomName : toPos.roomName, mountObj : {id : null, pos : toPos}}, roleDescriptor, {
                 funcs : {
                     selfCheck : function() {
@@ -664,7 +673,6 @@ class TaskConstructor {
                         if (!worker.memory.permanentFlags) worker.memory.permanentFlags = {};
                         if (!worker.memory.permanentFlags.employedTick) worker.memory.permanentFlags.employedTick = Game.time;
                         if (worker.room.name === this.taskData.targetRoom) {
-                            
                             if (worker.pos.getRangeTo(worker.room.controller) > 1) worker.moveTo(worker.room.controller);
                             else {
                                 // In this case, `worker` has moved to the position of `target`
@@ -709,11 +717,15 @@ class TaskConstructor {
     }
     /**
      * @param {string} targetRoom
-     * @param { {default? : boolean, dryRun? : boolean} } [options = {}]
+     * @param { {default? : boolean, dryRun? : boolean, callback? : import('./lucy.app').AnyCallback} } [options = {}]
      * @returns {boolean}
      */
     ScoutTask(targetRoom, options = {}) {
-        if (global.TaskManager.Fetch("default", `SCOUT_${targetRoom}`).length > 0) return true;
+        const scoutTask = global.TaskManager.Fetch("default", `SCOUT_${targetRoom}`);
+        if (scoutTask.length > 0) {
+            if (options.callback) scoutTask[0].taskData.callbacks.push(options.callback);
+            return true;
+        }
         const status = Game.map.getRoomStatus(targetRoom).status;
         if (status === "closed") {
             global.Map.SetAsUnreachable(targetRoom);
@@ -758,7 +770,10 @@ class TaskConstructor {
                         global.Map.SetAsUnreachable(this.taskData.targetRoom, this.taskData.fromRoom);
                         return "dead";
                     }
-                    if (this.taskData[OK]) return "dead";
+                    if (this.taskData[OK]) {
+                        for (const callback of this.taskData.callbacks) if (callback) callback();
+                        return "dead";
+                    }
                     return "working";
                 },
                 run : function() {
@@ -783,7 +798,7 @@ class TaskConstructor {
                     return [];
                 }
             },
-            taskData : {targetRoom : targetRoom, fromRoom : null, taskConstructor : _taskConstructor, [ERR_NO_PATH] : false, [OK] : false},
+            taskData : {targetRoom : targetRoom, fromRoom : null, taskConstructor : _taskConstructor, [ERR_NO_PATH] : false, [OK] : false, callbacks : options.callback? [options.callback] : []},
             taskKey : `SCOUT_${targetRoom}`
         });
         return true;

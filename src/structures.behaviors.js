@@ -3,6 +3,7 @@
  * 
  * This module defines the most basic behaviors for Structures.
  */
+const icon                          =   require('./util').icon;
 const isMyRoom                      =   require('./util').isMyRoom;
 const evaluateCost                  =   require('./util').evaluateCost;
 const getPrice                      =   require('./util').getPrice;
@@ -212,7 +213,7 @@ function giveSpawnBehaviors() {
              */
             if (!resource) {
                 Lucy.Timer.add(Game.time + getCacheExpiration(nextFillingTIMEOUT, nextFillingOFFSET), issueFarFromSpawnEnergyFilling, this.id, [], "Filling Energies for far-from-spawn Structures");
-                console.log(`<p style="color:red;display:inline;">Error:</p> Fail to propose "Energy Filling for far-from-spawn Structures" task in ${this.room.name}.`);
+                global.Log.error("Fail to propose", global.Dye.yellow("Filling Extensions"), `in ${this.room.name}`);
                 return;
             }
             const amount = Math.min(checkForStore(resource, RESOURCE_ENERGY), lackingEnergy);
@@ -257,7 +258,7 @@ function giveSpawnBehaviors() {
                         const farFromSpawnExtensionsLackingEnergy = _.sum(farFromSpawnExtensions.map(e => e.store.getCapacity(RESOURCE_ENERGY) - e.store.getUsedCapacity(RESOURCE_ENERGY)));
                         if (farFromSpawnExtensionsLackingEnergy > 0 && checkForStore(Game.getObjectById(this.taskData.targetId), RESOURCE_ENERGY) === 0) {
                             Lucy.Timer.add(Game.time + getCacheExpiration(nextFillingTIMEOUT, nextFillingOFFSET), issueFarFromSpawnEnergyFilling, this.mountObj.id, [], "Filling Energies for far-from-spawn Structures");
-                            console.log(`<p style="color:red;display:inline;">Error:</p> Fail to propose "Energy Filling for far-from-spawn Structures" task in ${this.mountObj.room.name} because of shortage of energy in ${Game.getObjectById(this.taskData.targetId)}.`);
+                            global.Log.error("Fail to operate", global.Dye.yellow("Filling Extensions"), `in ${this.room.name} because of shortage of energy of ${this.taskData.targetId}`);
                             return "dead";
                         }
                         if (farFromSpawnExtensionsLackingEnergy > 0) return "working";
@@ -425,7 +426,7 @@ function giveControllerBehaviors() {
                     },
                 estimateWorkingTicks :
                     (object) => object.store.getCapacity() / (evaluateAbility(object, "upgradeController")),
-                expandFunction : (room) => bodyPartDetermination({type : "exhuastEnergy", availableEnergy : global.ResourceManager.Sum(room.name, RESOURCE_ENERGY, {type : "retrieve", allowToHarvest : false, key : Lucy.Rules.arrangements.UPGRADE_ONLY}), energyConsumptionPerUnitPerTick : 1, sustainTick : global.MapMonitorManager.FetchStructureWithTag(room.name, "forController", STRUCTURE_LINK).length > 0 ? 1 : undefined}),
+                expandFunction : (room) => bodyPartDetermination({type : "exhuastEnergy", availableEnergy : global.ResourceManager.Sum(room.name, RESOURCE_ENERGY, {type : "retrieve", allowToHarvest : false, key : Lucy.Rules.arrangements.UPGRADE_ONLY}), energyConsumptionPerUnitPerTick : 1, sustainTick : global.MapMonitorManager.FetchStructureWithTag(room.name, "forController", STRUCTURE_LINK).length > 0 ? 5 : undefined}), // worst case of issuing `order` to centralTransfer : 0, Game.time % 3 === 1; 1, Game.time % 3 === 2; 3, Issue Order & Receive Order & Withdraw ; 4. Creep.Transfer; 5. Link.TransferEnergy
                 tag : `upgrader`, // Considering the existence of link, the setup for `upgrader` is slightly different from `1-worker`.
                 allowEmptyTag : true,
                 mode : "expand",
@@ -561,7 +562,7 @@ function giveContainerBehaviors() {
                     if (isMineral(mineral)) {
                         if (mineral.mineralAmount === 0) {
                             Lucy.Timer.add(Game.time + mineral.ticksToRegeneration, container.triggerHarvesting, container.id, [], `Harvesting in room ${mineral.room.name} for ${mineral}`);
-                            console.log(`<p style="color:gray;display:inline;">[Log]</p> "Harvest ${mineral}" task in ${mineral.room.name} finished. New one is scheduled at ${Game.time + mineral.ticksToRegeneration}.`);
+                            global.Log.room(mineral.pos.roomName, global.Dye.green(`Harvesting`), `${icon(mineral.mineralType)} Task finishes.`);
                             return "dead";
                         }
                     }

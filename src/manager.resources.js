@@ -309,6 +309,11 @@ class ResourceManager {
         }
         if (!chosen && options.type === "retrieve" && !options.avoidRequest && options.allowStore && !options.excludeDefault && (options.allowStructureTypes.length === 0 || options.allowStructureTypes.indexOf(STRUCTURE_TERMINAL) !== -1)) {
             /**
+             * @TODO
+             * For some resourceTypes, including `energy` and minerals, `decompression` could be triggered.
+             */
+            //
+            /**
              * In this case, some resources are wanted but in the state of shortage.
              */
             global.TerminalManager.Request(roomName, resourceType, amount);
@@ -327,36 +332,18 @@ class ResourceManager {
     }
     constructor() {
         /* Retrieving Resources */
-        /**
-         * @type { {[resourceType : string] : {[id : string] : ResourceDescriptor}} }
-         * @private
-         */
+        /** @type { {[resourceType : string] : {[id : string] : ResourceDescriptor}} } @private */
         this.resourceType2Resources         = {};
-        /**
-         * @type { {[roomName : string] : {[resourceType : string] : Array<ResourceDescriptor>}} }
-         * @private
-         */
+        /** @type { {[roomName : string] : {[resourceType : string] : Array<ResourceDescriptor>}} } @private */
         this.room2resourceTypes             = {};
-        /**
-         * @type { {[roomName : string] : {[resourceType : string] : number}} }
-         * @private
-         */
+        /** @type { {[roomName : string] : {[resourceType : string] : number}} } @private */
         this.room2resourceTypesExpiration   = {};
         /* Storing Resources */
-        /**
-         * @type { {[resourceType : string] : {[id : string] : StoringDescriptor}} }
-         * @private
-         */
+        /** @type { {[resourceType : string] : {[id : string] : StoringDescriptor}} } @private */
         this.resourceType2StoringResources          = {};
-        /**
-         * @type { {[roomName : string] : {[resourceType : string] : Array<StoringDescriptor>}} }
-         * @private
-         */
+        /** @type { {[roomName : string] : {[resourceType : string] : Array<StoringDescriptor>}} } @private */
         this.room2StoringResourceTypes              = {};
-        /**
-         * @type { {[roomName : string] : {[resourceType : string] : number}} }
-         * @private
-         */
+        /** @type { {[roomName : string] : {[resourceType : string] : number}} } @private */
         this.room2StoringResourceTypesExpiration    = {};
     }
 };

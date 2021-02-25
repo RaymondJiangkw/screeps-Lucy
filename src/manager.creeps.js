@@ -81,7 +81,7 @@ class CreepSpawnManager {
             if (sumOfEnergy <= maximumEnergy) return body;
             const ret = {};
             for (const bodyPart in body) {
-                ret[bodyPart] = Math.max(1, Math.min(body[bodyPart], Math.floor((maximumEnergy / sumOfEnergy) * body[bodyPart])));
+                ret[bodyPart] = Math.max(1, Math.min(body[bodyPart], Math.round((maximumEnergy / sumOfEnergy) * body[bodyPart])));
             }
             return ret;
         };

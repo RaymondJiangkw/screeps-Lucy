@@ -16,6 +16,19 @@ class Collector {
             return this[key] = Object.values(Game.rooms).filter(r => r.controller && r.controller.my);
         } else return this[key];
     }
+    /**
+     * @param {string} targetRoomName
+     * @returns { {roomName : string, distance : number} }
+     */
+    findClosestColonyByPath(targetRoomName) {
+        const dist = (roomName) => {
+            const ret = global.Map.CalcRoomDistance(roomName, targetRoomName);
+            if (ret === Infinity) return Game.map.getRoomLinearDistance(roomName, targetRoomName);
+            else return ret;
+        };
+        const roomName = this.colonies.sort((u, v) => dist(u.name) - dist(v.name))[0].name;
+        return {distance : dist(roomName), roomName : roomName};
+    }
     constructor() {}
 }
 

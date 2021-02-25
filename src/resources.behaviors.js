@@ -94,6 +94,16 @@ function giveLabBehaviors() {
         }
     };
 }
+function giveFactoryBehaviors() {
+    StructureFactory.prototype.register = function() {
+        global.FactoryManager.Register(this);
+        for (const resourceType of RESOURCES_ALL) {
+            global.ResourceManager.Register(new ResourceDescriptor(this, RESOURCE_POSSESSING_TYPES.STORING, resourceType, "default", function(factory) {
+                return factory.store[this.resourceType];
+            }));
+        }
+    }
+}
 function mount() {
     giveContainerBehaviors();
     giveStorageBehaviors();
@@ -101,6 +111,7 @@ function mount() {
     giveSourceBehaviors();
     giveTerminalBehaviors();
     giveLabBehaviors();
+    giveFactoryBehaviors();
 }
 global.Lucy.App.mount(mount);
 /** @type {import("./lucy.app").AppLifecycleCallbacks} */
@@ -118,6 +129,7 @@ const RoomResetTriggerPlugin = {
                 room["containers"].forEach(c => c.register());
                 if (room.storage) room.storage.register();
                 if (room.terminal) room.terminal.register();
+                if (room.factory) room.factory.register();
                 room["links"].forEach(l => l.register());
                 room["labs"].forEach(l => l.register());
                 /** Register into LabManager should be put after registering labs into ResourceManager */

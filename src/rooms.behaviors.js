@@ -159,7 +159,7 @@ class CentralSpawnUnit {
                     /** @type {StructureLink | null} */
                     // const link = global.MapMonitorManager.FetchStructure(linkPos.roomName, linkPos.y, linkPos.x)[0] || null;
                     if (worker.pos.getRangeTo(targetPos) !== 0) {
-                        worker.moveTo(targetPos);
+                        worker.travelTo(targetPos);
                         return [];
                     }
                     if (!worker.memory.flags) worker.memory.flags = {};
@@ -187,6 +187,7 @@ class CentralSpawnUnit {
                                     isActionDone = true;
                                 } else if (link && link.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
                                     worker.transfer(link, RESOURCE_ENERGY);
+                                    centralSpawn.SetSignal("all", "fromLink", true);
                                     isActionDone = true;
                                 }
                             }
@@ -216,6 +217,7 @@ class CentralSpawnUnit {
                                     isActionDone = true;
                                 } else if (link && link.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
                                     worker.transfer(link, RESOURCE_ENERGY);
+                                    centralSpawn.SetSignal("all", "fromLink", true);
                                     isActionDone = true;
                                 }
                             }
@@ -336,124 +338,135 @@ class CentralTransferUnit {
         }), {
             selfCheck : () => "working",
             run : function() {
-                /** @type {Creep} */
-                const worker = this.FetchEmployees("worker")[0];
-                if (!worker) return [];
-                if (!worker.memory.flags) worker.memory.flags = {};
-                /** @type {RoomPosition} */
-                const pos = this.taskData.pos;
-                if (worker.pos.getRangeTo(pos) !== 0) {
-                    worker.moveTo(pos);
-                    return [];
-                }
-                /** @type {CentralTransferUnit} */
-                const centralTransferUnit = this.taskData.centralTransferUnit;
-                // Since Resources transferred among CentralTransferUnit are usually valuable, it is important
-                // to make sure creep carries nothing, when it is going to die.
-                if (!worker.memory.dying && Object.keys(worker.store).length + 1 >= worker.ticksToLive) {
-                    if (worker.memory.flags.order) {
-                        centralTransferUnit.PushOrder(worker.memory.flags.order);
-                        worker.memory.flags = {};
+                /** @type {Creep[]} */
+                const workers = this.FetchEmployees("worker");
+                /** @type {Creep[]} */
+                const firedEmployees = [];
+                workers.forEach(worker => {
+                    if (!worker.memory.flags) worker.memory.flags = {};
+                    /** Succession Data */
+                    if (!worker.memory.temporaryFlags) worker.memory.temporaryFlags = {};
+                    if (!worker.memory.permanentFlags) worker.memory.permanentFlags = {};
+                    if (!worker.memory.permanentFlags.employedTick) worker.memory.permanentFlags.employedTick = Game.time;
+                    /** @type {RoomPosition} */
+                    const pos = this.taskData.pos;
+                    if (worker.pos.getRangeTo(pos) !== 0) return worker.travelTo(pos);
+                    if (!worker.memory.permanentFlags.startWorkingTick) worker.memory.permanentFlags.startWorkingTick = Game.time;
+                    /** Issue Succession */
+                    if (!worker.memory.temporaryFlags.isSuccessionIssued && worker.memory.permanentFlags.startWorkingTick && worker.ticksToLive < (worker.memory.permanentFlags.startWorkingTick - worker.memory.permanentFlags.employedTick + worker.body.length * 3)) {
+                        worker.memory.temporaryFlags.isSuccessionIssued = true;
+                        this.SignalReplacement(worker);
+                        global.Log.room(pos.roomName, global.Emoji.skull, global.Dye.black(`${worker.name} (${worker.memory.tag}) is near death and asks for successor ...`));
                     }
-                    worker.memory.dying = true;
-                }
-                if (worker.memory.dying) {
-                    for (const resourceType in worker.store) if (worker.transfer(centralTransferUnit.GetStoreStructure(), resourceType) === OK) return [];
-                    return [];
-                }
-                if (!worker.memory.flags.order && !worker.memory.dying) worker.memory.flags.order = centralTransferUnit.FetchOrder();
-                // Check Validity
-                while (worker.memory.flags.order) {
-                    /** @type {TransferOrder} */
-                    const order = worker.memory.flags.order;
-                    if (!worker.memory.flags.fromTargetId) {
-                        let fromTarget = null;
-                        if (order.from === "any") fromTarget = centralTransferUnit.GetFetchStructure(order.resourceType, order.amount);
-                        else fromTarget = centralTransferUnit.GetStructure(order.from);
-                        if (fromTarget) worker.memory.flags.fromTargetId = fromTarget.id;
-                    }
-                    if (!worker.memory.flags.toTargetId) {
-                        let toTarget = null;
-                        if (order.to === "any") toTarget = centralTransferUnit.GetStoreStructure(order.amount, order.from);
-                        else toTarget = centralTransferUnit.GetStructure(order.to);
-                        if (toTarget) worker.memory.flags.toTargetId = toTarget.id;
-                    }
-                    const fromTarget = Game.getObjectById(worker.memory.flags.fromTargetId);
-                    const toTarget = Game.getObjectById(worker.memory.flags.toTargetId);
-                    if (order.amount === 0 && !worker.memory.flags.working) {
-                        if (order.callback) order.callback();
-                        worker.memory.flags = {};
-                    } else if ((!worker.memory.flags.working && !fromTarget) || !toTarget) {
-                        console.log(`<p style="display:inline;color:red;">Error: </p>Unable to carry out "Transfer" task of ${centralTransferUnit.room.name} from ${order.from} to ${order.to}`);
-                        if (order.callback) order.callback();
-                        worker.memory.flags = {};
-                    } else if (checkForFreeStore(toTarget) === 0) {
-                        if (order.to === "any") {
-                            const toTarget = centralTransferUnit.GetStoreStructure(order.amount, order.from);
-                            if (toTarget) worker.memory.flags.toTargetId = toTarget.id;
-                            else {
-                                if (order.callback) order.callback();
-                                worker.memory.flags = {};
-                            }
-                        } else {
-                            if (order.callback) order.callback();
+                    /** @type {CentralTransferUnit} */
+                    const centralTransferUnit = this.taskData.centralTransferUnit;
+                    // Since Resources transferred among CentralTransferUnit are usually valuable, it is important
+                    // to make sure creep carries nothing, when it is going to die.
+                    if (!worker.memory.dying && Object.keys(worker.store).length + 1 >= worker.ticksToLive) {
+                        if (worker.memory.flags.order) {
+                            centralTransferUnit.PushOrder(worker.memory.flags.order);
                             worker.memory.flags = {};
                         }
-                    } else if (worker.store[order.resourceType] === 0 && (fromTarget.store.getUsedCapacity(order.resourceType) || 0) === 0) {
-                        // Potential Switch
-                        if (order.from === "any") {
-                            const fromTarget = centralTransferUnit.GetFetchStructure(order.resourceType, order.amount);
-                            if (fromTarget) worker.memory.flags.fromTargetId = fromTarget.id;
-                            else {
-                                if (order.callback) order.callback();
-                                worker.memory.flags = {};
-                            }
-                        } else {
-                            if (order.callback) order.callback();
-                            worker.memory.flags = {};
-                        }
+                        worker.memory.dying = true;
+                    }
+                    if (worker.memory.dying) {
+                        for (const resourceType in worker.store) if (worker.transfer(centralTransferUnit.GetStoreStructure(), resourceType) === OK) return;
+                        return;
                     }
                     if (!worker.memory.flags.order && !worker.memory.dying) worker.memory.flags.order = centralTransferUnit.FetchOrder();
-                    else break;
-                }
-                if (worker.memory.flags.order) {
-                    /** @type {TransferOrder} */
-                    const order = worker.memory.flags.order;
-                    /** Store Irrelated Resources */
-                    if (worker.store[order.resourceType] !== worker.store.getUsedCapacity()) for (const resourceType in worker.store) if (resourceType !== order.resourceType && worker.transfer(centralTransferUnit.GetStoreStructure(), resourceType) === OK) return [];
-                    /** Special Case for Having Stored resourceType */
-                    if (!worker.memory.flags.working && (worker.store.getFreeCapacity(order.resourceType) === 0 || worker.store[order.resourceType] >= order.amount)) worker.memory.flags.working = true;
-                    if (!worker.memory.flags.working) {
+                    // Check Validity
+                    while (worker.memory.flags.order) {
+                        /** @type {TransferOrder} */
+                        const order = worker.memory.flags.order;
+                        if (!worker.memory.flags.fromTargetId) {
+                            let fromTarget = null;
+                            if (order.from === "any") fromTarget = centralTransferUnit.GetFetchStructure(order.resourceType, order.amount);
+                            else fromTarget = centralTransferUnit.GetStructure(order.from);
+                            if (fromTarget) worker.memory.flags.fromTargetId = fromTarget.id;
+                        }
+                        if (!worker.memory.flags.toTargetId) {
+                            let toTarget = null;
+                            if (order.to === "any") toTarget = centralTransferUnit.GetStoreStructure(order.amount, order.from);
+                            else toTarget = centralTransferUnit.GetStructure(order.to);
+                            if (toTarget) worker.memory.flags.toTargetId = toTarget.id;
+                        }
                         const fromTarget = Game.getObjectById(worker.memory.flags.fromTargetId);
-                        // Special Case of fromTarget : fromTarget is link, and has executed transferEnergy.
-                        if (fromTarget._hasTransferred) return [];
-                        const amount = Math.min(fromTarget.store[order.resourceType], order.amount, worker.store.getFreeCapacity());
-                        const retCode = worker.withdraw(fromTarget, order.resourceType, amount);
-                        if (retCode !== OK) {
-                            console.log(`<p style="display:inline;color:red;">Error: </p>Fail to carry out "Transfer" Task of ${centralTransferUnit.room.name} with ${JSON.stringify(order)} while Withdrawing with return Code ${retCode}`);
-                            if (order.callback) order.callback();
-                            worker.memory.flags = {};
-                            return [];
-                        }
-                        worker.memory.flags.working = true;
-                        return [];
-                    }
-                    if (worker.memory.flags.working) {
                         const toTarget = Game.getObjectById(worker.memory.flags.toTargetId);
-                        const amount = Math.min(worker.store[order.resourceType], checkForFreeStore(toTarget), order.amount);
-                        const retCode = worker.transfer(toTarget, order.resourceType, amount);
-                        if (retCode !== OK) {
-                            console.log(`<p style="display:inline;color:red;">Error: </p>Fail to carry out "Transfer" Task of ${centralTransferUnit.room.name} with ${JSON.stringify(order)} while Transfering with return Code ${retCode}`);
+                        if (order.amount === 0 && !worker.memory.flags.working) {
                             if (order.callback) order.callback();
                             worker.memory.flags = {};
+                        } else if ((!worker.memory.flags.working && !fromTarget) || !toTarget) {
+                            console.log(`<p style="display:inline;color:red;">Error: </p>Unable to carry out "Transfer" task of ${centralTransferUnit.room.name} from ${order.from} to ${order.to}`);
+                            if (order.callback) order.callback();
+                            worker.memory.flags = {};
+                        } else if (checkForFreeStore(toTarget) === 0) {
+                            if (order.to === "any") {
+                                const toTarget = centralTransferUnit.GetStoreStructure(order.amount, order.from);
+                                if (toTarget) worker.memory.flags.toTargetId = toTarget.id;
+                                else {
+                                    if (order.callback) order.callback();
+                                    worker.memory.flags = {};
+                                }
+                            } else {
+                                if (order.callback) order.callback();
+                                worker.memory.flags = {};
+                            }
+                        } else if (worker.store[order.resourceType] === 0 && (fromTarget.store.getUsedCapacity(order.resourceType) || 0) === 0) {
+                            // Potential Switch
+                            if (order.from === "any") {
+                                const fromTarget = centralTransferUnit.GetFetchStructure(order.resourceType, order.amount);
+                                if (fromTarget) worker.memory.flags.fromTargetId = fromTarget.id;
+                                else {
+                                    if (order.callback) order.callback();
+                                    worker.memory.flags = {};
+                                }
+                            } else {
+                                if (order.callback) order.callback();
+                                worker.memory.flags = {};
+                            }
+                        }
+                        if (!worker.memory.flags.order && !worker.memory.dying) worker.memory.flags.order = centralTransferUnit.FetchOrder();
+                        else break;
+                    }
+                    if (worker.memory.flags.order) {
+                        /** @type {TransferOrder} */
+                        const order = worker.memory.flags.order;
+                        /** Store Irrelated Resources */
+                        if (worker.store[order.resourceType] !== worker.store.getUsedCapacity()) for (const resourceType in worker.store) if (resourceType !== order.resourceType && worker.transfer(centralTransferUnit.GetStoreStructure(), resourceType) === OK) return;
+                        /** Special Case for Having Stored resourceType */
+                        if (!worker.memory.flags.working && (worker.store.getFreeCapacity(order.resourceType) === 0 || worker.store[order.resourceType] >= order.amount)) worker.memory.flags.working = true;
+                        if (!worker.memory.flags.working) {
+                            const fromTarget = Game.getObjectById(worker.memory.flags.fromTargetId);
+                            // Special Case of fromTarget : fromTarget is link, and has executed transferEnergy.
+                            if (fromTarget._hasTransferred) return [];
+                            const amount = Math.min(fromTarget.store[order.resourceType], order.amount, worker.store.getFreeCapacity());
+                            const retCode = worker.withdraw(fromTarget, order.resourceType, amount);
+                            if (retCode !== OK) {
+                                console.log(`<p style="display:inline;color:red;">Error: </p>Fail to carry out "Transfer" Task of ${centralTransferUnit.room.name} with ${JSON.stringify(order)} while Withdrawing with return Code ${retCode}`);
+                                if (order.callback) order.callback();
+                                worker.memory.flags = {};
+                                return [];
+                            }
+                            worker.memory.flags.working = true;
                             return [];
                         }
-                        order.amount -= amount;
-                        worker.memory.flags.working = false;
-                        return [];
+                        if (worker.memory.flags.working) {
+                            const toTarget = Game.getObjectById(worker.memory.flags.toTargetId);
+                            const amount = Math.min(worker.store[order.resourceType], checkForFreeStore(toTarget), order.amount);
+                            const retCode = worker.transfer(toTarget, order.resourceType, amount);
+                            if (retCode !== OK) {
+                                console.log(`<p style="display:inline;color:red;">Error: </p>Fail to carry out "Transfer" Task of ${centralTransferUnit.room.name} with ${JSON.stringify(order)} while Transfering with return Code ${retCode}`);
+                                if (order.callback) order.callback();
+                                worker.memory.flags = {};
+                                return [];
+                            }
+                            order.amount -= amount;
+                            worker.memory.flags.working = false;
+                            return [];
+                        }
                     }
-                }
-                return [];
+                });
+                return firedEmployees;
             }
         }, {pos : pos, centralTransferUnit : this});
     }

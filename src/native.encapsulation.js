@@ -25,6 +25,19 @@ function mount() {
         }
         return ret;
     };
+    const createFlag = Room.prototype.createFlag;
+    Room.prototype.createFlag = function() {
+        /** @type {CreateFlagOption} */
+        const options = (arguments[0] instanceof RoomPosition? arguments[2] : arguments[3]) || {};
+        _.defaults(options, { color : COLOR_WHITE, secondaryColor : COLOR_WHITE });
+        const params = arguments[0] instanceof RoomPosition? [arguments[0], arguments[1], options.color, options.secondaryColor] : [arguments[0], arguments[1], arguments[2], options.color, options.secondaryColor];
+        const ret = createFlag.apply(this, params);
+        if (ret === OK) {
+            const name = arguments[0] instanceof RoomPosition ? arguments[1] : arguments[2];
+            global.FlagManager.PreRegister(name, options.memory || {});
+        }
+        return ret;
+    };
     const build = Creep.prototype.build;
     Creep.prototype.build = function(target) {
         const ret = build.apply(this, arguments);

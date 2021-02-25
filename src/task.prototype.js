@@ -46,9 +46,9 @@ function CleanTaskById(id) {
  * Support abstract task-taken objects.
  * @typedef {"static" | "expand" | "shrinkToEnergyAvailable" | "shrinkToEnergyCapacity"} CreepSpawnMode Notice that in "expand" mode, only `tag` will be considered.
  * @typedef { { minimumNumber : number, maximumNumber : number, estimateProfitPerTurn : (object : GameObject) => number, estimateWorkingTicks : (object : GameObject) => number, tag : string, groupTag ? : string, allowEmptyTag ? : boolean, allowOtherTags ? : Array<string>} } CommonRoleDescription `tag` is used for hiring specific `creep`. Those creeps with defined tag will not be hired into `role` without tag. `groupTag` is used to control the spawning of creeps.
- * @typedef { { bodyMinimumRequirements : {[body in BodyPartConstant]? : number}, bodyBoostRequirements? : BoostRequirements, expandFunction? : (room : Room) => {[body in BodyPartConstant]? : number}, mode? : CreepSpawnMode, confinedInRoom? : boolean, workingPos? : RoomPosition} & CommonRoleDescription } CreepRoleDescription
+ * @typedef { { bodyMinimumRequirements : {[body in BodyPartConstant]? : number}, bodyBoostRequirements? : BoostRequirements, expandFunction? : (room : Room) => {[body in BodyPartConstant]? : number}, mode? : CreepSpawnMode, confinedInRoom? : boolean, workingPos? : RoomPosition, ticksToLive? : (creep) => number} & CommonRoleDescription } CreepRoleDescription
  * `expandFunction` allows much more flexibility into the setup for bodies of creeps, since it sets up the upper line instead of the bottom line and can adjust the body settings according to instant condition in the room. NOTICE : `move` parts should be specified. Values in `bodyBoostRequirements` are interpreted as ratio between satisfied bodyparts and total bodyparts. Higher level compound is calculated at higher priority, while bodypart with higher level compound is compatible with requirement of lower level compound, if it is not counted.
- * @typedef { {[role : string] : CreepRoleDescription | CommonRoleDescription } } RoleDescription
+ * @typedef { {[role : string] : CreepRoleDescription } } RoleDescription
  */
 class TaskDescriptor {
     /**
@@ -62,6 +62,13 @@ class TaskDescriptor {
         if (this.boundTask.FetchEmployeeLength(role) >= this.roleDescription[role].maximumNumber) return false;
         /* Checking Tags */
         if (object.memory.tag !== this.roleDescription[role].tag && (this.roleDescription[role].allowOtherTags || []).indexOf(object.memory.tag) === -1) return false;
+        if (this.roleDescription[role].ticksToLive && (!object.ticksToLive || object.ticksToLive < Math.min(this.roleDescription[role].ticksToLive(object), object instanceof Creep ? CREEP_LIFE_TIME - 5 : POWER_CREEP_LIFE_TIME - 5))) {
+            /**
+             * @DEBUG
+             */
+            global.Log.info(`${this.boundTask.name}`, global.Dye.red("refuses"), `${object} since it requires at least ${this.roleDescription[role].ticksToLive(object)} ticks to operate`);
+            return false;
+        }
         return true;
     }
     /**

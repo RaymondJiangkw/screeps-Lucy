@@ -127,7 +127,8 @@ class DefendManager {
                     worker.heal(worker);
                     // An Easy Kite Strategy
                     if (worker.pos.getRangeTo(target) > 3) worker.travelTo(target, {stuckValue : 1, movingTarget : true, repath : 1});
-                    else if (worker.pos.getRangeTo(target) <= 3) worker.travelTo(target, {flee : true, stuckValue : 1, movingTarget : true, range : 3, repath : 1});
+                    // `movingTarget` will leads `range` to be 0 which is not desired.
+                    else if (worker.pos.getRangeTo(target) <= 3) worker.travelTo(target, {flee : true, stuckValue : 1, range : 3, repath : 1});
                     worker.rangedAttack(target);
                 });
                 return firedCreeps;

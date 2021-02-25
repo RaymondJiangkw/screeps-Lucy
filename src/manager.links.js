@@ -15,7 +15,7 @@ class LinkManager {
         if (!this.room2tags2links[roomName][tag]) return [];
         if (!this.room2tags2links[roomName][tag]._lastUpdateTick || this.room2tags2links[roomName][tag]._lastUpdateTick < Game.time) {
             this.room2tags2links[roomName][tag]._lastUpdateTick = Game.time;
-            this.room2tags2links[roomName][tag]._links = this.room2tags2links[roomName][tag].map(id => Game.getObjectById(id));
+            this.room2tags2links[roomName][tag]._links = this.room2tags2links[roomName][tag].map(id => Game.getObjectById(id)).filter(link => link);
         }
         return this.room2tags2links[roomName][tag]._links;
     }
@@ -39,7 +39,7 @@ class LinkManager {
              */
             for (const targetLink of [].concat(this.Fetch(roomName, FetchTag("spawn")), this.Fetch(roomName, FetchTag("controller")))) {
                 /** Has not been Used Up */
-                if (targetLink.store.getUsedCapacity(RESOURCE_ENERGY) > 0) continue;
+                if (targetLink.store.getUsedCapacity(RESOURCE_ENERGY) > CARRY_CAPACITY) continue;
                 for (const sourceLink of this.Fetch(roomName, FetchTag("source"))) {
                     if (sourceLink.store.getFreeCapacity(RESOURCE_ENERGY) > CARRY_CAPACITY || sourceLink.cooldown > 0 || sourceLink._hasTransferred) continue;
                     sourceLink.transferEnergy(targetLink);
@@ -48,13 +48,12 @@ class LinkManager {
                 if (!targetLink._hasBeenTransferred) {
                     for (const transferLink of this.Fetch(roomName, FetchTag("transfer"))) {
                         // NOTICE : _hasBeenWithdrawn is ignored here.
-                        if (transferLink.cooldown > 0 || transferLink._hasTransferred) continue;
-                        if (transferLink.store[RESOURCE_ENERGY] === 0) { // In this case : transferLink needs to be filled.
+                        if (transferLink.cooldown > 0 || transferLink._hasTransferred || transferLink._hasPushedOrder) continue;
+                        if (transferLink.store[RESOURCE_ENERGY] === 0 && Game.time % 3 === 0) { // In this case : transferLink needs to be filled.
                             /** @type {import("./rooms.behaviors").CentralTransferUnit} */
                             const centralTransfer = Game.rooms[roomName].centralTransfer;
                             centralTransfer.PushOrder({from : "any", to : "link", resourceType : RESOURCE_ENERGY, amount : LINK_CAPACITY});
-                            // NOTICE : Another Exhaustion Order is issued in case of blocking.
-                            centralTransfer.PushOrder({from : "link", to : "any", resourceType : RESOURCE_ENERGY, amount : LINK_CAPACITY});
+                            transferLink._hasPushedOrder = true;
                             continue;
                         }
                         transferLink.transferEnergy(targetLink);
@@ -68,10 +67,11 @@ class LinkManager {
             for (const sourceLink of this.Fetch(roomName, FetchTag("source"))) {
                 if (sourceLink.store.getFreeCapacity(RESOURCE_ENERGY) > CARRY_CAPACITY || sourceLink.cooldown > 0 || sourceLink._hasTransferred) continue;
                 for (const transferLink of this.Fetch(roomName, FetchTag("transfer"))) {
-                    if (transferLink.store.getUsedCapacity(RESOURCE_ENERGY) > 0 || transferLink._hasBeenTransferred) continue;
+                    if (transferLink.store.getFreeCapacity(RESOURCE_ENERGY) <= LINK_CAPACITY * LINK_LOSS_RATIO || transferLink._hasBeenTransferred || transferLink._hasPushedOrder) continue;
                     sourceLink.transferEnergy(transferLink);
                     const centralTransfer = Game.rooms[roomName].centralTransfer;
                     centralTransfer.PushOrder({from : "link", to : "any", resourceType : RESOURCE_ENERGY, amount : LINK_CAPACITY});
+                    transferLink._hasPushedOrder = true;
                     break;
                 }
             }

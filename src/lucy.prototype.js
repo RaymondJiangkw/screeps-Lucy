@@ -47,6 +47,7 @@ require("./structures.behaviors");
 /** Mount Extended Behaviors of Creeps */
 require("./creeps.behaviors");
 /** Mount Managers */
+require("./manager.flags");
 require("./manager.map");
 require("./manager.resources");
 /** Handle Events from Last Tick */
@@ -55,6 +56,7 @@ require("./manager.links");
 require("./manager.tasks");
 require("./manager.creeps");
 require("./manager.terminals");
+require("./manager.factories");
 require("./manager.labs");
 require("./manager.observers");
 require("./manager.attack");

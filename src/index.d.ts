@@ -15,6 +15,8 @@ declare namespace NodeJS {
         },
         /** Global Signals */
         signals : import("./lucy.signal").Signals,
+        /** Global Manipulation for Flags */
+        FlagManager : FlagManager,
         /** Global Augmented Map */
         Map : import("./manager.map").Map,
         /** Global Monitor for Rooms */
@@ -29,6 +31,8 @@ declare namespace NodeJS {
         TaskManager : import("./manager.tasks").TaskManager,
         /** Global Manipulation for Market */
         TerminalManager : import("./manager.terminals").TerminalManager,
+        /** Global Manipulation for Factory */
+        FactoryManager : FactoryManager,
         /** Global Manipulation for Resources */
         ResourceManager : import("./manager.resources").ResourceManager,
         /** Manipulation for Links */
@@ -37,6 +41,8 @@ declare namespace NodeJS {
         LabManager : import("./manager.labs").LabManager,
         /** Global Manipulation for Spawning Creeps */
         CreepSpawnManager : import("./manager.creeps").CreepSpawnManager,
+        /** Global Manipulation for Deposit Harvesting */
+        DepositManager : DepositManager,
         /** Global Log */
         Log : Log,
         /** Global Dye */
@@ -55,6 +61,15 @@ interface Game {
     getTaskById(id : Id<any>) : import("./task.prototype").Task,
     /** Clean GameObject's Task */
     cleanTaskById(id : Id<any>) : void
+}
+
+interface CreateFlagOption {
+    /** The color of a new flag. Should be one of the COLOR_* constants. The default value is COLOR_WHITE. */
+    color?          : ColorConstant,
+    /** The secondary color of a new flag. Should be one of the COLOR_* constants. The default value is equal to color. */
+    secondaryColor? : ColorConstant,
+    /** Memory of the new flag. If provided, it will be immediately stored into `Memory.flags[name]` */
+    memory?         : {}
 }
 
 interface Room {
@@ -82,7 +97,37 @@ interface Room {
     keeperLairs         : StructureKeeperLair[],
     portals             : StructurePortal[],
     powerBanks          : StructurePowerBank[],
-    powerSpawn?         : StructurePowerBank
+    powerSpawn?         : StructurePowerBank,
+    // Replaced Function
+    /**
+     * Create new Flag at the specified location.
+     * @param x The X position.
+     * @param y The Y position.
+     * @param name (optional) The name of a new flag.
+     *
+     * It should be unique, i.e. the Game.flags object should not contain another flag with the same name (hash key).
+     *
+     * If not defined, a random name will be generated.
+     *
+     * The maximum length is 60 characters.
+     * 
+     * 
+     * @returns The name of a new flag, or one of the following error codes: ERR_NAME_EXISTS, ERR_INVALID_ARGS
+     */
+    createFlag(x : number, y : number, options? : CreateFlagOption) : ERR_NAME_EXISTS | ERR_FULL | ERR_INVALID_ARGS,
+    /**
+     * Create new Flag at the specified location.
+     * @param pos Can be a RoomPosition object or any object containing RoomPosition.
+     * @param name (optional) The name of a new flag.
+     *
+     * It should be unique, i.e. the Game.flags object should not contain another flag with the same name (hash key).
+     *
+     * If not defined, a random name will be generated.
+     *
+     * The maximum length is 60 characters.
+     * @returns The name of a new flag, or one of the following error codes: ERR_NAME_EXISTS, ERR_INVALID_ARGS
+     */
+    createFlag(pos : RoomPosition, options? : CreateFlagOption) : ERR_NAME_EXISTS | ERR_FULL | ERR_INVALID_ARGS
 }
 
 interface Array<T> {

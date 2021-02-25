@@ -1579,6 +1579,15 @@ class Map {
         else return this.disFromRoom[roomNameV][roomNameU].distance;
     }
     /**
+     * @param {RoomPosition} pos_U
+     * @param {RoomPosition} pos_V
+     * @returns {number}
+     */
+    EstimateDistance(pos_U, pos_V) {
+        if (pos_U.roomName === pos_V.roomName) return calcInRoomDistance(pos_U, pos_V);
+        else return calcRoomDistance(pos_U, pos_V) * 50;
+    }
+    /**
      * @param {string} roomName
      * @param {boolean} [dryRun]
      * @returns {"invisible" | "visible" | "scouting"}

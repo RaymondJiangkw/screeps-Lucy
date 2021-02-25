@@ -520,7 +520,7 @@ module.exports = {
     },
     /**
      * @TODO Consider Boosts
-     * @param { {type : "exhuastEnergy", availableEnergy : number, energyConsumptionPerUnitPerTick : number, sustainTick? : number} | {type : "transfer", transferAmount : number} } mode
+     * @param { {type : "exhuastEnergy", availableEnergy : number, energyConsumptionPerUnitPerTick : number, sustainTick? : number, MOVE_COEFFICIENT? : number} | {type : "transfer", transferAmount : number, MOVE_COEFFICIENT? : number} } mode
      * @returns { {[bodypart in BodyPartConstant]? : number} }
      */
     bodyPartDetermination(mode) {
@@ -528,7 +528,7 @@ module.exports = {
             /* Capacity of a single CARRY */
             const CARRY_CAPACITY = 50;
             /* Number of bodyparts a MOVE can boost */
-            const MOVE_COEFFICIENT = 2;
+            const MOVE_COEFFICIENT = mode.MOVE_COEFFICIENT || 2;
             const availableEnergy = mode.availableEnergy;
             const energyConsumptionPerUnitPerTick = mode.energyConsumptionPerUnitPerTick;
             const sustainTick = mode.sustainTick || (CARRY_CAPACITY / energyConsumptionPerUnitPerTick);
@@ -572,7 +572,7 @@ module.exports = {
             /* Capacity of a single CARRY */
             const CARRY_CAPACITY = 50;
             /* Number of bodyparts a MOVE can boost */
-            const MOVE_COEFFICIENT = 2;
+            const MOVE_COEFFICIENT = mode.MOVE_COEFFICIENT || 2;
             const carry = Math.ceil(mode.transferAmount / CARRY_CAPACITY);
             const carryNum = carry >= 1 ? carry : 1;
             const moveNum = Math.max(1, Math.ceil(carryNum / MOVE_COEFFICIENT));
