@@ -8,8 +8,10 @@
  */
 const getCacheExpiration    =   require('./util').getCacheExpiration;
 const calcInRoomDistance    =   require('./util').calcInRoomDistance;
+const icon                  =   require('./util').icon;
 const getPrice              =   require('./util').getPrice;
 const isHarvestable         =   require('./util').isHarvestable;
+const calcRoomDistance      =   require('./util').calcRoomDistance;
 const profiler = require("./screeps-profiler");
 const TRANSACTION_STATE     =   require('money.prototype').TRANSACTION_STATE;
 const RESOURCE_POSSESSING_TYPES = Object.freeze({
@@ -41,30 +43,43 @@ class ResourceDescriptor {
     get Key() {
         return this.key;
     }
+    get StructureType() {
+        return this.structureType;
+    }
+    get HasStore() {
+        return this.hasStore;
+    }
+    get Harvestable() {
+        return this.harvestable;
+    }
+    get Id() {
+        return this.objId;
+    }
     /**
+     * @param {string} roomName
      * @param {import("./task.prototype").GameObject} obj
      * @param {RESOURCE_POSSESSING_TYPES} type
      * @param {ResourceConstant} resourceType
      * @param { string } [key = "default"] used to identify a specific group
      * @param { (resource : import("./task.prototype").GameObject) => number } checkForAmountFunc this is not required to implement the exclusion of dealt, but still possessing resources
      */
-    constructor(obj, type, resourceType, key = "default", checkForAmountFunc) {
-        /**
-         * @private
-         */
+    constructor(roomName, obj, type, resourceType, key = "default", checkForAmountFunc) {
+        this.roomName = roomName;
+        /** @type {StructureConstant | undefined} @private */
+        this.structureType = obj.structureType;
+        /** @private */
+        this.hasStore = obj.store ? true : false;
+        /** @private */
+        this.harvestable = isHarvestable(obj);
+        /** @private */
         this.objId = obj.id;
-        /**
-         * @private
-         */
+        /** @private */
         this.type = type;
-        /**
-         * @private
-         */
+        /** @private */
         this.resourceType = resourceType;
-        /**
-         * @private
-         */
+        /** @private */
         this.key = key;
+        /** @private */
         this._checkForAmountFunc = checkForAmountFunc.bind(this);
         /**
          * @type { () => number }
@@ -111,25 +126,30 @@ class StoringDescriptor {
     get Key() {
         return this.key;
     }
+    get StructureType() {
+        return this.structureType;
+    }
+    get Id() {
+        return this.objId;
+    }
     /**
+     * @param {string} roomName
      * @param {import("./task.prototype").GameObject} obj
      * @param {ResourceConstant} resourceType 
      * @param {string} [key = "default"] used to identify a specific group
      * @param {(resource : import("./task.prototype").GameObject) => number} checkForFreeAmountFunc this is not required to implement the exclusion of preoccupasion by dealt resources, which is still under transportation.
      */
-    constructor(obj, resourceType, key = "default", checkForFreeAmountFunc) {
-        /**
-         * @private
-         */
+    constructor(roomName, obj, resourceType, key = "default", checkForFreeAmountFunc) {
+        this.roomName = roomName;
+        /** @type {StructureConstant | undefined} */
+        this.structureType = obj.structureType;
+        /** @private */
         this.objId = obj.id;
-        /**
-         * @private
-         */
+        /** @private */
         this.resourceType = resourceType;
-        /**
-         * @private
-         */
+        /** @private */
         this.key = key;
+        /** @private */
         this._checkForFreeAmountFunc = checkForFreeAmountFunc;
         /**
          * @type { () => number }
@@ -150,9 +170,6 @@ class StoringDescriptor {
     }
 };
 
-const RESOURCE_ROOM_CACHE_TIMEOUT   =   50;
-const RESOURCE_ROOM_CACHE_OFFSET    =   5;
-
 /**
  * Class representation for ResourceManager
  * Single Class.
@@ -161,35 +178,33 @@ class ResourceManager {
     /**
      * @private
      * @param {string} roomName
-     * @param {ResourceConstant} resourceType
-     * updateRoomCache updates caching for Retrieving and Storing.
      */
-    updateRoomCache(roomName, resourceType) {
-        if (!Game.rooms[roomName]) return;
-        /* Init Expiration */
-        if (!this.room2resourceTypesExpiration[roomName]) this.room2resourceTypesExpiration[roomName] = {};
-        if (!this.room2StoringResourceTypesExpiration[roomName]) this.room2StoringResourceTypesExpiration[roomName] = {};
-        if (!this.room2resourceTypes[roomName]) this.room2resourceTypes[roomName] = {};
-        if (!this.room2StoringResourceTypes[roomName]) this.room2StoringResourceTypes[roomName] = {};
-        const checkExpiration = (expirationMap, roomMap, resourceTypeMap) => {
-            /* Instant Update is forced, if there isn't any registered entries in the array. */
-            if (!expirationMap[roomName][resourceType] || expirationMap[roomName][resourceType] <= Game.time || !roomMap[roomName][resourceType] || roomMap[roomName][resourceType].length === 0) {
-                expirationMap[roomName][resourceType] = Game.time + getCacheExpiration(RESOURCE_ROOM_CACHE_TIMEOUT, RESOURCE_ROOM_CACHE_OFFSET);
-                roomMap[roomName][resourceType] = [];
-                for (const id in resourceTypeMap[resourceType]) {
-                    const descriptor = resourceTypeMap[resourceType][id];
-                    if (!descriptor.Obj) { // Clean Up
-                        delete resourceTypeMap[resourceType][id];
-                        continue;
-                    }
-                    if (descriptor.Obj.pos && descriptor.Obj.pos.roomName === roomName) {
-                        roomMap[roomName][resourceType].push(descriptor);
-                    }
+    needUpdate(roomName) {
+        return global.signals.IsStructureDestroy[roomName] || false;
+    }
+    /**
+     * @private
+     * @param {string} roomName
+     * @param {ResourceConstant} resourceType
+     * @param {"retrieve" | "store"} type
+     */
+    updateRoomCache(roomName, resourceType, type) {
+        const key = `_${roomName}_${resourceType}_${type}_tick`;
+        if (this.needUpdate() && (!this[key] || this[key] < Game.time)) {
+            const _cpuUsed = Game.cpu.getUsed();
+            this[key] = Game.time;
+            console.log(String.fromCodePoint(0x231b), `${roomName}'s ${icon(resourceType)} Cache Updating ...`);
+            if (type === "retrieve") {
+                if (Game.rooms[roomName] && this.room2key2resourceTypes[roomName] && this.room2key2resourceTypes[roomName][resourceType]) {
+                    for (const key in this.room2key2resourceTypes[roomName][resourceType]) _.remove(this.room2key2resourceTypes[roomName][resourceType][key], d => d.Obj);
+                }
+            } else if (type === "store") {
+                if (Game.rooms[roomName] && this.room2key2StoringResourceTypes[roomName] && this.room2key2StoringResourceTypes[roomName][resourceType]) {
+                    for (const key in this.room2key2StoringResourceTypes[roomName][resourceType]) _.remove(this.room2key2StoringResourceTypes[roomName][resourceType][key], d => d.Obj);
                 }
             }
-        };
-        checkExpiration(this.room2resourceTypesExpiration, this.room2resourceTypes, this.resourceType2Resources);
-        checkExpiration(this.room2StoringResourceTypesExpiration, this.room2StoringResourceTypes, this.resourceType2StoringResources);
+            global.Log.success('Cache Update Done', global.Dye.grey(`cpu-cost:${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`));
+        }
     }
     /**
      * Register self into ResourceManager
@@ -198,14 +213,18 @@ class ResourceManager {
      */
     Register(descriptor) {
         if (descriptor instanceof ResourceDescriptor) {
-            _.set(this.resourceType2Resources, [descriptor.ResourceType, descriptor.Obj.id], descriptor);
+            if (!this.room2key2resourceTypes[descriptor.roomName]) this.room2key2resourceTypes[descriptor.roomName] = {};
+            if (!this.room2key2resourceTypes[descriptor.roomName][descriptor.ResourceType]) this.room2key2resourceTypes[descriptor.roomName][descriptor.ResourceType] = {};
+            if (!this.room2key2resourceTypes[descriptor.roomName][descriptor.ResourceType][descriptor.Key]) this.room2key2resourceTypes[descriptor.roomName][descriptor.ResourceType][descriptor.Key] = [];
+            this.room2key2resourceTypes[descriptor.roomName][descriptor.ResourceType][descriptor.Key].push(descriptor);
         } else if (descriptor instanceof StoringDescriptor) {
-            _.set(this.resourceType2StoringResources, [descriptor.ResourceType, descriptor.Obj.id], descriptor);
+            if (!this.room2key2StoringResourceTypes[descriptor.roomName]) this.room2key2StoringResourceTypes[descriptor.roomName] = {};
+            if (!this.room2key2StoringResourceTypes[descriptor.roomName][descriptor.ResourceType]) this.room2key2StoringResourceTypes[descriptor.roomName][descriptor.ResourceType] = {};
+            if (!this.room2key2StoringResourceTypes[descriptor.roomName][descriptor.ResourceType][descriptor.Key]) this.room2key2StoringResourceTypes[descriptor.roomName][descriptor.ResourceType][descriptor.Key] = [];
+            this.room2key2StoringResourceTypes[descriptor.roomName][descriptor.ResourceType][descriptor.Key].push(descriptor);
         }
     }
     /**
-     * Sum returns the accumulation of available amount of resources for `retrieving` or `storing`.
-     * @TODO
      * Currently, only those resources within the `roomName` are calculated. It should be extended into the calculation of
      * all truly available resources in the future.
      * @param {string} roomName
@@ -215,22 +234,35 @@ class ResourceManager {
      */
     Sum(roomName, resourceType, options) {
         _.defaults(options, {key : "default", allowStore : true, allowToHarvest : true, confinedInRoom : true, excludeDefault : false, allowStructureTypes : []});
-        this.updateRoomCache(roomName, resourceType);
-        if (options.type === "retrieve")
-            return _.sum(
-                this.room2resourceTypes[roomName][resourceType]
-                    .filter(a => (a.Key === "default" && !options.excludeDefault) || a.Key === options.key)
-                    .filter(a => !a.Obj.structureType || options.allowStructureTypes.length === 0 || options.allowStructureTypes.indexOf(a.Obj.structureType) !== -1)
-                    .filter(a => (options.allowStore && a.Obj.store !== undefined) || (options.allowToHarvest && isHarvestable(a.Obj)))
-                    .map(a => a.Amount)
-            );
+        this.updateRoomCache(roomName, resourceType, options.type);
+        if (options.type === "retrieve") {
+            if (!this.room2key2resourceTypes[roomName] || !this.room2key2resourceTypes[roomName][resourceType]) return 0;
+            const sum = (key) => 
+                this.room2key2resourceTypes[roomName][resourceType][key] ? 
+                    _.sum(
+                        this.room2key2resourceTypes[roomName][resourceType][key]
+                            .filter(a => 
+                                (options.allowStructureTypes.length === 0 || options.allowStructureTypes.includes(a.StructureType)) && 
+                                ((options.allowStore && a.HasStore) || (options.allowToHarvest && a.Harvestable))
+                            )
+                            .map(a => a.Amount)
+                    )
+                    : 0;
+            return sum(options.key) + (options.key !== "default" && !options.excludeDefault)? sum("default") : 0;
+        }
         else if (options.type === "store")
-            return _.sum(
-                this.room2StoringResourceTypes[roomName][resourceType]
-                    .filter(a => (a.Key === "default" && !options.excludeDefault) || a.Key === options.key)
-                    .filter(a => !a.Obj.structureType || options.allowStructureTypes.length === 0 || options.allowStructureTypes.indexOf(a.Obj.structureType) !== -1)
-                    .map(a => a.FreeAmount)
-            );
+            if (!this.room2key2StoringResourceTypes[roomName] || !this.room2key2StoringResourceTypes[roomName][resourceType]) return 0;
+            const sum = (key) =>
+                this.room2key2StoringResourceTypes[roomName][resourceType][key] ?
+                    _.sum(
+                        this.room2key2StoringResourceTypes[roomName][resourceType][key]
+                            .filter(a =>
+                                options.allowStructureTypes.length === 0 || options.allowStructureTypes.includes(a.StructureType)    
+                            )
+                            .map(a => a.FreeAmount)
+                    )
+                    : 0;
+            return sum(options.key) + (options.key !== "default" && !options.excludeDefault)? sum("default") : 0;
     }
     /**
      * Query returns the best suitable object to be extracted or to store.
@@ -260,50 +292,57 @@ class ResourceManager {
          * base room, since long distance is not preferred.
          */
         const ALLOWED_DISTANCE = 1;
-        this.updateRoomCache(roomName, resourceType);
+        this.updateRoomCache(roomName, resourceType, options.type);
         /**
          * @type {Array<string>}
          * NOTICE : Neutral or Hostile rooms are also included in `adjacentRooms`.
          * Thus, as long as the resources from those rooms are registered, they could be accessed, which allowing for
          * much more flexibility.
          */
-        const adjacentRooms = global.Map.Query(roomName);
-        /**
-         * @type {import("./task.prototype").GameObject | null}
-         */
+        const adjacentRooms = (options.type === "retrieve"? Object.keys(this.room2key2resourceTypes) : Object.keys(this.room2key2StoringResourceTypes)).sort((u, v) => calcRoomDistance(roomName, u) - calcRoomDistance(roomName, v));
+        /** @type {import('./task.prototype').GameObject | null} */
         let chosen = null;
-        /**
-         * Used to identity the penalty designed for registered resources with distinctive tag while options.key === "default"
-         * @param {ResourceDescriptor | StoringDescriptor} des
-         * @returns {number} Positive Number
-         */
-        const calcKeyPenalty = function(des) {
-            if (options.key !== des.Key) {
-                /* Calc the distance again */
-                return Infinity; // calcInRoomDistance(des.Obj.pos, pos) * 2 * getPrice("cpu") / 5;
-            } else return 0;
-        };
         for (const room of adjacentRooms) {
-            if (options.type === "retrieve" && (!this.room2resourceTypes[room] || !this.room2resourceTypes[room][resourceType])) continue;
-            if (options.type === 'store' && (!this.room2StoringResourceTypes[room] || !this.room2StoringResourceTypes[room][resourceType])) continue;
+            /** Invisible */
+            if (!Game.rooms[room]) continue;
+            /** Not Have Any Information */
+            if ((options.type === "retrieve" && !this.room2key2resourceTypes[room][resourceType]) || (options.type === 'store' && !this.room2key2StoringResourceTypes[room][resourceType])) continue;
+            /** Map Constraints */
             if ((options.confinedInRoom && room !== roomName) || Game.map.getRoomLinearDistance(room, roomName) > ALLOWED_DISTANCE) continue;
             /**
              * @type {Array<ResourceDescriptor> | Array<StoringDescriptor>}
              */
             let totalAvailableResourceObjects = [];
-            if (options.type === "retrieve") totalAvailableResourceObjects = (this.room2resourceTypes[room][resourceType] || [])
-                .filter(a => a.Obj.id !== id && a.Amount > 0)
-                .filter(a => !a.Obj.structureType || options.allowStructureTypes.length === 0 || options.allowStructureTypes.indexOf(a.Obj.structureType) !== -1)
-                .filter(a => (a.Key === "default" && !options.excludeDefault) || a.Key === options.key)
-                .filter(a => (options.allowStore && a.Obj.store !== undefined) || (options.allowToHarvest && isHarvestable(a.Obj))) // I suppose there is nothing which is harvestable and also has `store`
-                .sort((a,b) => a.Obj.pos.getRangeTo(pos) * 2 * getPrice("cpu") / 5 + (amount - a.Amount) * getPrice(resourceType) / 1000 + calcKeyPenalty(a) - b.Obj.pos.getRangeTo(pos) * 2 * getPrice("cpu") / 5 - (amount - b.Amount) * getPrice(resourceType) / 1000 - calcKeyPenalty(b));
-            else if (options.type === 'store') totalAvailableResourceObjects = (this.room2StoringResourceTypes[room][resourceType] || [])
-                .filter(a => a.Obj.id !== id && a.FreeAmount > 0)
-                .filter(a => !a.Obj.structureType || options.allowStructureTypes.length === 0 || options.allowStructureTypes.indexOf(a.Obj.structureType) !== -1)
-                .filter(a => (a.Key === "default" && !options.excludeDefault) || a.Key === options.key)
-                .sort((a,b) => a.Obj.pos.getRangeTo(pos) * 2 * getPrice("cpu") / 5 + (amount - a.FreeAmount) * getPrice(resourceType) / 1000 + calcKeyPenalty(a) - b.Obj.pos.getRangeTo(pos) * 2 * getPrice("cpu") / 5 - (amount - b.FreeAmount) * getPrice(resourceType) / 1000 - calcKeyPenalty(b));
+            if (options.type === "retrieve") {
+                const harvestablePenalty = 100000;
+                const query = (key) =>
+                    this.room2key2resourceTypes[room][resourceType][key] ?
+                        this.room2key2resourceTypes[room][resourceType][key]
+                            .filter(a =>
+                                (a.Id !== id) &&
+                                (a.Amount > 0) &&
+                                (options.allowStructureTypes.length === 0 || options.allowStructureTypes.includes(a.StructureType)) &&
+                                ((options.allowStore && a.HasStore) || (options.allowToHarvest && a.Harvestable))
+                            )
+                            // Generally `Store` is preferred to `Harvestable`
+                            .select(v => v, a => (a.Amount - amount) - (a.Harvestable? harvestablePenalty : 0)) || []
+                        : [];
+                totalAvailableResourceObjects = [].concat(query(options.key), (options.key !== "default" && !options.excludeDefault) ? query("default") : []);
+            } else if (options.type === 'store') {
+                const query = (key) =>
+                    this.room2key2StoringResourceTypes[room][resourceType][key] ?
+                        this.room2key2StoringResourceTypes[room][resourceType][key]
+                            .filter(a =>
+                                (a.Id !== id) &&
+                                (a.FreeAmount > 0) &&
+                                (options.allowStructureTypes.length === 0 || options.allowStructureTypes.includes(a.StructureType))
+                            )
+                            .select(v => v, a => a.FreeAmount - amount) || []
+                        : [];
+                totalAvailableResourceObjects = [].concat(query(options.key), (options.key !== "default" && !options.excludeDefault) ? query("default") : []);
+            }
             if (totalAvailableResourceObjects.length === 0) continue;
-            const adequateResourceObjects = options.ensureAmount? _.filter(totalAvailableResourceObjects, d => (options.type === "retrieve" ? d.Amount : d.FreeAmount) >= amount) : [];
+            const adequateResourceObjects = options.ensureAmount? _.filter(totalAvailableResourceObjects, a => (options.type === "retrieve" ? a.Amount : a.FreeAmount) >= amount) : [];
             chosen = (adequateResourceObjects[0] && adequateResourceObjects[0].Obj) || (totalAvailableResourceObjects[0] && totalAvailableResourceObjects[0].Obj);
             break;
         }
@@ -318,33 +357,38 @@ class ResourceManager {
              */
             global.TerminalManager.Request(roomName, resourceType, amount);
         }
-        // console.log(`Query Resource ret ${chosen} with params ${subject} ${resourceType} ${amount} ${JSON.stringify(options)}`);
         return chosen;
     }
+    /**
+     * @param {string} roomName
+     */
+    Test(roomName) {
+        console.log(`Testing Performance of ResourceManager's Query ...`);
+        let _cpuUsed = Game.cpu.getUsed();
+        let cnt = 0;
+        const pos = new RoomPosition(25, 25, roomName);
+        for (const resourceType of RESOURCES_ALL) cnt += this.Query(pos, resourceType, Math.ceil(Math.random() * CONTAINER_CAPACITY), {type : "retrieve", avoidRequest : true})? 1 : 0;
+        console.log(`\t"retrieve":\t${RESOURCES_ALL.length} entries with ${cnt} valid returns, consumes ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}.`);
+        _cpuUsed = Game.cpu.getUsed();
+        cnt = 0;
+        for (const resourceType of RESOURCES_ALL) cnt += this.Query(pos, resourceType, Math.ceil(Math.random() * CONTAINER_CAPACITY), {type : "store", avoidRequest : true})? 1 : 0;
+        console.log(`\t"store":\t${RESOURCES_ALL.length} entries with ${cnt} valid returns, consumes ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}.`);
+    }
     Display() {
-        for (const roomName in this.room2resourceTypes) {
-            if (!Game.rooms[roomName]) continue;
-            const resourceType = RESOURCE_ENERGY;
-            for (const descriptor of this.room2resourceTypes[roomName][resourceType]) {
-                new RoomVisual(descriptor.Obj.pos.roomName).text(descriptor.Amount, descriptor.Obj.pos, {color : "yellow"});
+        for (const roomName in this.room2key2resourceTypes) {
+            if (!Game.rooms[roomName] || !this.room2key2resourceTypes[roomName][RESOURCE_ENERGY]) continue;
+            for (const key in this.room2key2resourceTypes[roomName][RESOURCE_ENERGY]) {
+                for (const descriptor of this.room2key2resourceTypes[roomName][RESOURCE_ENERGY][key]) {
+                    new RoomVisual(descriptor.Obj.pos.roomName).text(descriptor.Amount, descriptor.Obj.pos, {color : "yellow"});
+                }
             }
         }
     }
     constructor() {
-        /* Retrieving Resources */
-        /** @type { {[resourceType : string] : {[id : string] : ResourceDescriptor}} } @private */
-        this.resourceType2Resources         = {};
-        /** @type { {[roomName : string] : {[resourceType : string] : Array<ResourceDescriptor>}} } @private */
-        this.room2resourceTypes             = {};
-        /** @type { {[roomName : string] : {[resourceType : string] : number}} } @private */
-        this.room2resourceTypesExpiration   = {};
-        /* Storing Resources */
-        /** @type { {[resourceType : string] : {[id : string] : StoringDescriptor}} } @private */
-        this.resourceType2StoringResources          = {};
-        /** @type { {[roomName : string] : {[resourceType : string] : Array<StoringDescriptor>}} } @private */
-        this.room2StoringResourceTypes              = {};
-        /** @type { {[roomName : string] : {[resourceType : string] : number}} } @private */
-        this.room2StoringResourceTypesExpiration    = {};
+        /** @type { {[roomName : string] : {[resourceType : string] : {[key : string] : Array<ResourceDescriptor>}}} } @private */
+        this.room2key2resourceTypes = {};
+        /** @type { {[roomName : string] : {[resourceType : string] : {[key : string] : Array<StoringDescriptor>}}} } @private */
+        this.room2key2StoringResourceTypes = {};
     }
 };
 const _resourceManager = new ResourceManager();

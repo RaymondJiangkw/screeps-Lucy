@@ -62,7 +62,7 @@ class TaskDescriptor {
         if (this.boundTask.FetchEmployeeLength(role) >= this.roleDescription[role].maximumNumber) return false;
         /* Checking Tags */
         if (object.memory.tag !== this.roleDescription[role].tag && (this.roleDescription[role].allowOtherTags || []).indexOf(object.memory.tag) === -1) return false;
-        if (this.roleDescription[role].ticksToLive && (!object.ticksToLive || object.ticksToLive < Math.min(this.roleDescription[role].ticksToLive(object), object instanceof Creep ? CREEP_LIFE_TIME - 5 : POWER_CREEP_LIFE_TIME - 5))) {
+        if (this.roleDescription[role].ticksToLive && object.spawning && (!object.ticksToLive || object.ticksToLive < Math.min(this.roleDescription[role].ticksToLive(object), object instanceof Creep ? CREEP_LIFE_TIME - 5 : POWER_CREEP_LIFE_TIME - 5))) {
             /**
              * @DEBUG
              */
@@ -310,7 +310,7 @@ class Task {
         const firedEmployees = this.run();
         for (const employee of firedEmployees) employee.task = null;
         /* Display */
-        if (this.mountObj && this.mountObj.pos) {
+        if (!Memory._disable && this.mountObj && this.mountObj.pos) {
             const roomName = this.mountObj.pos.roomName;
             for (const employeeId in this.employee2role) {
                 const employee = Game.getObjectById(employeeId);

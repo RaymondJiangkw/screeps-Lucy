@@ -21,7 +21,7 @@ function giveContainerBehaviors() {
         else if (Game.getTagById(this.id) === "labs") storingResourceTypes = Object.keys(REACTION_TIME);
         if (storingResourceTypes.length > 0) {
             for (const storingResourceType of storingResourceTypes) {
-                global.ResourceManager.Register(new ResourceDescriptor(this, RESOURCE_POSSESSING_TYPES.STORING, storingResourceType, Game.getTagById(this.id) === global.Lucy.Rules.arrangements.SPAWN_ONLY? global.Lucy.Rules.arrangements.SPAWN_ONLY : "default", function(container) {
+                global.ResourceManager.Register(new ResourceDescriptor(this.room.name, this, RESOURCE_POSSESSING_TYPES.STORING, storingResourceType, Game.getTagById(this.id) === global.Lucy.Rules.arrangements.SPAWN_ONLY? global.Lucy.Rules.arrangements.SPAWN_ONLY : "default", function(container) {
                     return container.store[this.resourceType];
                 }));
             }
@@ -29,7 +29,7 @@ function giveContainerBehaviors() {
         /* Register for Storing Additional Resources */
         // NOTICE : `labs` tagged containers are not used for actively storing additional resources. Their input is solely determined by `unboost`.
         // "default" enables containers to be found by searching structures for storing energy.
-        if (Game.getTagById(this.id) === global.Lucy.Rules.arrangements.SPAWN_ONLY) global.ResourceManager.Register(new StoringDescriptor(this, RESOURCE_ENERGY, "default", function (container) {
+        if (Game.getTagById(this.id) === global.Lucy.Rules.arrangements.SPAWN_ONLY) global.ResourceManager.Register(new StoringDescriptor(this.room.name, this, RESOURCE_ENERGY, "default", function (container) {
             return container.store.getFreeCapacity(RESOURCE_ENERGY);
         }));
     }
@@ -37,12 +37,12 @@ function giveContainerBehaviors() {
 function giveStorageBehaviors() {
     StructureStorage.prototype.register = function() {
         for (const resourceType of RESOURCES_ALL) {
-            global.ResourceManager.Register(new StoringDescriptor(this, resourceType, "default", function (storage) {
+            global.ResourceManager.Register(new StoringDescriptor(this.room.name, this, resourceType, "default", function (storage) {
                 return storage.store.getFreeCapacity(this.resourceType);
             }));
         }
         for (const resourceType of RESOURCES_ALL) {
-            global.ResourceManager.Register(new ResourceDescriptor(this, RESOURCE_POSSESSING_TYPES.STORING, resourceType, "default", function (storage) {
+            global.ResourceManager.Register(new ResourceDescriptor(this.room.name, this, RESOURCE_POSSESSING_TYPES.STORING, resourceType, "default", function (storage) {
                 return storage.store[this.resourceType];
             }));
         }
@@ -51,12 +51,12 @@ function giveStorageBehaviors() {
 function giveTerminalBehaviors() {
     StructureTerminal.prototype.register = function() {
         for (const resourceType of RESOURCES_ALL) {
-            global.ResourceManager.Register(new StoringDescriptor(this, resourceType, "default", function (terminal) {
+            global.ResourceManager.Register(new StoringDescriptor(this.room.name, this, resourceType, "default", function (terminal) {
                 return terminal.store.getFreeCapacity(this.resourceType);
             }));
         }
         for (const resourceType of RESOURCES_ALL) {
-            global.ResourceManager.Register(new ResourceDescriptor(this, RESOURCE_POSSESSING_TYPES.STORING, resourceType, "default", function (terminal) {
+            global.ResourceManager.Register(new ResourceDescriptor(this.room.name, this, RESOURCE_POSSESSING_TYPES.STORING, resourceType, "default", function (terminal) {
                 return terminal.store[this.resourceType];
             }));
         }
@@ -67,7 +67,7 @@ function giveTerminalBehaviors() {
 function giveLinkBehaviors() {
     StructureLink.prototype.register = function() {
         if (Game.getTagById(this.id) === global.Lucy.Rules.arrangements.UPGRADE_ONLY) {
-            global.ResourceManager.Register(new ResourceDescriptor(this, RESOURCE_POSSESSING_TYPES.STORING, RESOURCE_ENERGY, Lucy.Rules.arrangements.UPGRADE_ONLY, function (link) {
+            global.ResourceManager.Register(new ResourceDescriptor(this.room.name, this, RESOURCE_POSSESSING_TYPES.STORING, RESOURCE_ENERGY, Lucy.Rules.arrangements.UPGRADE_ONLY, function (link) {
                 return link.store[RESOURCE_ENERGY];
             }));
         }
@@ -76,7 +76,7 @@ function giveLinkBehaviors() {
 }
 function giveSourceBehaviors() {
     Source.prototype.register = function() {
-        global.ResourceManager.Register(new ResourceDescriptor(this, RESOURCE_POSSESSING_TYPES.PRODUCING, RESOURCE_ENERGY, "default", function(source) {
+        global.ResourceManager.Register(new ResourceDescriptor(this.room.name, this, RESOURCE_POSSESSING_TYPES.PRODUCING, RESOURCE_ENERGY, "default", function(source) {
             // const vacantSpace = global.MapMonitorManager.FetchVacantSpaceCnt(source.pos.roomName, Math.max(source.pos.y - 1, 1), Math.max(source.pos.x - 1, 1), Math.min(source.pos.y + 1, 48), Math.min(source.pos.x + 1, 48)) - 1;
             return source.energy;
         }));
@@ -87,7 +87,7 @@ function giveLabBehaviors() {
         /** @type {Array<MineralCompoundConstant | MineralConstant>} */
         const mineralTypes = [].concat(Object.keys(REACTION_TIME), Object.keys(MINERAL_MIN_AMOUNT));
         for (const mineralType of mineralTypes) {
-            global.ResourceManager.Register(new ResourceDescriptor(this, RESOURCE_POSSESSING_TYPES.STORING, mineralType, "labs", function(lab) {
+            global.ResourceManager.Register(new ResourceDescriptor(this.room.name, this, RESOURCE_POSSESSING_TYPES.STORING, mineralType, "labs", function(lab) {
                 if (lab.mineralType === this.resourceType) return lab.store[this.resourceType];
                 else return 0;
             }));
@@ -98,7 +98,7 @@ function giveFactoryBehaviors() {
     StructureFactory.prototype.register = function() {
         global.FactoryManager.Register(this);
         for (const resourceType of RESOURCES_ALL) {
-            global.ResourceManager.Register(new ResourceDescriptor(this, RESOURCE_POSSESSING_TYPES.STORING, resourceType, "default", function(factory) {
+            global.ResourceManager.Register(new ResourceDescriptor(this.room.name, this, RESOURCE_POSSESSING_TYPES.STORING, resourceType, "default", function(factory) {
                 return factory.store[this.resourceType];
             }));
         }

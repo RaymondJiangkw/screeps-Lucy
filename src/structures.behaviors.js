@@ -60,8 +60,7 @@ function giveSpawnBehaviors() {
             let isResourceSpawnOnly = true;
             let resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, lackingEnergy, {key : Lucy.Rules.arrangements.SPAWN_ONLY, type : "retrieve", excludeDefault : true, confinedInRoom : true, allowToHarvest : false});
             if (!resource) isResourceSpawnOnly = false;
-            if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, lackingEnergy, {type : "retrieve", allowToHarvest : false, confinedInRoom : true});
-            if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, lackingEnergy, {type : "retrieve", allowToHarvest : true, confinedInRoom : false});
+            if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, lackingEnergy, {type : "retrieve"});
             /**
              * If there is no resources available, the refilling will be postponed.
              */
@@ -206,8 +205,7 @@ function giveSpawnBehaviors() {
              * @type { import('./task.prototype').GameObject | null }
              */
             let resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, lackingEnergy, {key : Lucy.Rules.arrangements.SPAWN_ONLY, type : "retrieve", excludeDefault : true, confinedInRoom : true, allowToHarvest : false});
-            if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, lackingEnergy, {type : "retrieve", allowToHarvest : false, confinedInRoom : true});
-            if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, lackingEnergy, {type : "retrieve", allowToHarvest : true, confinedInRoom : false});
+            if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, lackingEnergy, {type : "retrieve"});
             /**
              * If there is no resources available, the refilling will be postponed.
              */
@@ -396,8 +394,7 @@ function giveControllerBehaviors() {
             /**
              * Since Link receives energy whenever it is exhausted, thus, even when energy in link is not enough for a creep, it is still worth being withdrawn first.
              */
-            let resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", key : Lucy.Rules.arrangements.UPGRADE_ONLY, allowToHarvest : false, confinedInRoom : true, ensureAmount : false});
-            if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", allowToHarvest : true, confinedInRoom : false});
+            let resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", key : Lucy.Rules.arrangements.UPGRADE_ONLY, ensureAmount : false});
             return resource;
         }.bind(this);
         if (!requestResource(1)) {
@@ -486,7 +483,7 @@ function giveContainerBehaviors() {
         this.triggerFillingEnergy();
     };
     StructureContainer.prototype.triggerRepairing = function() {
-        const allowableHitsDiff = this.hitsMax * (isMyRoom(this.room)? 0.3 : 0.45);
+        const allowableHitsDiff = this.hitsMax * 0.3;
         const randomAllowableHitsDiff = (Math.random() + 1) * allowableHitsDiff;
         /**
          * Postpone Checking
@@ -725,6 +722,7 @@ function giveContainerBehaviors() {
             /** In order to avoid transfering energy from one container to another, "default" key is employed. */
             let resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", confinedInRoom : true, allowToHarvest : false});
             if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", confinedInRoom : true, allowToHarvest : true});
+            if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", confinedInRoom : false, allowToHarvest : true});
             return resource;
         }.bind(this);
         TaskConstructor.RequestTask(this, RESOURCE_ENERGY, "triggerFillingEnergy", this.store.getFreeCapacity(), "default", 1, requestResource, requestResource, (creep) => Math.min(creep.store.getFreeCapacity(RESOURCE_ENERGY), this.store.getFreeCapacity()), (room) => global.ResourceManager.Sum(room.name, RESOURCE_ENERGY, {type : "retrieve", allowToHarvest : false}), function (object) {
@@ -834,7 +832,7 @@ function giveLinkBehaviors() {
                 let to = null;
                 if (centralTransfer.Storage && centralTransfer.Storage.store.getFreeCapacity() >= global.Lucy.Rules.storage["collectSpareCapacity"] && centralTransfer.Storage.store[RESOURCE_ENERGY] / centralTransfer.Storage.store.getCapacity() <= global.Lucy.Rules.storage[RESOURCE_ENERGY]) to = STRUCTURE_STORAGE;
                 else if (centralTransfer.Terminal && centralTransfer.Terminal.store.getFreeCapacity() >= global.Lucy.Rules.terminal["collectSpareCapacity"] && centralTransfer.Terminal.store[RESOURCE_ENERGY] / centralTransfer.Terminal.store.getCapacity() <= global.Lucy.Rules.terminal[RESOURCE_ENERGY]) to = STRUCTURE_TERMINAL;
-                if (to) centralTransfer.PushOrder({from : "link", to : to, resourceType : RESOURCE_ENERGY, amount : amount});
+                if (to) centralTransfer.PushOrder({from : "link", to : to, resourceType : RESOURCE_ENERGY, amount : this.store[RESOURCE_ENERGY]});
             }
         }
     };

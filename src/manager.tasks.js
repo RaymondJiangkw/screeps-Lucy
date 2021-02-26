@@ -20,6 +20,9 @@ const Constructors          = require('./task.modules').Constructors;
 const Builders              = require('./task.modules').Builders;
 const Notifier              = require("./visual.notifier").Notifier;
 const profiler              = require("./screeps-profiler");
+
+const DEBUG = false;
+
 /**
  * A Constructor, which aims at helping to construct role.
  */
@@ -211,10 +214,7 @@ class TaskConstructor {
          * @type {(amount : number) => Source | StructureContainer | StructureStorage | StructureLink}
          */
         const requestResource = function(amount) {
-            let resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", allowToHarvest : false, confinedInRoom : true});
-            if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", allowToHarvest : true, confinedInRoom : true});
-            if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", allowToHarvest : false, confinedInRoom : false});
-            if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", allowToHarvest : true, confinedInRoom : false});
+            let resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve"});
             return resource;
         }.bind(constructionSitePos);
         /**
@@ -269,10 +269,7 @@ class TaskConstructor {
          * @type {(amount : number) => Source | StructureContainer | StructureStorage | StructureLink}
          */
         const requestResource = function(amount) {
-            let resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", confinedInRoom : true, allowToHarvest : false});
-            if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", allowToHarvest : true, confinedInRoom : true});
-            if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", allowToHarvest : false, confinedInRoom : false});
-            if (!resource) resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve", allowToHarvest : true, confinedInRoom : false});
+            let resource = global.ResourceManager.Query(this, RESOURCE_ENERGY, amount, {type : "retrieve"});
             return resource;
         }.bind(structurePos);
         /**
@@ -763,7 +760,7 @@ class TaskConstructor {
             .set("worker", {key : "workingTicks", value : () => 0})
             .set("worker", {key : "spawnConstraint", value : {tag : "scoutPatch", mountRoomSpawnOnly : false}})
             .set("worker", {key : "number", value : [1,1]});
-        this.Construct({taskName : `[Scout:${targetRoom}]`, taskType : options.default? "default" : "Scout"}, {mountRoomName : targetRoom, mountObj : {id : null}}, roleDescriptor, {
+        this.Construct({taskName : `[Scout:${targetRoom}]`, taskType : options.default? "default" : "Scout"}, {mountRoomName : global.Lucy.Collector.colonies.select(v => v, r => Game.map.getRoomLinearDistance(r.name, targetRoom)).name, mountObj : {id : null}}, roleDescriptor, {
             funcs : {
                 selfCheck : function() {
                     if (this.taskData[ERR_NO_PATH]) {
@@ -972,12 +969,24 @@ class TaskManager {
      */
     Run() {
         for (const roomName in this.roomName2information) {
+            if (DEBUG) console.log(`[${roomName}]`);
             const _cpuUsed = Game.cpu.getUsed();
             for (const tag in this.roomName2information[roomName].tags) {
+                if (DEBUG) console.log(`\t${tag}:`);
                 const _cpuUsed = Game.cpu.getUsed();
-                for (const index of this.roomName2information[roomName].tags[tag].working) this.taskPools[index].Run();
+                for (const index of this.roomName2information[roomName].tags[tag].working) {
+                    const _cpuUsed = Game.cpu.getUsed();
+                    this.taskPools[index].Run();
+                    if (DEBUG && Game.cpu.getUsed() - _cpuUsed >= 0.1) console.log(`\t\t-${this.taskPools[index].name} ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`);
+                }
                 // `waiting` Task still gets chance to run.
-                for (const index of this.roomName2information[roomName].tags[tag].waiting) if (this.taskPools[index].EmployeeAmount > 0) this.taskPools[index].Run();
+                for (const index of this.roomName2information[roomName].tags[tag].waiting) {
+                    if (this.taskPools[index].EmployeeAmount > 0) {
+                        const _cpuUsed = Game.cpu.getUsed();
+                        this.taskPools[index].Run();
+                        if (DEBUG && Game.cpu.getUsed() - _cpuUsed >= 0.1) console.log(`\t\t-${this.taskPools[index].name} ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`);
+                    }
+                }
                 this.room2tag2ticks[roomName][tag] = `${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`;
             }
             this.room2ticks[roomName] = `${(Game.cpu.getUsed() - _cpuUsed).toFixed(3)}`;

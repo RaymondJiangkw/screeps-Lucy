@@ -990,6 +990,7 @@ class Planner {
         /** Switch to unitTypeAlias if possible */
         unitType = options.unitTypeAlias || unitType;
         const ret = new ResponsePatch(Response.prototype.FINISH, "tag", "build", "road");
+        if (!options.build && !options.display && !options.road && !options.tag) return ret;
         /** Trigger Planning */
         if (!this.FetchUnitPos(roomName, unitType)) {
             /** Memory Caching */
@@ -1574,9 +1575,10 @@ class Map {
         // this.updateAdjacentRooms(roomNameU, {fullDistrict : true});
         // this.updateAdjacentRooms(roomNameV, {fullDistrict : true});
         if (this.disFromRoom[roomNameU]) this.updateDistanceBetweenRooms(roomNameU);
-        else this.updateDistanceBetweenRooms(roomNameV);
+        else if (this.disFromRoom[roomNameV]) this.updateDistanceBetweenRooms(roomNameV);
         if (this.disFromRoom[roomNameU]) return this.disFromRoom[roomNameU][roomNameV].distance;
-        else return this.disFromRoom[roomNameV][roomNameU].distance;
+        else if (this.disFromRoom[roomNameV]) return this.disFromRoom[roomNameV][roomNameU].distance;
+        return Infinity;
     }
     /**
      * @param {RoomPosition} pos_U
@@ -1724,7 +1726,7 @@ class Map {
                 return false;
             });
         if (isThereAnyInformationLacking > 0) {
-            global.Lucy.Timer.add(Game.time + isThereAnyInformationLacking * 50, this.ClaimRoom, this, [amount], `Claim ${amount} ${amount === 1 ? "room" : "rooms"}`);
+            global.Lucy.Timer.add(Game.time + isThereAnyInformationLacking * 50, this.ClaimRoom, this, [amount, dryRun], `Claim ${amount} ${amount === 1 ? "room" : "rooms"}`);
             return true;
         }
         candidates = candidates

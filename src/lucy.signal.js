@@ -1,5 +1,5 @@
 /**
- * @typedef {PristineSignals} Signals
+ * @typedef {PristineSignals} LucySignals
  */
 const PristineSignals = {
     IsStructureDestroy : {},

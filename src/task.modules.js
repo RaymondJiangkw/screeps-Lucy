@@ -23,6 +23,9 @@ const checkForFreeStore = require("./util").checkForFreeStore;
 const isHarvestable = require("./util").isHarvestable;
 const getPrice = require("./util").getPrice;
 const profiler = require("./screeps-profiler");
+
+const DEBUG = false;
+
 /**
  * Class representation for Component.
  */
@@ -87,20 +90,21 @@ class Project {
             this.pointers[object.id] = {layer : 0, signal : OK};
             this.layers[0][OK].Feed(object, this.attachedData[object.id] || {});
         }
-        // console.log(`<p style="display:inline;color:yellow;">Start Pos</p> ${task.name} for ${object} : ${this.pointers[object.id].layer}->${this.pointers[object.id].signal}`);
-        // let startTime = Game.cpu.getUsed();
+        if (DEBUG) console.log(`<p style="display:inline;color:yellow;">Start Pos</p> ${task.name} for ${object} : ${this.pointers[object.id].layer}->${this.pointers[object.id].signal}`);
+        let startTime = Game.cpu.getUsed();
         /**
          * @type {null | Signal}
          */
         let ret = this.layers[this.pointers[object.id].layer][this.pointers[object.id].signal].Run(object, task);
-        // if (!ret) {
-        //    console.log(`${object} : ${this.pointers[object.id].layer}->${this.pointers[object.id].signal} : ${JSON.stringify(ret)} : ${(Game.cpu.getUsed() - startTime).toFixed(3)}`);
-        // }
+        if (DEBUG && !ret) {
+            console.log(`${object} : ${this.pointers[object.id].layer}->${this.pointers[object.id].signal} : ${JSON.stringify(ret)} : ${(Game.cpu.getUsed() - startTime).toFixed(3)}`);
+        }
         while (ret) {
-            // console.log(`${object} : ${this.pointers[object.id].layer}->${this.pointers[object.id].signal} : ${JSON.stringify(ret)} : ${(Game.cpu.getUsed() - startTime).toFixed(3)}`);
+            if (DEBUG) console.log(`${object} : ${this.pointers[object.id].layer}->${this.pointers[object.id].signal} : ${JSON.stringify(ret)} : ${(Game.cpu.getUsed() - startTime).toFixed(3)}`);
+            startTime = Game.cpu.getUsed();
             // startTime = Game.cpu.getUsed();
             /* Cycle Condition */
-            if (this.pointers[object.id].layer === this.layers.length - 1 && this.lastLayer2FirstLayerSignals.indexOf(ret.signal) !== -1) {
+            if (this.pointers[object.id].layer === this.layers.length - 1 && this.lastLayer2FirstLayerSignals.includes(ret.signal)) {
                 this.pointers[object.id].layer = 0;
                 this.pointers[object.id].signal = OK;
             } else {
@@ -242,8 +246,6 @@ function ConstructStoreFullCheckComponent(resourceType) {
 function ConstructStoreEmptyCheckComponent(resourceType) {
     const component = new Component(function(object, task) {
         const attachedData = this.attachedData[object.id] || {};
-        if (!object.store) return ConstructSignal(ERR_INVALID_ARGS, attachedData);
-        if (typeof object.store.getUsedCapacity(resourceType) !== 'number') return ConstructSignal(ERR_INVALID_ARGS, attachedData);
         if (object.store.getUsedCapacity(resourceType) === 0) return ConstructSignal(OK, attachedData);
         else {
             attachedData.resourceType = resourceType;
@@ -286,7 +288,7 @@ function ConstructMoveToComponent(dist = 1) {
         // console.log(`<p style="display:inline;color:green;">Notice: </p>${target} : ${targetPos}, ${object} : ${currentPos}`);
         if (targetPos.roomName === currentPos.roomName && targetPos.getRangeTo(currentPos) <= dist) return ConstructSignal(OK, attachedData);
         else {
-            object.travelTo(targetPos);
+            object.travelTo(targetPos, {maxOps : 2000});
             return null;
         }
     });
@@ -363,8 +365,6 @@ function ConstructDealTransactionComponent() {
     const component = new Component(function(object, task) {
         const attachedData = this.attachedData[object.id] || {};
         const target = Game.getObjectById(attachedData.targetId);
-        // console.log(attachedData.targetId, target, attachedData.amount, attachedData.resourceType);
-        if (!target || !attachedData.amount || !attachedData.resourceType) return ConstructSignal(ERR_INVALID_ARGS, attachedData);
         const amount = Math.min(attachedData.amount, checkForStore(target, attachedData.resourceType));
         /* No Need To Check for Vacant Here */
         task.transactions[object.id] = new Transaction(task.mountObj, target, amount * getPrice(attachedData.resourceType), {info : {resourceType : attachedData.resourceType, amount : amount}, type : "resource"});
@@ -512,11 +512,11 @@ function BuildGoToDoSomethingProject(dist, func) {
  */
 function BuildFetchResourceAndDoSomethingProject(resourceType, fetchFunc, storeFetchFunc, amountFunc, target, dist = 1, func, params = []) {
     const project = new Project()
-                        .InsertLayer({[OK] : ConstructStoreCheckComponent([resourceType])})
-                        .InsertLayer({
-                            [OK] : ConstructEmptyComponent(OK),
-                            [ERR_CONTAIN_IRRELATED_RESOURCES] : BuildDepositIrrelevantResourcesProject(storeFetchFunc)
-                        })
+                        // .InsertLayer({[OK] : ConstructStoreCheckComponent([resourceType])})
+                        // .InsertLayer({
+                        //     [OK] : ConstructEmptyComponent(OK),
+                        //     [ERR_CONTAIN_IRRELATED_RESOURCES] : BuildDepositIrrelevantResourcesProject(storeFetchFunc)
+                        // })
                         .InsertLayer({[OK] : ConstructStoreEmptyCheckComponent(resourceType)})
                         .InsertLayer({
                             [ERR_FULL] : ConstructEmptyComponent(OK),

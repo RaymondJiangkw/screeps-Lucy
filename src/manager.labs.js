@@ -144,7 +144,7 @@ class LabUnit {
          * In this case, `fill` is already satisfied.
          */
         if (mineralType === null && !lab.mineralType) return true;
-        else if (lab.mineralType === mineralType) return true;
+        else if (lab.mineralType === mineralType && lab.store.getFreeCapacity(mineralType) === 0) return true;
 
         const outFunc = (storeStructureId, callback) => {
             return function () {
@@ -170,7 +170,7 @@ class LabUnit {
             };
         };
         let storeStructure = null, fetchStructure = null;
-        if (lab.mineralType) {
+        if (lab.mineralType && lab.mineralType !== mineralType) {
             storeStructure = global.ResourceManager.Query(lab, lab.mineralType, lab.store[lab.mineralType], {type : "store", confinedInRoom : true});
             if (!storeStructure) {
                 console.log(`<p style="display:inline;color:red;">Error:</p> Cannot find a storing structure for ${lab}`);
@@ -443,7 +443,7 @@ class LabUnit {
         /**
          * Case : `recipe` run out of resources.
          */
-        if (this.recipeFunction && (_workingInputLabs.length !== 2 || _workingInputLabs.filter(l => !l.mineralType).length > 0)) {
+        if (this.recipeFunction && (_workingInputLabs.length !== 2 || _workingInputLabs.filter(l => !l.mineralType || l.store[l.mineralType] < 5).length > 0)) {
             this.updateRecipe();
             return;
         }
@@ -452,7 +452,8 @@ class LabUnit {
          */
         const workingInputLabs = {[this.recipe[0]] : null, [this.recipe[1]] : null};
         if (_workingInputLabs.length === 2) {
-            const u = _workingInputLabs[0].mineralType, v = _workingInputLabs[1].mineralType;
+            const parseLab = lab => lab.mineralType && lab.store[lab.mineralType] >= 5 ? lab.mineralType : null;
+            const u = parseLab(_workingInputLabs[0]), v = parseLab(_workingInputLabs[1]);
             const t_u = this.recipe[0], t_v = this.recipe[1];
             const l_u = _workingInputLabs[0], l_v = _workingInputLabs[1];
             // if (DEBUG) console.log(u, v, t_u, t_v);

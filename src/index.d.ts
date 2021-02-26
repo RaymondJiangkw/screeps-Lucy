@@ -14,7 +14,7 @@ declare namespace NodeJS {
             Collector : import("./lucy.collector").Collector
         },
         /** Global Signals */
-        signals : import("./lucy.signal").Signals,
+        signals : LucySignals,
         /** Global Manipulation for Flags */
         FlagManager : FlagManager,
         /** Global Augmented Map */

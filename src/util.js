@@ -1,3 +1,5 @@
+const { times } = require("lodash");
+
 /**
  * @module util
  * @typedef {CreepFunctions} CreepFunctions
@@ -238,7 +240,144 @@ class ResponsePatch {
         keys.forEach(key => this[key] = new Response(this._value));
     }
 }
-module.exports = {
+/**
+ * A General `CostMatrix`
+ */
+class Matrix {
+    /**
+     * @private
+     * @param {number} x
+     * @param {number} y
+     * @param {number | number[]} val
+     * @param {(number, number) => number} func
+     */
+    modify(x = 0, y = 0, val, func) {
+        const minimum = -32768, maximum = 32767;
+        const op = value => Math.min(Math.max(minimum, value), maximum);
+        if (typeof val === "number") this._bits[x * 50 + y] = func(this._bits[x * 50 + y], op(val));
+        else {
+            this._bits[x * 50 + y] = func(this._bits[x * 50 + y], op(val[0]));
+            for (var d = 1; d < val.length; ++d) {
+                const value = op(val[d]);
+                var x_top = x - d, x_bottom = x + d;
+                var y_left = y - d, y_right = y + d;
+                if (x_top >= 0) for (var i = Math.max(0, y_left); i <= Math.min(49, y_right); ++i) this._bits[x_top * 50 + i] = func(this._bits[x_top * 50 + i], value);
+                if (x_bottom < 50) for (var i = Math.max(0, y_left); i <= Math.min(49, y_right); ++i) this._bits[x_bottom * 50 + i] = func(this._bits[x_bottom * 50 + i], value);
+                if (y_left >= 0) for (var i = Math.max(0, x_top); i <= Math.min(49, x_bottom); ++i) this._bits[i * 50 + y_left] = func(this._bits[i * 50 + y_left], value);
+                if (y_right < 50) for (var i = Math.max(0, x_top); i <= Math.min(49, x_bottom); ++i) this._bits[i * 50 + y_right] = func(this._bits[i * 50 + y_right], value);
+            }
+        }
+    }
+    /**
+     * @param {number} x
+     * @param {number} y
+     * @param {number | number[]} val
+     */
+    set(x, y, val) {
+        this.modify(x, y, val, Matrix._set);
+    }
+    /**
+     * @param {number} x
+     * @param {number} y
+     * @param {number | number[]} val
+     */
+    add(x, y, val) {
+        this.modify(x, y, val, Matrix._add);
+    }
+    /**
+     * @param {number} x
+     * @param {number} y
+     * @param {number | number[]} val
+     */
+    subtract(x, y, val) {
+        this.modify(x, y, val, Matrix._subtract);
+    }
+    /**
+     * @param {number} x
+     * @param {number} y
+     * @param {number | number[]} val
+     */
+    multiply(x, y, val) {
+        this.modify(x, y, val, Matrix._multiply);
+    }
+    /**
+     * @param {number} x
+     * @param {number} y
+     * @param {number | number[]} val
+     */
+    divide(x, y, val) {
+        this.modify(x, y, val, Matrix._divide);
+    }
+    /**
+     * @param {number} x
+     * @param {number} y
+     */
+    get(x = 0, y = 0) {
+        return this._bits[x * 50 + y];
+    }
+    clone() {
+        var newMatrix = new Matrix();
+        newMatrix._bits = new int16Array(this._bits);
+        return newMatrix;
+    }
+    serialize() {
+        return Array.prototype.slice.apply(new int32Array(this._bits.buffer));
+    }
+    constructor() {
+        /** @private */
+        this._bits = new int16Array(2500);
+    }
+}
+Matrix.deserialize = function(data) {
+    let instance = Object.create(Matrix.prototype);
+    instance._bits = new int16Array(new int32Array(data).buffer);
+    return instance;
+}
+/** @private */
+Matrix._set = (a, b) => b;
+/** @private */
+Matrix._add = (a, b) => a + b;
+/** @private */
+Matrix._subtract = (a, b) => a - b;
+/** @private */
+Matrix._multiply = (a, b) => a * b;
+/** @private */
+Matrix._divide = (a, b) => a / b;
+class AttackMatrix extends Matrix {
+    /**
+     * @param {StructureTower} tower
+     */
+    addTower(tower) {
+        var coefficient = 1;
+        [PWR_OPERATE_TOWER, PWR_DISRUPT_TOWER].forEach(power => {
+            var effect = _.find(tower.effects, {effect : power});
+            coefficient *= POWER_INFO[power].effect[effect.level - 1];
+        });
+        this.add(tower.pos.x, tower.pos.y, coefficient === 1 ? AttackMatrix._towerAttackValue : AttackMatrix._towerAttackValue.map(v => v * coefficient));
+    }
+    /**
+     * @param {Creep} creep
+     * @param {"rangedAttack" | "rangedMassAttack"} ranged_type
+     */
+    addCreep(creep, ranged_type) {
+        const attack = utils.evaluateAbility(creep, "attack");
+        this.add(creep.pos.x, creep.pos.y, [0, 30 * attack]);
+        if (ranged_type === "rangedAttack") {
+            const ranged_attack = utils.evaluateAbility(creep, "rangedAttack");
+            this.add(creep.pos.x, creep.pos.y, [0, 10 * ranged_attack, 10 * ranged_attack, 10 * ranged_attack]);
+        } else if (ranged_type === "rangedMassAttack") {
+            const ranged_mass_attack = utils.evaluateAbility(creep, "rangedMassAttack");
+            this.add(creep.pos.x, creep.pos.y, [0, 10 * ranged_mass_attack, 4 * ranged_mass_attack, 1 * ranged_mass_attack]);
+        }
+    }
+}
+/** @private */
+AttackMatrix._towerAttackValue = [600,600,600,600,600,600,570,540,510,480,450,420,390,360,330,300,270,240,210,180,150,150,150,150,150,150,150,150,150,150,150,150,150,150,150,150,150,150,150,150,150,150,150,150,150,150,150,150,150,150];
+
+class HealMatrix extends Matrix {
+
+}
+const utils = {
     /**
      * isStructure distinguish `ConstructionSite` from `Structure`.
      * @param {import("./task.prototype").GameObject} obj
@@ -646,7 +785,11 @@ module.exports = {
         [STRUCTURE_INVADER_CORE]    : STRUCTURE_INVADER_CORE,
         [STRUCTURE_PORTAL]          : STRUCTURE_PORTAL
     },
-    Response : Response,
-    ResponsePatch : ResponsePatch,
-    DisjointSet : DisjointSet
+    Response        : Response,
+    ResponsePatch   : ResponsePatch,
+    DisjointSet     : DisjointSet,
+    AttackMatrix    : AttackMatrix,
+    HealMatrix      : HealMatrix
 };
+
+module.exports = utils;
