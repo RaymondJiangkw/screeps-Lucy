@@ -113,6 +113,7 @@ class CentralSpawnUnit {
                     estimateProfitPerTurn : () => 0,
                     estimateWorkingTicks : (object) => object.ticksToLive || CREEP_LIFE_TIME,
                     tag : `centralSpawn-${i}`,
+                    spawnPriority : 5,
                     bodyMinimumRequirements : {
                         [CARRY] : 4,
                         [MOVE] : 1
@@ -333,7 +334,8 @@ class CentralTransferUnit {
                     return ret;
                 },
                 workingPos : pos,
-                confinedInRoom : true
+                confinedInRoom : true,
+                spawnPriority : 3
             }
         }), {
             selfCheck : () => "working",

@@ -62,3 +62,5 @@ require("./manager.observers");
 require("./manager.attack");
 require("./manager.defend");
 require("./manager.deposits");
+/** Mount Test Module */
+require("./test");

@@ -10,6 +10,7 @@ const getPrice              = require("./util").getPrice;
 const checkForStore         = require("./util").checkForStore;
 const checkForFreeStore     = require("./util").checkForFreeStore;
 const getCacheExpiration    = require("./util").getCacheExpiration;
+const profiler = require("./screeps-profiler");
 
 const DEBUG = true;
 
@@ -567,6 +568,7 @@ class LabManager {
         this.room2labUnit = {};
     }
 }
+profiler.registerClass(LabManager, "LabManager");
 const _labManager = new LabManager();
 global.Lucy.App.on({
     init : () => global.LabManager = _labManager,

@@ -5,6 +5,7 @@
  */
 const getPrice          = require("./util").getPrice;
 const TaskConstructor   = require("./manager.tasks").TaskConstructor;
+const profiler = require("./screeps-profiler");
 /**
  * @typedef { {memory : {depositType : DepositConstant, disappearTick : number, lastCooldown : number, depositId : Id<Deposit>}} } DepositFlagMemory
  */
@@ -99,6 +100,8 @@ class DepositManager {
 }
 
 const _depositManager = new DepositManager();
+
+profiler.registerClass(DepositManager, "DepositManager");
 
 /** @type {import("./lucy.app").AppLifecycleCallbacks} */
 const DepositPlugin = {

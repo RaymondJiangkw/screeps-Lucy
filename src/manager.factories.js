@@ -1,7 +1,7 @@
 /**
  * @module manager.factories
  */
-
+const profiler = require("./screeps-profiler");
 class FactoryManager {
     /**
      * `sumAll` sums all resources in the controlled rooms.
@@ -35,6 +35,7 @@ class FactoryManager {
     }
 }
 const factoryManager = new FactoryManager();
+profiler.registerClass(FactoryManager, "FactoryManager");
 /** @type {import("./lucy.app").AppLifecycleCallbacks} */
 const FactoryPlugin = {
     init : () => global.FactoryManager = factoryManager

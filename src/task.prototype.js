@@ -1,7 +1,7 @@
 /** 
  * @module task
  * 
- * @typedef { {id: string, memory : {}, pos : RoomPosition, store? : Store<StoreDefinitionUnlimited, true> | Store<StoreDefinition, false> } } GameObject
+ * @typedef { {id: string, memory : {}, pos : RoomPosition, store? : Store<StoreDefinitionUnlimited, true> | Store<StoreDefinition, false>, account : import("./money.prototype").Account } } GameObject
  * @typedef { {pos : RoomPosition} } HasPositionObject
  * @typedef {Task} Task
  * @typedef {TaskDescriptor} TaskDescriptor
@@ -16,6 +16,7 @@ const isCreep                       = require('./util').isCreep;
 const isStructure                   = require('./util').isStructure;
 const isConstructionSite            = require('./util').isConstructionSite;
 const calcBoost                     = require("./util").calcBoost;
+const evaluateCost                  = require('./util').evaluateCost;
 const Project                       = require("./task.modules").Project;
 const profiler = require("./screeps-profiler");
 /**
@@ -46,7 +47,7 @@ function CleanTaskById(id) {
  * Support abstract task-taken objects.
  * @typedef {"static" | "expand" | "shrinkToEnergyAvailable" | "shrinkToEnergyCapacity"} CreepSpawnMode Notice that in "expand" mode, only `tag` will be considered.
  * @typedef { { minimumNumber : number, maximumNumber : number, estimateProfitPerTurn : (object : GameObject) => number, estimateWorkingTicks : (object : GameObject) => number, tag : string, groupTag ? : string, allowEmptyTag ? : boolean, allowOtherTags ? : Array<string>} } CommonRoleDescription `tag` is used for hiring specific `creep`. Those creeps with defined tag will not be hired into `role` without tag. `groupTag` is used to control the spawning of creeps.
- * @typedef { { bodyMinimumRequirements : {[body in BodyPartConstant]? : number}, bodyBoostRequirements? : BoostRequirements, expandFunction? : (room : Room) => {[body in BodyPartConstant]? : number}, mode? : CreepSpawnMode, confinedInRoom? : boolean, workingPos? : RoomPosition, ticksToLive? : (creep) => number} & CommonRoleDescription } CreepRoleDescription
+ * @typedef { { bodyMinimumRequirements : {[body in BodyPartConstant]? : number}, bodyBoostRequirements? : BoostRequirements, expandFunction? : (room : Room) => {[body in BodyPartConstant]? : number}, mode? : CreepSpawnMode, confinedInRoom? : boolean, workingPos? : RoomPosition, ticksToLive? : (creep) => number, spawnPriority? : 0 | 1 | 2 | 3 | 4 | 5} & CommonRoleDescription } CreepRoleDescription
  * `expandFunction` allows much more flexibility into the setup for bodies of creeps, since it sets up the upper line instead of the bottom line and can adjust the body settings according to instant condition in the room. NOTICE : `move` parts should be specified. Values in `bodyBoostRequirements` are interpreted as ratio between satisfied bodyparts and total bodyparts. Higher level compound is calculated at higher priority, while bodypart with higher level compound is compatible with requirement of lower level compound, if it is not counted.
  * @typedef { {[role : string] : CreepRoleDescription } } RoleDescription
  */
@@ -62,10 +63,7 @@ class TaskDescriptor {
         if (this.boundTask.FetchEmployeeLength(role) >= this.roleDescription[role].maximumNumber) return false;
         /* Checking Tags */
         if (object.memory.tag !== this.roleDescription[role].tag && (this.roleDescription[role].allowOtherTags || []).indexOf(object.memory.tag) === -1) return false;
-        if (this.roleDescription[role].ticksToLive && object.spawning && (!object.ticksToLive || object.ticksToLive < Math.min(this.roleDescription[role].ticksToLive(object), object instanceof Creep ? CREEP_LIFE_TIME - 5 : POWER_CREEP_LIFE_TIME - 5))) {
-            /**
-             * @DEBUG
-             */
+        if (this.roleDescription[role].ticksToLive && !object.spawning && (!object.ticksToLive || object.ticksToLive < Math.min(this.roleDescription[role].ticksToLive(object), object instanceof Creep ? CREEP_LIFE_TIME - 5 : POWER_CREEP_LIFE_TIME - 5))) {
             global.Log.info(`${this.boundTask.name}`, global.Dye.red("refuses"), `${object} since it requires at least ${this.roleDescription[role].ticksToLive(object)} ticks to operate`);
             return false;
         }
@@ -135,8 +133,60 @@ class TaskDescriptor {
  * @interface
  */
 class TaskCreepDescriptor {
-    get BodyRequirements() {
-        return this.roleDescription.bodyMinimumRequirements;
+    /**
+     * @private
+     * @param {{[body in BodyPartConstant]? : number}} body
+     * @param {number} maximumEnergy
+     * @returns {{[body in BodyPartConstant]? : number}}
+     */
+    shrinkBodyParts(body, maximumEnergy) {
+        let sumOfEnergy = evaluateCost(body);
+        if (sumOfEnergy <= maximumEnergy) return body;
+        const ret = {};
+        for (const bodyPart in body) {
+            ret[bodyPart] = Math.max(1, Math.min(body[bodyPart], Math.floor((maximumEnergy / sumOfEnergy) * body[bodyPart])));
+        }
+        return ret;
+    }
+    /**
+     * @private
+     * @param {Room} room
+     * @returns {{[body in BodyPartConstant]? : number}}
+     */
+    parseBodyParts(room) {
+        if (this.Mode === "shrinkToEnergyAvailable") return this.shrinkBodyParts(this.roleDescription.bodyMinimumRequirements, room.energyAvailable);
+        else if (this.Mode === "shrinkToEnergyCapacity") return this.shrinkBodyParts(this.roleDescription.bodyMinimumRequirements, room.energyCapacityAvailable);
+        else if (this.Mode === "expand") return this.shrinkBodyParts(this.ExpandFunction(room), room.energyAvailable);
+    }
+    /**
+     * @param {Room} room
+     * @param {"bodyParts" | "cost"} key
+     */
+    fetch(room, key) {
+        if (!this.roomName2bodyParts[room.name] || this.roomName2bodyParts[room.name].tick < Game.time) {
+            if (!this.roomName2bodyParts[room.name]) this.roomName2bodyParts[room.name] = {};
+            this.roomName2bodyParts[room.name].tick = Game.time;
+            this.roomName2bodyParts[room.name].bodyParts = this.parseBodyParts(room);
+            this.roomName2bodyParts[room.name].cost = evaluateCost(this.roomName2bodyParts[room.name].bodyParts);
+            return this.roomName2bodyParts[room.name][key];
+        } else return this.roomName2bodyParts[room.name][key];
+    }
+    /**
+     * @param {Room} room
+     */
+    BodyRequirements(room) {
+        if (this.Mode === "static") return this.roleDescription.bodyMinimumRequirements;
+        return this.fetch(room, "bodyParts");
+    }
+    /**
+     * @param {Room} room
+     */
+    Cost(room) {
+        if (this.Mode === "static") {
+            if (!this[`_static_cost`]) this[`_static_cost`] = evaluateCost(this.roleDescription.bodyMinimumRequirements);
+            return this[`_static_cost`];
+        }
+        return this.fetch(room, "cost");
     }
     get MinimumAmount() {
         return this.roleDescription.minimumNumber;
@@ -146,10 +196,6 @@ class TaskCreepDescriptor {
     }
     get CurrentAmount() {
         return this.boundTask.FetchEmployeeLength(this.role);
-    }
-    get IsFunctioning() {
-        if (!this.boundTask || this.boundTask.State === "dead") return false;
-        return true;
     }
     get Tag() {
         return this.roleDescription.tag;
@@ -170,6 +216,9 @@ class TaskCreepDescriptor {
     get WorkingPos() {
         return this.roleDescription.workingPos;
     }
+    get SpawnPriority() {
+        return this.roleDescription.spawnPriority || 0;
+    }
     /**
      * @param {Task} task
      * @param {string} role
@@ -178,13 +227,14 @@ class TaskCreepDescriptor {
     constructor(task, role, groupTag) {
         /** @private */
         this.boundTask = task;
-        if (!this.boundTask.Descriptor.RoleDescription[role] || (!this.boundTask.Descriptor.RoleDescription[role].bodyMinimumRequirements && !this.boundTask.Descriptor.RoleDescription[role].expandFunction)) console.log(`<p style="color:red;display:inline;">Fail to create creep descriptor for Role : ${role} of Task : ${task}</p>`);
         /** @private */
         this.role = role;
         /** @type {CreepRoleDescription} @private */
         this.roleDescription = this.boundTask.Descriptor.RoleDescription[role];
         /** @private */
         this.groupTag = groupTag;
+        /** @type { {[roomName : string] : {tick : number, bodyParts : {[body in BodyPartConstant]? : number}, cost : number}} } */
+        this.roomName2bodyParts = {};
     }
 }
 /** 
@@ -241,6 +291,7 @@ class Task {
             if (this.sufficientRoles.indexOf(role) !== -1) {
                 if (this.role2length[role].length < this.descriptor.RoleDescription[role].minimumNumber) {
                     this.sufficientRoles.splice(this.sufficientRoles.indexOf(role), 1);
+                    global.CreepSpawnManager.Switch(this.role2descriptorIndex[role], "waiting");
                     global.TaskManager.Switch(this.index, "waiting");
                     this._status = "waiting";
                 }
@@ -281,6 +332,7 @@ class Task {
         if (this.sufficientRoles.indexOf(role) === -1) {
             if (this.role2length[role].length >= this.descriptor.RoleDescription[role].minimumNumber) {
                 this.sufficientRoles.push(role);
+                global.CreepSpawnManager.Switch(this.role2descriptorIndex[role], "working");
                 if (this.sufficientRoles.length === this.roles.length) {
                     // Switch to Working State
                     global.TaskManager.Switch(this.index, "working");
@@ -395,7 +447,8 @@ class Task {
     FetchEmployees(role) {
         if (!this[`_employees_${role}_tick`] || this[`_employees_${role}_tick`] < Game.time) {
             if (!this.role2creepIds[role]) return this[`_employees_${role}`] = [];
-            return this[`_employees_${role}`] = this.role2creepIds[role].map(Game.getObjectById).filter(c => !c.spawning && this.Boost(c)); 
+            if (!this.Descriptor.RoleDescription[role].bodyBoostRequirements) return this[`_employees_${role}`] = this.role2creepIds[role].map(Game.getObjectById).filter(c => !c.spawning);
+            else return this[`_employees_${role}`] = this.role2creepIds[role].map(Game.getObjectById).filter(c => !c.spawning && this.Boost(c));
         } else return this[`_employees_${role}`];
     }
     /**
@@ -423,6 +476,7 @@ class Task {
         if (this.sufficientRoles.indexOf(role) !== -1) {
             if (this.role2length[role].length < this.descriptor.RoleDescription[role].minimumNumber) {
                 this.sufficientRoles.splice(this.sufficientRoles.indexOf(role), 1);
+                global.CreepSpawnManager.Switch(this.role2descriptorIndex[role], "waiting");
                 global.TaskManager.Switch(this.index, "waiting");
                 this._status = "waiting";
             }
@@ -478,13 +532,16 @@ class Task {
          * Add the function to release all workers if this task is `dead` here.
          * NOTICE that except for this.selfCheck, ids stored in this.employee2role should be trusted to be valid.
          */
-        this.selfCheck = function() {
+        this.selfCheck = () => {
             const ret = this._selfCheck();
             if (ret === "dead") {
+                /** Fire All Employed Creeps */
                 for (const id in this.employee2role) CleanTaskById(id);
+                /** Remove All Registered Creep Descriptors */
+                for (const role in this.role2descriptorIndex) global.CreepSpawnManager.Remove(this.role2descriptorIndex[role]);
             }
             return ret;
-        }.bind(this);
+        };
         /**
          * @type {(obj : GameObject) => number}
          */
@@ -536,6 +593,8 @@ class Task {
             }
             return firedEmployees;
         }.bind(this);
+        /** @type { {[role : string] : string} } @private */
+        this.role2descriptorIndex = {};
         /**
          * Register needs of employees, especially for creeps, into the Central Creep Manager
          * Notice that needs should be bound with the State, so that whenever State becomes `dead`, the needs are invalid.
@@ -543,16 +602,10 @@ class Task {
         for (const role in this.descriptor.RoleDescription) {
             /* Creep Role */
             if (this.descriptor.RoleDescription[role].bodyMinimumRequirements || this.descriptor.RoleDescription[role].expandFunction) {
-                global.CreepSpawnManager.Register({creepDescriptor : new TaskCreepDescriptor(this, role, this.descriptor.RoleDescription[role].groupTag), roomName : this.mountRoomName});
+                this.role2descriptorIndex[role] = global.CreepSpawnManager.Register({creepDescriptor : new TaskCreepDescriptor(this, role, this.descriptor.RoleDescription[role].groupTag), roomName : this.mountRoomName});
             }
-            /**
-             * @TODO
-             * Needs for roles of other objects
-             */
         }
-        /**
-         * Register this into global.TaskManager
-         */
+        /** Register this into global.TaskManager */
         this.index = global.TaskManager.Register(this.mountRoomName, this);
     }
 }

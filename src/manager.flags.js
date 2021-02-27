@@ -1,6 +1,7 @@
 /**
  * @module manager.flags
  */
+const profiler = require("./screeps-profiler");
 class FlagManager {
     /**
      * @param {Flag | string} flag_or_flagName
@@ -27,7 +28,7 @@ class FlagManager {
     }
     constructor() {}
 }
-
+profiler.registerClass(FlagManager, "FlagManager");
 const flagManager = new FlagManager();
 /** @type {import("./lucy.app").AppLifecycleCallbacks} */
 const FlagPlugin = {

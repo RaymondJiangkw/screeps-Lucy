@@ -11,6 +11,7 @@ const Task                  = require("./task.prototype").Task;
 const TaskDescriptor        = require("./task.prototype").TaskDescriptor;
 const decideRoomStatus      = require("./util").decideRoomStatus;
 const isMyRoom              = require("./util").isMyRoom;
+const profiler = require("./screeps-profiler");
 const DEFEND_RETURN_VALID_DURATION_TICKS = CREEP_LIFE_TIME * 10;
 const DEFEND_RETURN_VALID_DURATION_TICKS_OFFSET = CREEP_LIFE_TIME;
 
@@ -244,6 +245,8 @@ class DefendManager {
 if (!Memory._defendTargetRooms) Memory._defendTargetRooms = {};
 
 const defendManager = new DefendManager();
+
+profiler.registerClass(DefendManager, "DefendManager");
 
 /** @type {import("./lucy.app").AppLifecycleCallbacks} */
 const DefendPlugin = {

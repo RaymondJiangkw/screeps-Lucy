@@ -181,7 +181,7 @@ function giveSpawnBehaviors() {
                         });
                         return firedCreeps;
                     }
-                }, {targetId : resource.id, structureIds : nearSpawnExtensions.concat(this.room.spawns).map(s => s.id), transaction : transaction});
+                }, {targetId : resource.id, structureIds : nearSpawnExtensions.filter(e => e.pos.getRangeTo(global.Map.getCenter(this.room.name)) > 1).concat(this.room.spawns).map(s => s.id), transaction : transaction});
             } else {
                 // Unit Center Tasks Control
                 this.room.centralSpawn.SetSignal("all", "extensions", true);
@@ -256,7 +256,7 @@ function giveSpawnBehaviors() {
                         const farFromSpawnExtensionsLackingEnergy = _.sum(farFromSpawnExtensions.map(e => e.store.getCapacity(RESOURCE_ENERGY) - e.store.getUsedCapacity(RESOURCE_ENERGY)));
                         if (farFromSpawnExtensionsLackingEnergy > 0 && checkForStore(Game.getObjectById(this.taskData.targetId), RESOURCE_ENERGY) === 0) {
                             Lucy.Timer.add(Game.time + getCacheExpiration(nextFillingTIMEOUT, nextFillingOFFSET), issueFarFromSpawnEnergyFilling, this.mountObj.id, [], "Filling Energies for far-from-spawn Structures");
-                            global.Log.error("Fail to operate", global.Dye.yellow("Filling Extensions"), `in ${this.room.name} because of shortage of energy of ${this.taskData.targetId}`);
+                            global.Log.error("Fail to operate", global.Dye.yellow("Filling Extensions"), `in ${this.mountRoomName} because of shortage of energy of ${this.taskData.targetId}`);
                             return "dead";
                         }
                         if (farFromSpawnExtensionsLackingEnergy > 0) return "working";
@@ -428,7 +428,8 @@ function giveControllerBehaviors() {
                 allowEmptyTag : true,
                 mode : "expand",
                 workingPos : this.pos,
-                confinedInRoom : false
+                confinedInRoom : false,
+                spawnPriority : 4
             }
         }), {
             selfCheck : function() {
@@ -534,7 +535,8 @@ function giveContainerBehaviors() {
                         [MOVE] : Math.min(Math.floor((workBodyParts + 1) / 2), 50 - workBodyParts - 1)
                     },
                     mode : "shrinkToEnergyAvailable",
-                    workingPos : this.pos
+                    workingPos : this.pos,
+                    spawnPriority : isMineral(target) ? undefined : 3
                 }
             }), {
                 selfCheck : function() {
@@ -559,6 +561,11 @@ function giveContainerBehaviors() {
                     if (isMineral(mineral)) {
                         if (mineral.mineralAmount === 0) {
                             Lucy.Timer.add(Game.time + mineral.ticksToRegeneration, container.triggerHarvesting, container.id, [], `Harvesting in room ${mineral.room.name} for ${mineral}`);
+                            global.Log.room(mineral.pos.roomName, global.Dye.green(`Harvesting`), `${icon(mineral.mineralType)} Task finishes.`);
+                            return "dead";
+                        }
+                        if (container.store.getFreeCapacity() === 0) {
+                            Lucy.Timer.add(Game.time + getCacheExpiration(CREEP_LIFE_TIME, CREEP_LIFE_TIME / 10), container.triggerHarvesting, container.id, [], `Harvesting in room ${mineral.room.name} for ${mineral}`);
                             global.Log.room(mineral.pos.roomName, global.Dye.green(`Harvesting`), `${icon(mineral.mineralType)} Task finishes.`);
                             return "dead";
                         }

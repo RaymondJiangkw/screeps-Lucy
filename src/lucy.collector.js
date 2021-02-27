@@ -4,6 +4,7 @@
  * 
  * @typedef {Collector} Collector
  */
+const profiler = require("./screeps-profiler");
 class Collector {
     /**
      * @returns {Room[]}
@@ -31,7 +32,7 @@ class Collector {
     }
     constructor() {}
 }
-
+profiler.registerClass(Collector, "Lucy.Collector");
 module.exports = {
     Collector : Collector
 };

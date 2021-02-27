@@ -8,6 +8,7 @@
 const getCacheExpiration =  require("./util").getCacheExpiration;
 const Task               =  require("./task.prototype").Task;
 const TaskDescriptor     =  require("./task.prototype").TaskDescriptor;
+const profiler = require("./screeps-profiler");
 const ATTACK_RETURN_VALID_DURATION_TICKS = CREEP_LIFE_TIME * 10;
 const ATTACK_RETURN_VALID_DURATION_TICKS_OFFSET = CREEP_LIFE_TIME;
 
@@ -237,6 +238,8 @@ class AttackManager {
         this.statistics = {};
     }
 }
+
+profiler.registerClass(AttackManager, "AttackManager");
 
 if (!Memory._attackTargetRooms) Memory._attackTargetRooms = {};
 

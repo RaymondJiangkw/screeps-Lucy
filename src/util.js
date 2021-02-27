@@ -154,7 +154,7 @@ class MyArray extends Array {
         let maxIndex = null, maxValue = null;
         for (let i = 0; i < this.length; i++) {
             const S = mapping(this[i]);
-            if (!S) continue;
+            if (S === null || S === undefined) continue;
             const number = toNumber(S);
             if (maxValue === null || number > maxValue) {
                 maxValue = number;

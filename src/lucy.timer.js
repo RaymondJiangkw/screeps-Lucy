@@ -2,6 +2,7 @@
  * @module lucy.timer
  * @typedef {Timer} Timer
  */
+const profiler = require("./screeps-profiler");
 class Timer extends Array {
     /**
      * Add Scheduled Task
@@ -39,7 +40,7 @@ class Timer extends Array {
         // console.log(`Timer -> ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`);
     }
 }
-
+profiler.registerClass(Timer, "Lucy.Timer");
 module.exports = {
     Timer : Timer
 };

@@ -11,6 +11,9 @@ const calcRoomDistance              = require('./util').calcRoomDistance;
 const parseBodyPartsConfiguration   = require('./util').parseBodyPartsConfiguration;
 const { Notifier } = require("./visual.notifier");
 const profiler = require("./screeps-profiler");
+
+const DEFAULT = "default";
+
 /**
  * Class Representation for CreepSpawn
  * Single Class
@@ -18,25 +21,22 @@ const profiler = require("./screeps-profiler");
 class CreepSpawnManager {
     /**
      * @private
-     * @param {string} roomName
      */
-    updateRoomCache(roomName) {
-        if (this._roomCheckTick[roomName] && this._roomCheckTick[roomName] === Game.time) return;
-        this._roomCheckTick[roomName] = Game.time;
-        /* Updating Instant Energy Cost At Current Tick */
-        if (Game.rooms[roomName] && isMyRoom(Game.rooms[roomName])) {
-            if (!Game.rooms[roomName]._instantEnergyCost) Game.rooms[roomName]._instantEnergyCost = 0;
-        }
-        /* Because of the potential dying of Task and the linking before using TaskDescriptor, the checking should be done at every tick. */
-        if (this.room2creepSpawns[roomName]) this.room2creepSpawns[roomName] = _.filter(this.room2creepSpawns[roomName], a => a.IsFunctioning);
-        else this.room2creepSpawns[roomName] = [];
-        if (this.room2creepSpawnsPatch[roomName]) for (const groupTag in this.room2creepSpawnsPatch[roomName]) {
-            /* Preprossessing */
-            this.room2creepSpawnsPatch[roomName][groupTag] = _.filter(this.room2creepSpawnsPatch[roomName][groupTag], a => a.IsFunctioning);
-            this.room2creepSpawnsPatch[roomName][groupTag].CurrentAmount = _.sum(this.room2creepSpawnsPatch[roomName][groupTag].map(a => a.CurrentAmount));
-            // console.log(this.room2creepSpawnsPatch[roomName][groupTag].CurrentAmount, "|", this.room2creepSpawnsPatch[roomName][groupTag].map(a => a.CurrentAmount));
-            this.room2creepSpawnsPatch[roomName][groupTag].MinimumAmount = _.sum(this.room2creepSpawnsPatch[roomName][groupTag].map(a => a.MinimumAmount));
-        } else this.room2creepSpawnsPatch[roomName] = {};
+    getIndex() {
+        return `${this.descriptorIndex++}`;
+    }
+    /**
+     * @param {string} index
+     */
+    Remove(index) {
+        const roomName = this.index2status[index].roomName;
+        const tag = this.index2status[index].tag;
+        var info = this.roomName2information[roomName][this.index2status[index].type];
+        --info[tag].total;
+        const statusDescriptorPools = info[tag][this.index2status[index].status];
+        statusDescriptorPools.splice(statusDescriptorPools.indexOf(index), 1);
+        delete this.index2status[index];
+        delete this.descriptorPools[index];
     }
     /**
      * Register self into CreepSpawnManager
@@ -44,24 +44,78 @@ class CreepSpawnManager {
      * @param { {creepDescriptor : import("./task.prototype").TaskCreepDescriptor, roomName : string} } descriptor
      */
     Register(descriptor) {
-        this.roomNames.add(descriptor.roomName);
-        if (!descriptor.creepDescriptor.GroupTag) {
-            this.room2creepSpawns[descriptor.roomName] = this.room2creepSpawns[descriptor.roomName] || [];
-            this.room2creepSpawns[descriptor.roomName].push(descriptor.creepDescriptor);
-        } else {
-            if (!this.room2creepSpawnsPatch[descriptor.roomName]) this.room2creepSpawnsPatch[descriptor.roomName] = {};
-            if (!this.room2creepSpawnsPatch[descriptor.roomName][descriptor.creepDescriptor.GroupTag]) {
-                this.room2creepSpawnsPatch[descriptor.roomName][descriptor.creepDescriptor.GroupTag] = [];
-                Notifier.register(descriptor.roomName, `Grouped Creeps`, `${descriptor.creepDescriptor.GroupTag}`, () => `${this.room2creepSpawnsPatch[descriptor.roomName][descriptor.creepDescriptor.GroupTag].CurrentAmount || 0}/${this.room2creepSpawnsPatch[descriptor.roomName][descriptor.creepDescriptor.GroupTag].MinimumAmount || 0}`);
-            }
-            this.room2creepSpawnsPatch[descriptor.roomName][descriptor.creepDescriptor.GroupTag].push(descriptor.creepDescriptor);
+        if (!this.roomName2information[descriptor.roomName]) {
+            this.roomName2information[descriptor.roomName] = {tags : {}, inRoomTags : {}};
         }
+        const tag = descriptor.creepDescriptor.GroupTag || "default";
+        /** @type {{[tag : string] : {working : Array<string>, waiting : Array<string>, total : number}} */
+        var info;
+        if (descriptor.creepDescriptor.IsConfinedInRoom) info = this.roomName2information[descriptor.roomName].inRoomTags;
+        else info = this.roomName2information[descriptor.roomName].tags;
+        if (!info[tag]) {
+            info[tag] = {total : 0, working : [], waiting : []};
+            /** Visual */
+            Notifier.register(descriptor.roomName, `Grouped Creeps`, `${descriptor.creepDescriptor.IsConfinedInRoom? "[*]" : "[ ]"} ${tag}`, () => `${_.sum(info[tag].waiting.map(index => this.descriptorPools[index].CurrentAmount)) + _.sum(info[tag].working.map(index => this.descriptorPools[index].CurrentAmount))}/${_.sum(info[tag].waiting.map(index => this.descriptorPools[index].MinimumAmount)) + _.sum(info[tag].working.map(index => this.descriptorPools[index].MinimumAmount))}`)
+        }
+        const index = this.getIndex();
+        this.descriptorPools[index] = descriptor.creepDescriptor;
+        ++info[tag].total;
+        info[tag].waiting.push(index);
+        this.index2status[index] = {roomName : descriptor.roomName, tag : tag, type : descriptor.creepDescriptor.IsConfinedInRoom? "inRoomTags" : "tags", "status" : "waiting"};
+        return index;
+    }
+    /**
+     * @param {string} index
+     * @param {"working" | "waiting"} status
+     */
+    Switch(index, status) {
+        const originalStatus = this.index2status[index].status;
+        if (originalStatus === status) return;
+        const pool = this.roomName2information[this.index2status[index].roomName][this.index2status[index].type][this.index2status[index].tag];
+        pool[originalStatus].splice(pool[originalStatus].indexOf(index), 1);
+        pool[status].push(index);
+        this.index2status[index].status = status;
+    }
+    /**
+     * @TODO Special Optimization for Controller Level 8 ?
+     * NOTICE : Cache is not implemented here, since, in a single tick, state of saturation
+     * could change.
+     * @param {string} roomName
+     * @param {"tags" | "inRoomTags"} type
+     * @param {string} tag
+     * @returns {boolean}
+     */
+    IsSaturated(roomName, type, tag) {
+        const descriptors = this.roomName2information[roomName][type][tag];
+        if (descriptors.total === 0) return true;
+        /**
+         * I expect the following property :
+         *  - expectedNum should be logorithm-like.
+         *  - When MinimumAmount = 1, expectedNum should be 1.
+         *  - When MinimumAmount = e^2, expectedNum should be 2.
+         */
+        const expectedNum = Math.floor(Math.log(descriptors.total) * 0.5 + 1);
+        const workingNum = descriptors.working.length;
+        /**
+         * NOTICE : For a group of Task, there could be the case that some of them still needs more workers and, when
+         * they employee more workers, the total workingNum remains the same.
+         */
+        if (workingNum < expectedNum) return false;
+        else return true;
+    }
+    /**
+     * @private
+     * @param {string} roomName
+     */
+    ableToHelp(roomName) {
+        const storedEnergy = global.ResourceManager.Sum(roomName, RESOURCE_ENERGY, {key : "default", type : "retrieve", allowStructureTypes : [STRUCTURE_STORAGE, STRUCTURE_TERMINAL, STRUCTURE_FACTORY], allowStore : true, allowToHarvest : false, confinedInRoom : true});
+        return storedEnergy >= Math.max(Game.rooms[roomName].energyCapacityAvailable, CONTROLLER_STRUCTURES[STRUCTURE_EXTENSION][6] * EXTENSION_ENERGY_CAPACITY[6] + CONTROLLER_STRUCTURES[STRUCTURE_SPAWN][6] * SPAWN_ENERGY_CAPACITY);
     }
     /**
      * Query returns the spawnable creep.
      * After querying, specific role from which the returned configuration is gotten will be ignored in the same tick in order to avoid over-production.
      * @param {string} roomName - Room Under Control
-     * @returns { {} | { body : {[body in BodyPartConstant]? : number}, memory : {}, workingPos? : RoomPosition} }
+     * @returns { null | { body : {[body in BodyPartConstant]? : number}, memory : {}, workingPos? : RoomPosition} }
      */
     Query(roomName) {
         /**
@@ -69,90 +123,40 @@ class CreepSpawnManager {
          * NOTICE: Neutral or Hostile rooms are also included in `adjacentRooms`.
          * Thus, as long as the TaskCreepDescriptors from those rooms are registered, they could be accessed, which allowing for much more flexibility.
          */
-        const adjacentRooms = Array.from(this.roomNames).sort((u, v) => calcRoomDistance(roomName, u) - calcRoomDistance(roomName, v));
-        /**
-         * @param {{[body in BodyPartConstant]? : number}} body
-         * @param {number} maximumEnergy
-         * @returns {{[body in BodyPartConstant]? : number}}
-         */
-        const shrinkBodyParts = (body, maximumEnergy) => {
-            if (evaluateCost(body) <= maximumEnergy) return body;
-            let sumOfEnergy = evaluateCost(body);
-            if (sumOfEnergy <= maximumEnergy) return body;
-            const ret = {};
-            for (const bodyPart in body) {
-                ret[bodyPart] = Math.max(1, Math.min(body[bodyPart], Math.round((maximumEnergy / sumOfEnergy) * body[bodyPart])));
-            }
-            return ret;
-        };
-        /**
-         * @param {import("./task.prototype").TaskCreepDescriptor} creepDescriptor
-         * @param {Room} room
-         * @returns {{[body in BodyPartConstant]? : number}}
-         */
-        const parseBodyParts = (creepDescriptor, room) => {
-            if (creepDescriptor.Mode === "static") return creepDescriptor.BodyRequirements;
-            else if (creepDescriptor.Mode === "shrinkToEnergyAvailable") return shrinkBodyParts(creepDescriptor.BodyRequirements, room.energyAvailable);
-            else if (creepDescriptor.Mode === "shrinkToEnergyCapacity") return shrinkBodyParts(creepDescriptor.BodyRequirements, room.energyCapacityAvailable);
-            else if (creepDescriptor.Mode === "expand") return shrinkBodyParts( creepDescriptor.ExpandFunction(room), room.energyAvailable);
-        };
-        const storedEnergy = global.ResourceManager.Sum(roomName, RESOURCE_ENERGY, {key : "default", type : "retrieve", allowStructureTypes : [STRUCTURE_STORAGE, STRUCTURE_TERMINAL, STRUCTURE_FACTORY], allowStore : true, allowToHarvest : false});
-        let chosen = {};
+        const adjacentRooms = Object.keys(this.roomName2information).sort((u, v) => calcRoomDistance(roomName, u) - calcRoomDistance(roomName, v));
+        const ableToHelp = this.ableToHelp(roomName);
+        let index = null;
         for (const room of adjacentRooms) {
-            if (room !== roomName && Memory.rooms[room] && Memory.rooms[room].rejectHelp && Game.rooms[room] && Game.rooms[room].spawns.length > 0) continue;
-            // When energy is not enough in the `roomName`, its first priority is to sustain operations in the room.
-            if (room !== roomName && storedEnergy < Math.min(Game.rooms[roomName].energyCapacityAvailable, CONTROLLER_STRUCTURES[STRUCTURE_EXTENSION][6] * EXTENSION_ENERGY_CAPACITY[6] + CONTROLLER_STRUCTURES[STRUCTURE_SPAWN][6] * SPAWN_ENERGY_CAPACITY)) continue;
-            this.updateRoomCache(room);
-            /**
-             * @type {Array<import("./task.prototype").TaskCreepDescriptor>}
-             */
-            let totalRequestingRoles = this.room2creepSpawns[room]
-                .filter(a => room === roomName || !a.IsConfinedInRoom)
-                .filter(a => a.CurrentAmount < a.MinimumAmount)
-                .filter(a => evaluateCost(parseBodyParts(a, Game.rooms[roomName])) <= (Game.rooms[roomName].energyAvailable - Game.rooms[roomName]._instantEnergyCost));
-            for (const groupTag in this.room2creepSpawnsPatch[room]) {
-                /**
-                 * @TODO Special Optimization for Controller Level 8 ?
-                 * I expect the following property :
-                 *  - expectedNum should be logorithm-like.
-                 *  - When MinimumAmount = 1, expectedNum should be 1.
-                 *  - When MinimumAmount = e^2, expectedNum should be 2.
-                 */
-                const expectedNum = Math.floor(Math.log(this.room2creepSpawnsPatch[room][groupTag].MinimumAmount) * 0.5 + 1);
-                if (this.room2creepSpawnsPatch[room][groupTag].CurrentAmount >= expectedNum) continue;
-                // console.log(`[${room}] ${groupTag} is not saturated ${this.room2creepSpawnsPatch[room][groupTag].CurrentAmount}:${expectedNum}.`);
-                totalRequestingRoles = totalRequestingRoles.concat(
-                    this.room2creepSpawnsPatch[room][groupTag]
-                        .filter(a => room === roomName || !a.IsConfinedInRoom)
-                        .filter(a => a.CurrentAmount < a.MinimumAmount)
-                        .filter(a => evaluateCost(parseBodyParts(a, Game.rooms[roomName])) <= (Game.rooms[roomName].energyAvailable - Game.rooms[roomName]._instantEnergyCost))
-                );
+            if (room !== roomName && (!ableToHelp || (Memory.rooms[room] && Memory.rooms[room].rejectHelp && Game.rooms[room] && Game.rooms[room].spawns.length > 0))) continue;
+            /** @type { ["inRoomTags", "tags"] | ["tags"] } */
+            var candidates;
+            if (room === roomName) candidates = ["inRoomTags", "tags"];
+            else candidates = ["tags"];
+            for (const candidate of candidates) { // 1~2
+                for (const tag in this.roomName2information[room][candidate]) { // 1~5
+                    if ((tag === DEFAULT && this.roomName2information[room][candidate][tag].waiting.length > 0) || !this.IsSaturated(room, candidate, tag)) {
+                        const target = this.roomName2information[room][candidate][tag].waiting.filter(index => this.descriptorPools[index].Cost(Game.rooms[roomName]) <= Game.rooms[roomName].energyAvailable).select(v => v, index => this.descriptorPools[index].SpawnPriority);
+                        if (target && this.descriptorPools[target]._spawnTick !== Game.time) {
+                            if (!index || this.descriptorPools[index].SpawnPriority < this.descriptorPools[target].SpawnPriority) index = target;
+                        }
+                    }
+                }
             }
-            totalRequestingRoles = _.shuffle(totalRequestingRoles);
-            // console.log(totalRequestingRoles.map(v => `${v.GroupTag}:${v.Tag}, ${v.MinimumAmount}:${v.CurrentAmount}\n`));
-            for (const descriptor of totalRequestingRoles) {
-                if (descriptor._spawnTick && descriptor._spawnTick === Game.time) continue;
-                chosen.body = parseBodyParts(descriptor, Game.rooms[roomName]);
-                /* Prepare Initial Memory */
-                chosen.memory = {};
-                chosen.workingPos = descriptor.WorkingPos || undefined;
-                if (descriptor.Tag) chosen.memory.tag = descriptor.Tag;
-                descriptor._spawnTick = Game.time;
-                break;
+            if (index) {
+                this.descriptorPools[index]._spawnTick = Game.time;
+                return {body : this.descriptorPools[index].BodyRequirements(Game.rooms[roomName]), memory : {tag : this.descriptorPools[index].Tag || undefined}, workingPos : this.descriptorPools[index].WorkingPos || undefined};
             }
-            if (chosen.body) break;
         }
-        return chosen;
+        return null;
     }
     constructor() {
-        /** @type { {[roomName : string] : Array<import("./task.prototype").TaskCreepDescriptor>} } @private */
-        this.room2creepSpawns = {};
-        /** @type { {[roomName : string] : {[patchTag : string] : Array<import("./task.prototype").TaskCreepDescriptor>}} } @private */
-        this.room2creepSpawnsPatch = {};
-        /** @type {Set<string>} @private */
-        this.roomNames = new Set();
-        /** @type { {[roomName : string] : number} } @private*/
-        this._roomCheckTick   = {};
+        /** @type { {[roomName : string] : {tags : {[tag : string] : {working : Array<string>, waiting : Array<string>, total : number}}, inRoomTags : {[tag : string] : {working : Array<string>, waiting : Array<string>, total : number}}}} } @private */
+        this.roomName2information = {};
+        /** @type { {[index : string] : import("./task.prototype").TaskCreepDescriptor} } @private */
+        this.descriptorPools      = {};
+        this.descriptorIndex      = 0;
+        /** @type { {[index : string] : {roomName : string, type : "inRoomTags" | "tags", tag : string, status : "working" | "waiting"}} } @private */
+        this.index2status         = {};
     }
 };
 const _creepSpawnManager = new CreepSpawnManager();
@@ -174,7 +178,8 @@ const CreepSpawnManagerPlugin = {
             if (candidateSpawns.length === 0) continue;
             // NOTICE : In order to avoid energy-consumption-overlapping, for each tick, only one Spawn will be allowed to spawn Creep.
             const spawnedCreep = global.CreepSpawnManager.Query(roomName);
-            if (!spawnedCreep.body) continue;
+            ticks[roomName] = `${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`;
+            if (!spawnedCreep) continue;
             global.Log.room(roomName, global.Emoji.baby, global.Dye.yellow(`Spawning ${spawnedCreep.memory.tag}!`));
             /** Record Spawn Room Name */
             spawnedCreep.memory.spawnRoomName = roomName;

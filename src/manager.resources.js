@@ -85,20 +85,9 @@ class ResourceDescriptor {
          * @type { () => number }
          * @private
          */
-        this.checkForAmountFunc = function() {
-            /* Edge Case : Expiration of Object */
-            if (!this.Obj) return 0;
-            const possessingNumber = this._checkForAmountFunc(this.Obj);
-            /* Special Case : Producer (Source, Mineral) ; Otherwise, one unit will be subtracted twice. */
-            if (this.type === RESOURCE_POSSESSING_TYPES.PRODUCING) return possessingNumber;
-            /**
-             * @type {Array<import('./money.prototype').Transaction>}
-             */
-            const dealingResourcesTransaction = this.Obj.account.Query("asSeller", {transactionType : "resource"}, t => t.State === TRANSACTION_STATE.WORKING && t.Description.info.resourceType === this.ResourceType);
-            let sumOfDealtAmount = 0;
-            for (const t of dealingResourcesTransaction) sumOfDealtAmount += t.Description.info.amount;
-            return possessingNumber - sumOfDealtAmount;
-        }.bind(this);
+        this.checkForAmountFunc = () => {
+            return this._checkForAmountFunc(this.Obj) - (this.Obj.account.resourceTransactions["asSeller"][this.resourceType] || 0);
+        };
     }
 };
 /**
@@ -155,18 +144,9 @@ class StoringDescriptor {
          * @type { () => number }
          * @private
          */
-        this.checkForFreeAmountFunc = function() {
-            /* Edge Case : Expiration of Object */
-            if (!this.Obj) return 0;
-            const possessingNumber = this._checkForFreeAmountFunc(this.Obj);
-            /**
-             * @type { Array<import("./money.prototype").Transaction> }
-             */
-            const dealingResourcesTransaction = this.Obj.account.Query("asBuyer", {transactionType : "resource"}, t => t.State === TRANSACTION_STATE.WORKING && t.Description.info.resourceType === this.ResourceType);
-            let sumOfDealtAmount = 0;
-            for (const t of dealingResourcesTransaction) sumOfDealtAmount += t.Description.info.amount;
-            return possessingNumber - sumOfDealtAmount;
-        }.bind(this);
+        this.checkForFreeAmountFunc = () => {
+            return this._checkForFreeAmountFunc(this.Obj) - this.Obj.account.resourceTransactions["asBuyer"]["total"];
+        };
     }
 };
 
@@ -233,6 +213,7 @@ class ResourceManager {
      * @returns {Number}
      */
     Sum(roomName, resourceType, options) {
+        if (!Game.rooms[roomName]) return 0;
         _.defaults(options, {key : "default", allowStore : true, allowToHarvest : true, confinedInRoom : true, excludeDefault : false, allowStructureTypes : []});
         this.updateRoomCache(roomName, resourceType, options.type);
         if (options.type === "retrieve") {
@@ -322,7 +303,7 @@ class ResourceManager {
                                 (a.Id !== id) &&
                                 (a.Amount > 0) &&
                                 (options.allowStructureTypes.length === 0 || options.allowStructureTypes.includes(a.StructureType)) &&
-                                ((options.allowStore && a.HasStore) || (options.allowToHarvest && a.Harvestable))
+                                ((options.allowStore && a.HasStore) || (options.allowToHarvest && global.MapMonitorManager.FetchStructureWithTag(room, "forSource", STRUCTURE_CONTAINER).length === 0 && a.Harvestable))
                             )
                             // Generally `Store` is preferred to `Harvestable`
                             .select(v => v, a => (a.Amount - amount) - (a.Harvestable? harvestablePenalty : 0)) || []

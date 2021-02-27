@@ -11,6 +11,7 @@ const Response        = require("./util").Response;
 const checkForStore   = require("./util").checkForStore;
 const getPrice        = require("./util").getPrice;
 const Transaction     = require("./money.prototype").Transaction;
+const profiler = require("./screeps-profiler");
 /** @type { {[id : string] : {[roomName : string] : {[resourceType in ResourceConstant]? : number}} } } */
 const sendOrders = {};
 /** @type { {[id : string] : {[resourceType in ResourceConstant]? : number}} } */
@@ -324,7 +325,7 @@ class TerminalManager {
     }
 }
 const _terminalManager = new TerminalManager();
-
+profiler.registerClass(TerminalManager, "TerminalManager");
 /** @type {import("./lucy.app").AppLifecycleCallbacks} */
 const TerminalPlugin = {
     init : () => global.TerminalManager = _terminalManager,

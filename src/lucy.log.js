@@ -10,7 +10,7 @@
  * @typedef {Event} Event
  * @typedef {LogPool} LogPool
  */
-
+const profiler = require("./screeps-profiler");
 /** 
  * Declaration of all possible types of event
  * @enum {string}
@@ -466,7 +466,7 @@ class LogPool {
         };
     }
 }
-
+profiler.registerClass(LogPool, "Lucy.LogPool");
 module.exports = {
     EVENT_TYPES: EVENT_TYPES,
     EventTaskStatusChange: EventTaskStatusChange,

@@ -7,11 +7,13 @@
  * @typedef {"cash" | "borrowed"} MoneyType
  * @typedef { {type : "resource", info : { resourceType : ResourceConstant, amount : Number }} } TransactionDescription
  * @typedef {Transaction} Transaction
+ * @typedef {Account} Account
  */
 const { EventMoneyIn, EventMoneyOut }   = require('./lucy.log');
 const checkForStore                     = require('./util').checkForStore;
 const isSpawn                           = require('./util').isSpawn;
 const isController                      = require('./util').isController;
+const profiler = require("./screeps-profiler");
 /* Record All Accounts */
 const accounts      = {};
 /** 
@@ -100,6 +102,12 @@ class Account {
             /* Push Transaction */
             this.transactions["asBuyer"][transaction.Seller.id].push(transaction);
             this.transactions["asBuyer"][transaction.Description.type].push(transaction);
+            /* Information Cache */
+            if (transaction.Description.type === "resource") {
+                this.resourceTransactions["asBuyer"][transaction.Description.info.resourceType] = this.resourceTransactions["asBuyer"][transaction.Description.info.resourceType] || 0;
+                this.resourceTransactions["asBuyer"][transaction.Description.info.resourceType] += transaction.Description.info.amount;
+                this.resourceTransactions["asBuyer"]["total"] += transaction.Description.info.amount;
+            }
         } else if (type === "asSeller") {
             /* Initialize Storing Array */
             this.transactions["asSeller"][transaction.Buyer.id] = this.transactions["asSeller"][transaction.Buyer.id] || [];
@@ -107,6 +115,12 @@ class Account {
             /* Push Transaction */
             this.transactions["asSeller"][transaction.Buyer.id].push(transaction);
             this.transactions["asSeller"][transaction.Description.type].push(transaction);
+            /* Information Cache */
+            if (transaction.Description.type === "resource") {
+                this.resourceTransactions["asSeller"][transaction.Description.info.resourceType] = this.resourceTransactions["asSeller"][transaction.Description.info.resourceType] || 0;
+                this.resourceTransactions["asSeller"][transaction.Description.info.resourceType] += transaction.Description.info.amount;
+                this.resourceTransactions["asSeller"]["total"] += transaction.Description.info.amount;
+            }
         }
     }
     /**
@@ -128,6 +142,11 @@ class Account {
         if (!isSuccess) return false;
         if (type === "asBuyer") {
             if (!this.transactions["asBuyer"][transaction.sellerId]) return false;
+            /* Information Cache Update */
+            if (transaction.Description.type === "resource") {
+                this.resourceTransactions["asBuyer"][transaction.Description.info.resourceType] -= transaction.Description.info.amount;
+                this.resourceTransactions["asBuyer"]["total"] -= transaction.Description.info.amount;
+            }
             for (let i = 0; i < this.transactions["asBuyer"][transaction.sellerId].length; ++i) {
                 if (this.transactions["asBuyer"][transaction.sellerId][i] === transaction) {
                     this.transactions["asBuyer"][transaction.sellerId].pop(i);
@@ -136,6 +155,11 @@ class Account {
             }
         } else if (type === "asSeller") {
             if (!this.transactions["asSeller"][transaction.buyerId]) return false;
+            /* Information Cache Update */
+            if (transaction.Description.type === "resource") {
+                this.resourceTransactions["asSeller"][transaction.Description.info.resourceType] -= transaction.Description.info.amount;
+                this.resourceTransactions["asSeller"]["total"] -= transaction.Description.info.amount;
+            }
             for (let i = 0; i < this.transactions["asSeller"][transaction.buyerId].length; ++i) {
                 if (this.transactions["asSeller"][transaction.buyerId][i] === transaction) {
                     this.transactions["asSeller"][transaction.buyerId].pop(i);
@@ -174,20 +198,11 @@ class Account {
      * @param {import("./task.prototype").GameObject} mountObj 
      */
     constructor(mountObj) {
-        /** 
-         * @type {import("./task.prototype").GameObject}
-         * @private
-         */
+        /** @type {Id} @private */
         this.mountObjId = mountObj.id;
-        /**
-         * @type {number}
-         * @private
-         */
+        /** @type {number} @private */
         this.cash = 0;
-        /**
-         * @type {number}
-         * @private
-         */
+        /** @type {number} @private */
         this.borrowedMoney = 0;
         /**
          * @type { { "asBuyer": {[id : string]: Array<Transaction>}, "asSeller": {[id : string] : Array<Transaction} } }
@@ -197,6 +212,13 @@ class Account {
         this.transactions = {
             "asBuyer": {},
             "asSeller": {}
+        };
+        /**
+         * @type { { "asBuyer" : {[resourceType : string] : number, total : number}, "asSeller" : {[resourceType : string] : number, total : number} } }
+         */
+        this.resourceTransactions = {
+            "asBuyer" : {total : 0},
+            "asSeller" : {total : 0}
         };
     }
 }
@@ -388,6 +410,9 @@ function mount() {
         configurable : false
     });
 }
+profiler.registerClass(Account, "Account");
+profiler.registerClass(Transaction, "Transaction");
+profiler.registerClass(Bank, "Bank");
 global.Bank = new Bank();
 global.Lucy.App.mount(mount);
 module.exports = {
