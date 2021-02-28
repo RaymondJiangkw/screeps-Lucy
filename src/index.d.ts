@@ -98,6 +98,9 @@ interface Room {
     portals             : StructurePortal[],
     powerBanks          : StructurePowerBank[],
     powerSpawn?         : StructurePowerBank,
+    // Unit
+    centralTransfer     : import("./rooms.behaviors").CentralTransferUnit,
+    centralSpawn        : import("./rooms.behaviors").CentralSpawnUnit,
     // Replaced Function
     /**
      * Create new Flag at the specified location.

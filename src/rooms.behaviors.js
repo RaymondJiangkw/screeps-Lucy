@@ -342,6 +342,10 @@ class CentralTransferUnit {
             run : function() {
                 /** @type {Creep[]} */
                 const workers = this.FetchEmployees("worker");
+                /** @type {CentralTransferUnit} */
+                const centralTransferUnit = this.taskData.centralTransferUnit;
+                if (!centralTransferUnit.HasWorker && workers.length > 0) centralTransferUnit.HasWorker = true;
+                else if (centralTransferUnit.HasWorker && workers.length === 0) centralTransferUnit.HasWorker = false;
                 /** @type {Creep[]} */
                 const firedEmployees = [];
                 workers.forEach(worker => {
@@ -360,8 +364,6 @@ class CentralTransferUnit {
                         this.SignalReplacement(worker);
                         global.Log.room(pos.roomName, global.Emoji.skull, global.Dye.black(`${worker.name} (${worker.memory.tag}) is near death and asks for successor ...`));
                     }
-                    /** @type {CentralTransferUnit} */
-                    const centralTransferUnit = this.taskData.centralTransferUnit;
                     // Since Resources transferred among CentralTransferUnit are usually valuable, it is important
                     // to make sure creep carries nothing, when it is going to die.
                     if (!worker.memory.dying && Object.keys(worker.store).length + 1 >= worker.ticksToLive) {
@@ -577,6 +579,8 @@ class CentralTransferUnit {
         /** @type {Array<TransferOrder>} @private */
         this.orderQueue = [];
         this.issueTasks();
+        /** Signal Whether there is Worker working. */
+        this.HasWorker = false;
     }
 }
 /** @type { {[roomName : string] : CentralSpawnUnit} } */

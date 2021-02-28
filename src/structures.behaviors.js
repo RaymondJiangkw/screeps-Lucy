@@ -586,6 +586,10 @@ function giveContainerBehaviors() {
                         if (worker.pos.getRangeTo(container) !== 0) worker.travelTo(container);
                         if (link && worker.store.getFreeCapacity() === 0 && link.store.getFreeCapacity(RESOURCE_ENERGY) > 0) worker.transfer(link, RESOURCE_ENERGY);
                         if (container.store.getFreeCapacity(RESOURCE_ENERGY) > 0 || worker.store.getFreeCapacity(RESOURCE_ENERGY) > 0) worker.harvest(target);
+                        else if (container.hits < container.hitsMax) {
+                            if (worker.store[RESOURCE_ENERGY] > 0) worker.repair(container);
+                            else if (container.store[RESOURCE_ENERGY] > 0) worker.withdraw(container, RESOURCE_ENERGY);
+                        }
                         return [];
                     }
             }, { containerId : this.id, targetId : target.id, tag : Game.getTagById(this.id) });
@@ -674,7 +678,7 @@ function giveContainerBehaviors() {
                             if ((container.store.getFreeCapacity(RESOURCE_ENERGY) > 0 || harvester.store.getFreeCapacity(RESOURCE_ENERGY) > 0) && source.energy > 0) harvester.harvest(source);
                             else if (container.hits < container.hitsMax) {
                                 if (harvester.store[RESOURCE_ENERGY] > 0) harvester.repair(container);
-                                else harvester.withdraw(container, RESOURCE_ENERGY);
+                                else if (container.store[RESOURCE_ENERGY] > 0) harvester.withdraw(container, RESOURCE_ENERGY);
                             }
                         });
                         transferers.forEach(transferer => {

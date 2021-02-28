@@ -52,8 +52,10 @@ class LinkManager {
                         if (transferLink.store[RESOURCE_ENERGY] === 0 && Game.time % 3 === 0) { // In this case : transferLink needs to be filled.
                             /** @type {import("./rooms.behaviors").CentralTransferUnit} */
                             const centralTransfer = Game.rooms[roomName].centralTransfer;
-                            centralTransfer.PushOrder({from : "any", to : "link", resourceType : RESOURCE_ENERGY, amount : LINK_CAPACITY});
-                            transferLink._hasPushedOrder = true;
+                            if (centralTransfer.HasWorker) {
+                                centralTransfer.PushOrder({from : "any", to : "link", resourceType : RESOURCE_ENERGY, amount : LINK_CAPACITY});
+                                transferLink._hasPushedOrder = true;
+                            }
                             continue;
                         }
                         transferLink.transferEnergy(targetLink);

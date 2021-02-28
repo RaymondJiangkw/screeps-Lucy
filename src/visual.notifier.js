@@ -371,10 +371,12 @@ const _notifier = new Notifier();
 /** @type {import("./lucy.app").AppLifecycleCallbacks} */
 const VisualPlugin = {
     afterTickEnd : () => {
-        const _cpuUsed = Game.cpu.getUsed();
-        _notifier.visuals();
-        Visualizer.visuals();
-        // console.log(`<p style="display:inline;color:green;">[Ticks]</p> Visual consumes ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`);
+        if (!Memory._disableInfo) {
+            const _cpuUsed = Game.cpu.getUsed();
+            _notifier.visuals();
+            Visualizer.visuals();
+            // console.log(`<p style="display:inline;color:green;">[Ticks]</p> Visual consumes ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`);
+        }
     }
 };
 

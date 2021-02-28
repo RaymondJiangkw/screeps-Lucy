@@ -98,10 +98,8 @@ class Account {
         if (type === "asBuyer") {
             /* Initialize Storing Array */
             this.transactions["asBuyer"][transaction.Seller.id] = this.transactions["asBuyer"][transaction.Seller.id] || [];
-            this.transactions["asBuyer"][transaction.Description.type] = this.transactions["asBuyer"][transaction.Description.type] || [];
             /* Push Transaction */
             this.transactions["asBuyer"][transaction.Seller.id].push(transaction);
-            this.transactions["asBuyer"][transaction.Description.type].push(transaction);
             /* Information Cache */
             if (transaction.Description.type === "resource") {
                 this.resourceTransactions["asBuyer"][transaction.Description.info.resourceType] = this.resourceTransactions["asBuyer"][transaction.Description.info.resourceType] || 0;
@@ -111,10 +109,8 @@ class Account {
         } else if (type === "asSeller") {
             /* Initialize Storing Array */
             this.transactions["asSeller"][transaction.Buyer.id] = this.transactions["asSeller"][transaction.Buyer.id] || [];
-            this.transactions["asSeller"][transaction.Description.type] = this.transactions["asSeller"][transaction.Description.type] || [];
             /* Push Transaction */
             this.transactions["asSeller"][transaction.Buyer.id].push(transaction);
-            this.transactions["asSeller"][transaction.Description.type].push(transaction);
             /* Information Cache */
             if (transaction.Description.type === "resource") {
                 this.resourceTransactions["asSeller"][transaction.Description.info.resourceType] = this.resourceTransactions["asSeller"][transaction.Description.info.resourceType] || 0;
@@ -130,16 +126,6 @@ class Account {
      * @returns {Boolean}
      */
     Dealt(type, transaction) {
-        if (!this.transactions[type][transaction.Description.type]) return false;
-        let isSuccess = false;
-        for (let i = 0; i < this.transactions[type][transaction.Description.type].length; ++i) {
-            if (this.transactions[type][transaction.Description.type][i] === transaction) {
-                this.transactions[type][transaction.Description.type].pop(i);
-                isSuccess = true;
-                break;
-            }
-        }
-        if (!isSuccess) return false;
         if (type === "asBuyer") {
             if (!this.transactions["asBuyer"][transaction.sellerId]) return false;
             /* Information Cache Update */
@@ -147,12 +133,7 @@ class Account {
                 this.resourceTransactions["asBuyer"][transaction.Description.info.resourceType] -= transaction.Description.info.amount;
                 this.resourceTransactions["asBuyer"]["total"] -= transaction.Description.info.amount;
             }
-            for (let i = 0; i < this.transactions["asBuyer"][transaction.sellerId].length; ++i) {
-                if (this.transactions["asBuyer"][transaction.sellerId][i] === transaction) {
-                    this.transactions["asBuyer"][transaction.sellerId].pop(i);
-                    return true;
-                }
-            }
+            return this.transactions["asBuyer"][transaction.sellerId].splice(this.transactions["asBuyer"][transaction.sellerId].indexOf(transaction), 1);
         } else if (type === "asSeller") {
             if (!this.transactions["asSeller"][transaction.buyerId]) return false;
             /* Information Cache Update */
@@ -160,30 +141,9 @@ class Account {
                 this.resourceTransactions["asSeller"][transaction.Description.info.resourceType] -= transaction.Description.info.amount;
                 this.resourceTransactions["asSeller"]["total"] -= transaction.Description.info.amount;
             }
-            for (let i = 0; i < this.transactions["asSeller"][transaction.buyerId].length; ++i) {
-                if (this.transactions["asSeller"][transaction.buyerId][i] === transaction) {
-                    this.transactions["asSeller"][transaction.buyerId].pop(i);
-                    return true;
-                }
-            }
+            return this.transactions["asSeller"][transaction.buyerId].splice(this.transactions["asSeller"][transaction.buyerId].indexOf(transaction), 1);
         }
         return false;
-    }
-    /**
-     * Query returns the selected transactions.
-     * @param {"asBuyer" | "asSeller"} type
-     * @param { {objectId : string} | {transactionType : string} } key
-     * @param { (transaction : Transaction) => Boolean } filterFunc
-     * @returns {Array<Transaction>}
-     */
-    Query(type, key, filterFunc) {
-        let transactions = [];
-        if (key.objectId) {
-            transactions = this.transactions[type][key.objectId];
-        } else if (key.transactionType) {
-            transactions = this.transactions[type][key.transactionType];
-        }
-        return _.filter(transactions, filterFunc);
     }
     /**
      * @returns {import("./task.prototype").GameObject}
