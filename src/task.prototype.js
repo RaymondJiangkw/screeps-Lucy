@@ -656,6 +656,7 @@ const TaskPlugin = {
         }
     }
 };
+profiler.registerObject(TaskPlugin, "TaskPlugin");
 global.Lucy.App.on(TaskPlugin);
 module.exports = {
     Task                : Task,

@@ -83,7 +83,7 @@ function giveSourceBehaviors() {
     };
 }
 function giveLabBehaviors() {
-    StructureLab.prototype.register = function() {
+    StructureLab.prototype.register = function(reset = false) {
         /** @type {Array<MineralCompoundConstant | MineralConstant>} */
         const mineralTypes = [].concat(Object.keys(REACTION_TIME), Object.keys(MINERAL_MIN_AMOUNT));
         for (const mineralType of mineralTypes) {
@@ -92,6 +92,7 @@ function giveLabBehaviors() {
                 else return 0;
             }));
         }
+        if (!reset) global.LabManager.Update(this.room.name);
     };
 }
 function giveFactoryBehaviors() {
@@ -131,7 +132,7 @@ const RoomResetTriggerPlugin = {
                 if (room.terminal) room.terminal.register();
                 if (room.factory) room.factory.register();
                 room["links"].forEach(l => l.register());
-                room["labs"].forEach(l => l.register());
+                room["labs"].forEach(l => l.register(true));
                 /** Register into LabManager should be put after registering labs into ResourceManager */
                 if (room["labs"].length > 0) global.LabManager.Update(room.name);
             } else {
@@ -140,4 +141,5 @@ const RoomResetTriggerPlugin = {
         }
     }
 };
+require("./screeps-profiler").registerObject(RoomResetTriggerPlugin, "RoomResetResourceTriggerPlugin");
 global.Lucy.App.on(RoomResetTriggerPlugin);

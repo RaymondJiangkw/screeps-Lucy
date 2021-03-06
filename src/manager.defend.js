@@ -254,4 +254,5 @@ const DefendPlugin = {
     reset : () => global.DefendManager.Init(),
     tickStart : () => global.DefendManager.Run()
 };
+profiler.registerObject(DefendPlugin, "DefendPlugin");
 global.Lucy.App.on(DefendPlugin);

@@ -88,20 +88,15 @@ class CreepSpawnManager {
     IsSaturated(roomName, type, tag) {
         const descriptors = this.roomName2information[roomName][type][tag];
         if (descriptors.total === 0) return true;
-        /**
-         * I expect the following property :
-         *  - expectedNum should be logorithm-like.
-         *  - When MinimumAmount = 1, expectedNum should be 1.
-         *  - When MinimumAmount = e^2, expectedNum should be 2.
-         */
-        const expectedNum = Math.floor(Math.log(descriptors.total) * 0.5 + 1);
-        const workingNum = descriptors.working.length;
-        /**
-         * NOTICE : For a group of Task, there could be the case that some of them still needs more workers and, when
-         * they employee more workers, the total workingNum remains the same.
-         */
-        if (workingNum < expectedNum) return false;
-        else return true;
+        const patchType = this.patchInformation[tag] ? this.patchInformation[tag].type : "logarithm";
+        switch (patchType) {
+            case "unlimited":
+                return descriptors.waiting.length === 0;
+            case "single":
+                return descriptors.working.length > 0;
+            case "logarithm":
+                return Math.floor(Math.log(descriptors.total) * 0.5 + 1) <= descriptors.working.length;
+        }
     }
     /**
      * @private
@@ -134,7 +129,7 @@ class CreepSpawnManager {
             else candidates = ["tags"];
             for (const candidate of candidates) { // 1~2
                 for (const tag in this.roomName2information[room][candidate]) { // 1~5
-                    if ((tag === DEFAULT && this.roomName2information[room][candidate][tag].waiting.length > 0) || !this.IsSaturated(room, candidate, tag)) {
+                    if (!this.IsSaturated(room, candidate, tag)) {
                         const target = this.roomName2information[room][candidate][tag].waiting.filter(index => this.descriptorPools[index].Cost(Game.rooms[roomName]) <= Game.rooms[roomName].energyAvailable).select(v => v, index => this.descriptorPools[index].SpawnPriority);
                         if (target && this.descriptorPools[target]._spawnTick !== Game.time) {
                             if (!index || this.descriptorPools[index].SpawnPriority < this.descriptorPools[target].SpawnPriority) index = target;
@@ -149,9 +144,18 @@ class CreepSpawnManager {
         }
         return null;
     }
+    /**
+     * @param {string} patch
+     * @param {"unlimited" | "logarithm" | "single"} type
+     */
+    DescribePatch(patch, type) {
+        this.patchInformation[patch] = {type : type};
+    }
     constructor() {
         /** @type { {[roomName : string] : {tags : {[tag : string] : {working : Array<string>, waiting : Array<string>, total : number}}, inRoomTags : {[tag : string] : {working : Array<string>, waiting : Array<string>, total : number}}}} } @private */
         this.roomName2information = {};
+        /** @type { {[patch : string] : {type : "unlimited" | "logarithm" | "single"}} } @private */
+        this.patchInformation     = {};
         /** @type { {[index : string] : import("./task.prototype").TaskCreepDescriptor} } @private */
         this.descriptorPools      = {};
         this.descriptorIndex      = 0;
@@ -159,13 +163,15 @@ class CreepSpawnManager {
         this.index2status         = {};
     }
 };
-const _creepSpawnManager = new CreepSpawnManager();
+const creepSpawnManager = new CreepSpawnManager();
+creepSpawnManager.DescribePatch("default", "unlimited");
+creepSpawnManager.DescribePatch("repairPatch", "single");
 profiler.registerClass(CreepSpawnManager, "CreepSpawnManager");
 /** @type {[roomName : string] : string} */
 const ticks = {};
 /** @type {import("./lucy.app").AppLifecycleCallbacks} */
 const CreepSpawnManagerPlugin = {
-    init : () => global.CreepSpawnManager = _creepSpawnManager,
+    init : () => global.CreepSpawnManager = creepSpawnManager,
     tickEnd : () => {
         for (const room of global.Lucy.Collector.colonies) {
             const roomName = room.name;
@@ -201,4 +207,5 @@ const CreepSpawnManagerPlugin = {
         }
     }
 };
+profiler.registerObject(CreepSpawnManagerPlugin, "CreepSpawnManagerPlugin");
 global.Lucy.App.on(CreepSpawnManagerPlugin);

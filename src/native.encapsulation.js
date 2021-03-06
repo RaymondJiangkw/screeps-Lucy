@@ -194,4 +194,5 @@ const NativeEncapsulationPlugin = {
         };
     }
 };
+require("./screeps-profiler").registerObject(NativeEncapsulationPlugin, "NativeEncapsulationPlugin");
 global.Lucy.App.on(NativeEncapsulationPlugin);

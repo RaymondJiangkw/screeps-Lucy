@@ -104,4 +104,5 @@ const LinkManagerPlugin = {
         
     }
 };
+profiler.registerObject(LinkManagerPlugin, "LinkManagerPlugin");
 global.Lucy.App.on(LinkManagerPlugin);

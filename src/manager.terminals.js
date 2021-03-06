@@ -331,5 +331,5 @@ const TerminalPlugin = {
     init : () => global.TerminalManager = _terminalManager,
     tickStart : () => global.TerminalManager.Run()
 };
-
+profiler.registerObject(TerminalPlugin, "TerminalPlugin");
 global.Lucy.App.on(TerminalPlugin);

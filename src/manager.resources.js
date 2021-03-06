@@ -379,6 +379,7 @@ const ResourceManagerPlugin = {
     init : () => global.ResourceManager = _resourceManager,
     tickEnd : () => global.ResourceManager.Display()
 };
+profiler.registerObject(ResourceManagerPlugin, "ResourceManagerPlugin");
 global.Lucy.App.on(ResourceManagerPlugin);
 module.exports = {
     ResourceDescriptor          : ResourceDescriptor,

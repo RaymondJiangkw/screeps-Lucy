@@ -251,4 +251,5 @@ const AttackPlugin = {
     reset : () => global.AttackManager.Init(),
     tickStart : () => global.AttackManager.Run()
 };
+profiler.registerObject(AttackPlugin, "AttackPlugin");
 global.Lucy.App.on(AttackPlugin);

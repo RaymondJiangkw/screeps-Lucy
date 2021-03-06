@@ -107,5 +107,5 @@ profiler.registerClass(DepositManager, "DepositManager");
 const DepositPlugin = {
     init : () => global.DepositManager = _depositManager
 };
-
+profiler.registerObject(DepositPlugin, "DepositPlugin");
 global.Lucy.App.on(DepositPlugin);

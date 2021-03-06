@@ -1018,7 +1018,6 @@ const TaskManagerPlugin = {
     init: () => global.TaskManager = _taskManager,
     beforeTickStart : () => global.TaskManager.Check(),
     tickStart : () => {
-        const _cpuUsed = Game.cpu.getUsed();
         /**
          * Before `Run`
          * It is very useful that Creeps are visited by the order of spawning, so for those seeking successors,
@@ -1044,6 +1043,7 @@ const TaskManagerPlugin = {
         }
     }
 };
+profiler.registerObject(TaskManagerPlugin, "TaskManagerPlugin");
 global.Lucy.App.on(TaskManagerPlugin);
 module.exports = {
     TaskConstructor : _taskConstructor

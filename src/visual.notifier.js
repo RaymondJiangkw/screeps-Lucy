@@ -379,7 +379,7 @@ const VisualPlugin = {
         }
     }
 };
-
+require("./screeps-profiler").registerObject(VisualPlugin, "VisualPlugin");
 global.Lucy.App.on(VisualPlugin);
 
 module.exports = {

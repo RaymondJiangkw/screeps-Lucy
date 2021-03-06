@@ -35,3 +35,5 @@ const FlagPlugin = {
     init : () => global.FlagManager = flagManager,
     reset : () => global.FlagManager.reset()
 };
+profiler.registerObject(FlagPlugin, "FlagPlugin");
+global.Lucy.App.on(FlagPlugin);

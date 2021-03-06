@@ -40,5 +40,5 @@ profiler.registerClass(FactoryManager, "FactoryManager");
 const FactoryPlugin = {
     init : () => global.FactoryManager = factoryManager
 };
-
+profiler.registerObject(FactoryPlugin, "FactoryPlugin");
 global.Lucy.App.on(FactoryPlugin);

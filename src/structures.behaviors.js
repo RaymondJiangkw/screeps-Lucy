@@ -973,4 +973,5 @@ const RoomResetTriggerPlugin = {
         }
     }
 };
+require("./screeps-profiler").registerObject(RoomResetTriggerPlugin, "RoomResetStructureTriggerPlugin");
 global.Lucy.App.on(RoomResetTriggerPlugin);

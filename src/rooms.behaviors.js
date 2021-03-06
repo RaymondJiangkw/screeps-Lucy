@@ -674,6 +674,8 @@ const RoomPlugin = {
         for (const roomName in Game.rooms) {
             if (isMyRoom(Game.rooms[roomName])) global.Map.AutoPlan("normal", roomName);
             else if (Game.rooms[roomName].memory.asRemoteMiningRoom) global.Map.AutoPlan("remoteMining_energy", roomName, Game.rooms[roomName].memory.asRemoteMiningRoom, true);
+            global.Map.updateAdjacentRooms(roomName, {fullDistrict : true});
+            global.Map.updateDistanceBetweenRooms(roomName);
         }
     },
     tickStart : () => {
@@ -701,6 +703,7 @@ const RoomPlugin = {
         // console.log(`Room -> ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`);
     }
 };
+require("./screeps-profiler").registerObject(RoomPlugin, "RoomPlugin");
 global.Lucy.App.on(RoomPlugin);
 /**
  * Monitor Controller Upgrade

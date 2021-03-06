@@ -676,10 +676,12 @@ class Planner {
      * @param {string} roomName
      * @param {number} y
      * @param {number} x
+     * @param {StructureConstant[]} allowedStructureTypes
      */
-    getPositionOccupied(roomName, y, x) {
+    getPositionOccupied(roomName, y, x, allowedStructureTypes) {
         if (!this.roomOccupiedSpace[roomName]) return false;
-        return this.roomOccupiedSpace[roomName][y][x].length > 0;
+        if (!allowedStructureTypes) return this.roomOccupiedSpace[roomName][y][x].length > 0;
+        else return this.roomOccupiedSpace[roomName][y][x].filter(s => !allowedStructureTypes.includes(s)).length > 0;
     }
     /**
      * Occupied Positions of Registered Unit will be avoided reusing when planning another unit.
@@ -1044,11 +1046,11 @@ class Planner {
         /** @type {StructureRoad} */
         const road = mapMonitor.FetchAroundStructure(roomName, pos.y, pos.x).filter(s => s.structureType === STRUCTURE_ROAD)[0];
         if (!road) return new Response(Response.prototype.WAIT_UNTIL_TIMEOUT);
-        const vacantPos = mapMonitor.FetchAroundVacantPos(road.pos.roomName, road.pos.y, road.pos.x, [STRUCTURE_LINK, STRUCTURE_RAMPART]).filter(pos => !planner.getPositionOccupied(roomName, pos.y, pos.x)).sort((posU, posV) => posU.getRangeTo(object) - posV.getRangeTo(object))[0];
+        const vacantPos = mapMonitor.FetchAroundVacantPos(road.pos.roomName, road.pos.y, road.pos.x, [STRUCTURE_LINK, STRUCTURE_RAMPART]).filter(pos => !planner.getPositionOccupied(roomName, pos.y, pos.x, [STRUCTURE_LINK])).sort((posU, posV) => posU.getRangeTo(object) - posV.getRangeTo(object))[0];
         if (!vacantPos) {
             global.Log.error(`Unable to construct`, global.Dye.yellow(`Link`), `for`, global.Dye.grey(`${object}`), `at`, global.Dye.grey(`${object.pos}`), `with candidates :`, global.Dye.grey(`${mapMonitor.FetchAroundVacantPos(road.pos.roomName, road.pos.y, road.pos.x, [STRUCTURE_LINK, STRUCTURE_RAMPART])}`));
             return new Response(Response.prototype.WAIT_UNTIL_TIMEOUT);
-        }
+        } else this.setPositionOccupied(object.pos.roomName, vacantPos.y, vacantPos.x, STRUCTURE_LINK);
         // console.log(`${object}->${vacantPos}`);
         /** @type {StructureLink | ConstructionSite<StructureLink>} */
         const link = mapMonitor.Fetch(roomName, vacantPos.y, vacantPos.x).filter(s => s.structureType === STRUCTURE_LINK)[0];
@@ -1088,20 +1090,19 @@ class Planner {
         /** @type {RoomPosition} */
         const pos = object.pos;
         const roomName = pos.roomName;
-        /** @type {StructureRoad} */
-        const road = mapMonitor.FetchAroundStructure(roomName, pos.y, pos.x).filter(s => s.structureType === STRUCTURE_ROAD)[0];
-        if (!road) return new Response(Response.prototype.WAIT_UNTIL_TIMEOUT);
+        const posTarget = mapMonitor.FetchAround(roomName, pos.y, pos.x).filter(s => s.structureType === STRUCTURE_CONTAINER)[0] || mapMonitor.FetchAroundStructure(roomName, pos.y, pos.x).filter(s => s.structureType === STRUCTURE_ROAD)[0];
+        if (!posTarget) return new Response(Response.prototype.WAIT_UNTIL_TIMEOUT);
         /** @type {StructureContainer | ConstructionSite<StructureContainer>} */
-        const container = mapMonitor.Fetch(roomName, road.pos.y, road.pos.x).filter(s => s.structureType === STRUCTURE_CONTAINER)[0];
+        const container = mapMonitor.Fetch(roomName, posTarget.pos.y, posTarget.pos.x).filter(s => s.structureType === STRUCTURE_CONTAINER)[0];
         /** @type {StructureRampart | ConstructionSite<StructureRampart>} */
-        const rampart = mapMonitor.Fetch(roomName, road.pos.y, road.pos.x).filter(s => s.structureType === STRUCTURE_RAMPART)[0];
+        const rampart = mapMonitor.Fetch(roomName, posTarget.pos.y, posTarget.pos.x).filter(s => s.structureType === STRUCTURE_RAMPART)[0];
         /**
          * Haven't been built -> wait until built
          */
         if (!container) {
-            const retCode = Game.rooms[roomName].createConstructionSite(road.pos.x, road.pos.y, STRUCTURE_CONTAINER);
+            const retCode = Game.rooms[roomName].createConstructionSite(posTarget.pos.x, posTarget.pos.y, STRUCTURE_CONTAINER);
             if (retCode !== OK) {
-                console.log(`<p style="display:inline;color:red;">Error:</p> Unable to create StructureContainer at ${road.pos.roomName} (${road.pos.x, road.pos.y}) with code ${retCode}`);
+                console.log(`<p style="display:inline;color:red;">Error:</p> Unable to create StructureContainer at ${posTarget.pos.roomName} (${posTarget.pos.x, posTarget.pos.y}) with code ${retCode}`);
             }
             return new Response(Response.prototype.WAIT_UNTIL_TIMEOUT);
         } else if (!isConstructionSite(container)) { // Structure
@@ -1114,7 +1115,7 @@ class Planner {
              */
             if (isRampart) {
                 if (Game.rooms[roomName].controller.level >= RAMPART_BUILD_CONTROLLER_LEVEL){
-                    if (!rampart) Game.rooms[roomName].createConstructionSite(road.pos.x, road.pos.y, STRUCTURE_RAMPART);
+                    if (!rampart) Game.rooms[roomName].createConstructionSite(posTarget.pos.x, posTarget.pos.y, STRUCTURE_RAMPART);
                     return new Response(Response.prototype.FINISH);
                 } else return new Response(Response.prototype.WAIT_UNTIL_UPGRADE);
             } else return new Response(Response.prototype.FINISH);
@@ -1191,7 +1192,7 @@ class Planner {
     updateRoadBetweenPositions(posU, posV, options = {}) {
         _.defaults(options, {range : 0, ignoreErr : false});
         const key = `${posU}->${posV}`;
-        if (Memory._roads && Memory._roads[key]) return this.roads[key] = Memory._roads[key].map(v => new RoomPosition(v.x, v.y, v.roomName));
+        // if (Memory._roads && Memory._roads[key]) return this.roads[key] = Memory._roads[key].map(v => new RoomPosition(v.x, v.y, v.roomName));
         /**
          * Decide whether road is built in rooms or between rooms.
          */
@@ -1215,7 +1216,7 @@ class Planner {
             }
             this.roads[key] = path.path;
         }
-        _.set(Memory, [`_roads`, key], this.roads[key]);
+        // _.set(Memory, [`_roads`, key], this.roads[key]);
     }
     /**
      * @param {RoomPosition} posU
@@ -1400,10 +1401,10 @@ planner.RegisterUnit("normal", new Unit(
 
 planner.RegisterUnit("normal", new Unit(
     [
-        [Unit.prototype.PLACE_ANY, [STRUCTURE_LAB, STRUCTURE_RAMPART], [STRUCTURE_LAB, STRUCTURE_RAMPART], Unit.prototype.PLACE_ANY],
+        [Unit.prototype.PLACE_ANY, [STRUCTURE_LAB, STRUCTURE_RAMPART], [STRUCTURE_LAB, STRUCTURE_RAMPART], STRUCTURE_ROAD],
         [[STRUCTURE_LAB, STRUCTURE_RAMPART], [STRUCTURE_LAB, STRUCTURE_RAMPART, Unit.prototype.FIRST_BUILD_HERE], STRUCTURE_ROAD, [STRUCTURE_LAB, STRUCTURE_RAMPART]],
         [[STRUCTURE_LAB, STRUCTURE_RAMPART], STRUCTURE_ROAD, [STRUCTURE_LAB, STRUCTURE_RAMPART, Unit.prototype.FIRST_BUILD_HERE], [STRUCTURE_LAB, STRUCTURE_RAMPART]],
-        [Unit.prototype.PLACE_ANY, [STRUCTURE_LAB, STRUCTURE_RAMPART], [STRUCTURE_LAB, STRUCTURE_RAMPART], Unit.prototype.PLACE_ANY]
+        [STRUCTURE_ROAD, [STRUCTURE_LAB, STRUCTURE_RAMPART], [STRUCTURE_LAB, STRUCTURE_RAMPART], Unit.prototype.PLACE_ANY]
     ]
     , "labUnit", "labs", "", "purple", {type : "distanceSum", objects : [STRUCTURE_SPAWN], subjects : [STRUCTURE_LAB]}, {avoidOverLapRoad : true}));
 
@@ -2004,7 +2005,6 @@ class Map {
                     build : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${0}`].Pick("build")) || options.objectDestroy,
                     road : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${0}`].Pick("road")) || options.objectDestroy,
                     num : 1,
-                    linkedUnits : ["centralTransfer"],
                     writeToMemory : true,
                     readFromMemory : true,
                     unitTypeAlias : `extensionUnit_${0}`
@@ -2018,7 +2018,6 @@ class Map {
                     build : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${1}`].Pick("build")) || options.objectDestroy,
                     road : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${1}`].Pick("road")) || options.objectDestroy,
                     num : 1,
-                    linkedUnits : ["centralTransfer"],
                     writeToMemory : true,
                     readFromMemory : true,
                     unitTypeAlias : `extensionUnit_${1}`
@@ -2214,6 +2213,7 @@ const MapPlugin = {
         // global.Map.ScoutingRooms();
     }
 };
+profiler.registerObject(MapPlugin, "MapPlugin");
 global.Lucy.App.on(MapPlugin);
 /** Register GCL Upgrading Response */
 global.Lucy.App.monitor({label : "gcl", fetch : () => Game.gcl.level, init : global.Lucy.Collector.colonies.length, func : (newNumber, oldNumber) => global.Map.ClaimRoom(newNumber - oldNumber)});

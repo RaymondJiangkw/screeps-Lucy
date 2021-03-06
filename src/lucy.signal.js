@@ -25,5 +25,5 @@ const SignalPlugin = {
         });
     }
 };
-
+require("./screeps-profiler").registerObject(SignalPlugin, "SignalPlugin");
 global.Lucy.App.on(SignalPlugin);

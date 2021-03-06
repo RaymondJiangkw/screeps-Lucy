@@ -14,4 +14,5 @@ const GCPlugin = {
         }
     }
 }
+require("./screeps-profiler").registerObject(GCPlugin, "GCPlugin");
 global.Lucy.App.on(GCPlugin);
