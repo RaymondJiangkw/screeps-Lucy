@@ -290,22 +290,23 @@ class LabUnit {
             return;
         }
         // Pure New Recipe
-        /** @type {[MineralCompoundConstant | MineralConstant, MineralCompoundConstant | MineralConstant][]} */
+        /** @type {{mineralTypes : [MineralCompoundConstant | MineralConstant, MineralCompoundConstant | MineralConstant], tier : number, amount : number, repo : number, product : MineralCompoundConstant}[]} */
         const pureNewCandidates = [];
         for (let i = COMPOUND_TIER_NUM - 1; i >= 0; --i) {
             const ingredients = Array.from(COMPOUND_TIERS_INGREDIENTS[i]).map(v => {return {mineralType : v, amount : this.sum(v)};}).filter(v => v.amount > 0).map(v => this.find(v.mineralType, v.amount)).filter(o => o && (o.amount > 0 || isAllowedToBuy(o.mineralTypes[1])));
             if (ingredients.length === 0) continue;
             let ret = ingredients[0];
             for (let i = 1; i < ingredients.length; ++i) ret = this.cmp(ret, ingredients[i]);
-            if (ret.repo >= global.Lucy.Rules.lab.checkReactionAmount) pureNewCandidates.push(ret.mineralTypes);
+            if (ret.repo >= global.Lucy.Rules.lab.checkReactionAmount) pureNewCandidates.push(ret);
             else {
                 this.recipe = ret.mineralTypes;
                 break;
             }
         }
         if (!this.recipe && pureNewCandidates.length > 0) {
-            this.recipe = pureNewCandidates[0];
-            for (let i = 1; i < pureNewCandidates.length; ++i) this.recipe = this.cmp(this.recipe, pureNewCandidates[i]);
+            let target = pureNewCandidates[0];
+            for (let i = 1; i < pureNewCandidates.length; ++i) target = this.cmp(target, pureNewCandidates[i]);
+            this.recipe = target.mineralTypes;
         }
         if (this.recipe) global.Log.room(this.roomName, global.Dye.purple(`Recipe`), global.Dye.blue(`Pure New One`), global.Dye.white(`${icon(this.recipe[0])} + ${icon(this.recipe[1])} => ${icon(REACTIONS[this.recipe[0]][this.recipe[1]])}`));
         // There isn't any existing mineralTypes

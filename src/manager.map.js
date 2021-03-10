@@ -1151,9 +1151,16 @@ class Planner {
      */
     fetchProtectedRamparts(roomName, unitTypes) {
         if (this.room2protectedRamparts[roomName]) return this.room2protectedRamparts[roomName];
+        const extend = (coordinations, range = 3) => {
+            coordinations.x1 = Math.max(1, coordinations.x1 - range);
+            coordinations.y1 = Math.max(1, coordinations.y1 - range);
+            coordinations.x2 = Math.min(48, coordinations.x2 + range);
+            coordinations.y2 = Math.min(48, coordinations.y2 + range);
+            return coordinations;
+        };
         /** @type {{x1 : number, y1 : number, x2 : number, y2 :number}[]} */
         const rect_array = [];
-        unitTypes.forEach(unitType => this.FetchUnitPos(roomName, unitType).forEach(([y1, x1, y2, x2]) => rect_array.push({x1, y1, x2, y2})));
+        unitTypes.forEach(unitType => this.FetchUnitPos(roomName, unitType).forEach(([y1, x1, y2, x2]) => rect_array.push(extend({x1, y1, x2, y2}))));
         return this.room2protectedRamparts[roomName] = util_mincut.GetCutTiles(roomName, rect_array, {x1 : 0, y1 : 0, x2 : 49, y2 : 49});
     }
     /**
@@ -1920,144 +1927,124 @@ class Map {
              * 3. Calling Planner
              */
             const level = this.planCache[roomName].controllerLevel;
-            if (level >= 3) {
-                /* Plan For CentralTransfer Unit */
-                if (!this.planCache[roomName].feedbacks["centralTransfer"]) this.planCache[roomName].feedbacks["centralTransfer"] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
-                this.planCache[roomName].feedbacks["centralTransfer"].Merge(planner.Plan(roomName, "normal", "centralTransfer", {
-                    display : true,
-                    tag : parseResponse(this.planCache[roomName].feedbacks["centralTransfer"].Pick("tag")) || options.structureConstruct,
-                    build : parseResponse(this.planCache[roomName].feedbacks["centralTransfer"].Pick("build")) || options.objectDestroy,
-                    road : parseResponse(this.planCache[roomName].feedbacks["centralTransfer"].Pick("road")) || options.objectDestroy,
-                    num : 1,
-                    linkedUnits : ["centralSpawn"],
-                    writeToMemory : true,
-                    readFromMemory : true
-                }));
-                /* Plan For Tower Unit */
-                if (!this.planCache[roomName].feedbacks["towers"]) this.planCache[roomName].feedbacks["towers"] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
-                this.planCache[roomName].feedbacks["towers"].Merge(planner.Plan(roomName, "normal", "towers", {
-                    display : true,
-                    tag : parseResponse(this.planCache[roomName].feedbacks["towers"].Pick("tag")) || options.structureConstruct,
-                    build : parseResponse(this.planCache[roomName].feedbacks["towers"].Pick("build")) || (options.objectDestroy),
-                    road : parseResponse(this.planCache[roomName].feedbacks["towers"].Pick("road")) || (options.objectDestroy),
-                    num : 6,
-                    writeToMemory : true,
-                    readFromMemory : true
-                }));
+            /* Plan For CentralTransfer Unit */
+            if (!this.planCache[roomName].feedbacks["centralTransfer"]) this.planCache[roomName].feedbacks["centralTransfer"] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
+            this.planCache[roomName].feedbacks["centralTransfer"].Merge(planner.Plan(roomName, "normal", "centralTransfer", {
+                display : true,
+                tag : parseResponse(this.planCache[roomName].feedbacks["centralTransfer"].Pick("tag")) || options.structureConstruct,
+                build : parseResponse(this.planCache[roomName].feedbacks["centralTransfer"].Pick("build")) || options.objectDestroy,
+                road : parseResponse(this.planCache[roomName].feedbacks["centralTransfer"].Pick("road")) || options.objectDestroy,
+                num : 1,
+                linkedUnits : ["centralSpawn"],
+                writeToMemory : true,
+                readFromMemory : true
+            }));
+            /* Plan For Tower Unit */
+            if (!this.planCache[roomName].feedbacks["towers"]) this.planCache[roomName].feedbacks["towers"] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
+            this.planCache[roomName].feedbacks["towers"].Merge(planner.Plan(roomName, "normal", "towers", {
+                display : true,
+                tag : parseResponse(this.planCache[roomName].feedbacks["towers"].Pick("tag")) || options.structureConstruct,
+                build : parseResponse(this.planCache[roomName].feedbacks["towers"].Pick("build")) || (options.objectDestroy),
+                road : parseResponse(this.planCache[roomName].feedbacks["towers"].Pick("road")) || (options.objectDestroy),
+                num : 6,
+                writeToMemory : true,
+                readFromMemory : true
+            }));
+            /* Plan For StructureController's Link */
+            if (!this.planCache[roomName].feedbacks["controllerLink"]) this.planCache[roomName].feedbacks["controllerLink"] = new Response(Response.prototype.PLACE_HOLDER);
+            if (parseResponse(this.planCache[roomName].feedbacks["controllerLink"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["controllerLink"].Feed(planner.PlanForAroundLink(Game.rooms[roomName].controller, global.Lucy.Rules.arrangements.UPGRADE_ONLY));
+            /* Plan For CentralSpawn Unit */
+            if (!this.planCache[roomName].feedbacks["centralSpawn"]) this.planCache[roomName].feedbacks["centralSpawn"] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
+            if (DEBUG) {
+                console.log(roomName, JSON.stringify(this.planCache[roomName].feedbacks["centralSpawn"]));
             }
-            if (level >= 1) {
-                /* Plan For StructureController's Link */
-                if (!this.planCache[roomName].feedbacks["controllerLink"]) this.planCache[roomName].feedbacks["controllerLink"] = new Response(Response.prototype.PLACE_HOLDER);
-                if (parseResponse(this.planCache[roomName].feedbacks["controllerLink"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["controllerLink"].Feed(planner.PlanForAroundLink(Game.rooms[roomName].controller, global.Lucy.Rules.arrangements.UPGRADE_ONLY));
-                /* Plan For CentralSpawn Unit */
-                if (!this.planCache[roomName].feedbacks["centralSpawn"]) this.planCache[roomName].feedbacks["centralSpawn"] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
-                if (DEBUG) {
-                    console.log(roomName, JSON.stringify(this.planCache[roomName].feedbacks["centralSpawn"]));
-                }
-                this.planCache[roomName].feedbacks["centralSpawn"].Merge(planner.Plan(roomName, "normal", "centralSpawn", {
-                    display : true,
-                    tag : parseResponse(this.planCache[roomName].feedbacks["centralSpawn"].Pick("tag")) || options.structureConstruct,
-                    build : parseResponse(this.planCache[roomName].feedbacks["centralSpawn"].Pick("build")) || options.objectDestroy,
-                    road : parseResponse(this.planCache[roomName].feedbacks["centralSpawn"].Pick("road")) || options.objectDestroy,
-                    num : 1,
-                    linkedRoomPosition : [].concat(
-                        Game.rooms[roomName]["sources"].map(s => s.pos),
-                        (Game.rooms[roomName].controller.level >= 5 ? Game.rooms[roomName]["mineral"].pos : []),
-                        Game.rooms[roomName].controller.pos
-                    ),
-                    writeToMemory : true,
-                    readFromMemory : true
-                }));
-                /* Plan For Harvest Unit */
-                if (!this.planCache[roomName].feedbacks["harvestEnergy"]) this.planCache[roomName].feedbacks["harvestEnergy"] = {};
-                for (const source of Game.rooms[roomName].sources) {
-                    /**
-                     * Container
-                     */
-                    if (!this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "container"]) this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "container"] = new Response(Response.prototype.PLACE_HOLDER);
-                    if (parseResponse(this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "container"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "container"].Feed(planner.PlanForAroundOverlapContainer(source, "forSource", true));
-                    /**
-                     * Link
-                     */
-                    if (!this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "link"]) this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "link"] = new Response(Response.prototype.PLACE_HOLDER);
-                    if (parseResponse(this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "link"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "link"].Feed(planner.PlanForAroundLink(source, "forSource"));
-                }
+            this.planCache[roomName].feedbacks["centralSpawn"].Merge(planner.Plan(roomName, "normal", "centralSpawn", {
+                display : true,
+                tag : parseResponse(this.planCache[roomName].feedbacks["centralSpawn"].Pick("tag")) || options.structureConstruct,
+                build : parseResponse(this.planCache[roomName].feedbacks["centralSpawn"].Pick("build")) || options.objectDestroy,
+                road : parseResponse(this.planCache[roomName].feedbacks["centralSpawn"].Pick("road")) || options.objectDestroy,
+                num : 1,
+                linkedRoomPosition : [].concat(
+                    Game.rooms[roomName]["sources"].map(s => s.pos),
+                    (Game.rooms[roomName].controller.level >= 5 ? Game.rooms[roomName]["mineral"].pos : []),
+                    Game.rooms[roomName].controller.pos
+                ),
+                writeToMemory : true,
+                readFromMemory : true
+            }));
+            /* Plan For Harvest Unit */
+            if (!this.planCache[roomName].feedbacks["harvestEnergy"]) this.planCache[roomName].feedbacks["harvestEnergy"] = {};
+            for (const source of Game.rooms[roomName].sources) {
+                /**
+                 * Container
+                 */
+                if (!this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "container"]) this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "container"] = new Response(Response.prototype.PLACE_HOLDER);
+                if (parseResponse(this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "container"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "container"].Feed(planner.PlanForAroundOverlapContainer(source, "forSource", true));
+                /**
+                 * Link
+                 */
+                if (!this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "link"]) this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "link"] = new Response(Response.prototype.PLACE_HOLDER);
+                if (parseResponse(this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "link"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["harvestEnergy"][source.id + "link"].Feed(planner.PlanForAroundLink(source, "forSource"));
             }
-            if (level >= 2) {
-                
-            }
-            if (level >= 4) {
-                /* Preplan for Central Lab (Reserve Space) */
-                if (!this.planCache[roomName].feedbacks["labUnit"]) this.planCache[roomName].feedbacks["labUnit"] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
-                this.planCache[roomName].feedbacks["labUnit"].Merge(planner.Plan(roomName, "normal", "labUnit", {
-                    tag : parseResponse(this.planCache[roomName].feedbacks["labUnit"].Pick("tag")) || options.structureConstruct,
-                    build : parseResponse(this.planCache[roomName].feedbacks["labUnit"].Pick("build")) || options.objectDestroy,
-                    road : parseResponse(this.planCache[roomName].feedbacks["labUnit"].Pick("road")) || options.objectDestroy,
-                    num : 1,
-                    linkedUnits : ["centralSpawn"],
-                    writeToMemory : true,
-                    readFromMemory : true
-                }));
-                /* Plan for Extensions */
-                if (!this.planCache[roomName].feedbacks[`extensionUnit_${0}`]) this.planCache[roomName].feedbacks[`extensionUnit_${0}`] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
-                this.planCache[roomName].feedbacks[`extensionUnit_${0}`].Merge(planner.Plan(roomName, "normal", "extensionUnit", {
-                    tag : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${0}`].Pick("tag")) || options.structureConstruct,
-                    build : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${0}`].Pick("build")) || options.objectDestroy,
-                    road : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${0}`].Pick("road")) || options.objectDestroy,
-                    num : 1,
-                    writeToMemory : true,
-                    readFromMemory : true,
-                    unitTypeAlias : `extensionUnit_${0}`
-                }));
-            }
-            if (level >= 5) {
-                /* Plan for Extensions */
-                if (!this.planCache[roomName].feedbacks[`extensionUnit_${1}`]) this.planCache[roomName].feedbacks[`extensionUnit_${1}`] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
-                this.planCache[roomName].feedbacks[`extensionUnit_${1}`].Merge(planner.Plan(roomName, "normal", "extensionUnit", {
-                    tag : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${1}`].Pick("tag")) || options.structureConstruct,
-                    build : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${1}`].Pick("build")) || options.objectDestroy,
-                    road : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${1}`].Pick("road")) || options.objectDestroy,
-                    num : 1,
-                    writeToMemory : true,
-                    readFromMemory : true,
-                    unitTypeAlias : `extensionUnit_${1}`
-                }));
-                /* Plan for Container of Mineral */
-                if (!this.planCache[roomName].feedbacks["harvestMineral"]) this.planCache[roomName].feedbacks["harvestMineral"] = new Response(Response.prototype.PLACE_HOLDER);
-                if (parseResponse(this.planCache[roomName].feedbacks["harvestMineral"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["harvestMineral"].Feed(planner.PlanForAroundOverlapContainer(Game.rooms[roomName].mineral, "forMineral", true));
-                /* Plan for Extensions */
-                if (!this.planCache[roomName].feedbacks[`extensionUnit_${2}`]) this.planCache[roomName].feedbacks[`extensionUnit_${2}`] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
-                this.planCache[roomName].feedbacks[`extensionUnit_${2}`].Merge(planner.Plan(roomName, "normal", "extensions", {
-                    tag : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${2}`].Pick("tag")) || options.structureConstruct,
-                    build : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${2}`].Pick("build")) || options.objectDestroy,
-                    road : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${2}`].Pick("road")) || options.objectDestroy,
-                    num : 12,
-                    writeToMemory : true,
-                    readFromMemory : true,
-                    unitTypeAlias : `extensionUnit_${2}`
-                }));
-                /* Plan for Protected Ramparts */
-                if (!this.planCache[roomName].feedbacks["protectedRamparts"]) this.planCache[roomName].feedbacks["protectedRamparts"] = new Response(Response.prototype.PLACE_HOLDER);
-                this.planCache[roomName].feedbacks["protectedRamparts"].Feed(planner.PlanForProtectedRamparts(roomName, ["centralSpawn", "centralTransfer", "towers", "labUnit", `extensionUnit_${0}`, `extensionUnit_${1}`, `extensionUnit_${2}`], {
-                    display : true,
-                    build : parseResponse(this.planCache[roomName].feedbacks["protectedRamparts"]) || options.objectDestroy,
-                    readFromMemory : true,
-                    writeToMemory : true
-                }));
-            }
+            /* Preplan for Central Lab (Reserve Space) */
+            if (!this.planCache[roomName].feedbacks["labUnit"]) this.planCache[roomName].feedbacks["labUnit"] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
+            this.planCache[roomName].feedbacks["labUnit"].Merge(planner.Plan(roomName, "normal", "labUnit", {
+                tag : parseResponse(this.planCache[roomName].feedbacks["labUnit"].Pick("tag")) || options.structureConstruct,
+                build : parseResponse(this.planCache[roomName].feedbacks["labUnit"].Pick("build")) || options.objectDestroy,
+                road : parseResponse(this.planCache[roomName].feedbacks["labUnit"].Pick("road")) || options.objectDestroy,
+                num : 1,
+                linkedUnits : ["centralSpawn"],
+                writeToMemory : true,
+                readFromMemory : true
+            }));
+            /* Plan for Extensions */
+            if (!this.planCache[roomName].feedbacks[`extensionUnit_${0}`]) this.planCache[roomName].feedbacks[`extensionUnit_${0}`] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
+            this.planCache[roomName].feedbacks[`extensionUnit_${0}`].Merge(planner.Plan(roomName, "normal", "extensionUnit", {
+                tag : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${0}`].Pick("tag")) || options.structureConstruct,
+                build : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${0}`].Pick("build")) || options.objectDestroy,
+                road : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${0}`].Pick("road")) || options.objectDestroy,
+                num : 1,
+                writeToMemory : true,
+                readFromMemory : true,
+                unitTypeAlias : `extensionUnit_${0}`
+            }));
+            /* Plan for Extensions */
+            if (!this.planCache[roomName].feedbacks[`extensionUnit_${1}`]) this.planCache[roomName].feedbacks[`extensionUnit_${1}`] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
+            this.planCache[roomName].feedbacks[`extensionUnit_${1}`].Merge(planner.Plan(roomName, "normal", "extensionUnit", {
+                tag : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${1}`].Pick("tag")) || options.structureConstruct,
+                build : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${1}`].Pick("build")) || options.objectDestroy,
+                road : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${1}`].Pick("road")) || options.objectDestroy,
+                num : 1,
+                writeToMemory : true,
+                readFromMemory : true,
+                unitTypeAlias : `extensionUnit_${1}`
+            }));
+            /* Plan for Container of Mineral */
+            if (!this.planCache[roomName].feedbacks["harvestMineral"]) this.planCache[roomName].feedbacks["harvestMineral"] = new Response(Response.prototype.PLACE_HOLDER);
+            if (parseResponse(this.planCache[roomName].feedbacks["harvestMineral"]) || options.objectDestroy || options.structureConstruct) this.planCache[roomName].feedbacks["harvestMineral"].Feed(planner.PlanForAroundOverlapContainer(Game.rooms[roomName].mineral, "forMineral", true));
+            /* Plan for Extensions */
+            if (!this.planCache[roomName].feedbacks[`extensionUnit_${2}`]) this.planCache[roomName].feedbacks[`extensionUnit_${2}`] = new ResponsePatch(Response.prototype.PLACE_HOLDER, "tag", "build", "road");
+            this.planCache[roomName].feedbacks[`extensionUnit_${2}`].Merge(planner.Plan(roomName, "normal", "extensions", {
+                tag : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${2}`].Pick("tag")) || options.structureConstruct,
+                build : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${2}`].Pick("build")) || options.objectDestroy,
+                road : parseResponse(this.planCache[roomName].feedbacks[`extensionUnit_${2}`].Pick("road")) || options.objectDestroy,
+                num : 12,
+                writeToMemory : true,
+                readFromMemory : true,
+                unitTypeAlias : `extensionUnit_${2}`
+            }));
+            /* Plan for Protected Ramparts */
+            if (!this.planCache[roomName].feedbacks["protectedRamparts"]) this.planCache[roomName].feedbacks["protectedRamparts"] = new Response(Response.prototype.PLACE_HOLDER);
+            this.planCache[roomName].feedbacks["protectedRamparts"].Feed(planner.PlanForProtectedRamparts(roomName, ["centralSpawn", "centralTransfer", "towers", "labUnit", `extensionUnit_${0}`, `extensionUnit_${1}`, `extensionUnit_${2}`], {
+                display : true,
+                build : parseResponse(this.planCache[roomName].feedbacks["protectedRamparts"]) || options.objectDestroy,
+                readFromMemory : true,
+                writeToMemory : true
+            }));
             if (level >= 6) {
                 /** @type {Mineral} */
                 const mineral = Game.rooms[roomName].mineral;
                 if (!Game.rooms[roomName][STRUCTURE_EXTRACTOR] && Game.rooms[roomName].controller.level >= 6 && mapMonitor.Fetch(roomName, mineral.pos.y, mineral.pos.x).filter(s => s.structureType === STRUCTURE_EXTRACTOR).length === 0) Game.rooms[roomName].createConstructionSite(mineral.pos, STRUCTURE_EXTRACTOR);
-            }
-            if (level >= 7) {
-
-            }
-            if (level >= 8) {
-                
-            }
-            if (DEBUG) {
-                console.log(`AutoPlan(${roomName})->Total consumes ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}.`);
             }
         } else if (roomType === "remoteMining_energy") {
             /**

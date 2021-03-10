@@ -229,7 +229,7 @@ class ResourceManager {
                             .map(a => a.Amount)
                     )
                     : 0;
-            return sum(options.key) + (options.key !== "default" && !options.excludeDefault)? sum("default") : 0;
+            return sum(options.key) + ((options.key !== "default" && !options.excludeDefault)? sum("default") : 0);
         }
         else if (options.type === "store")
             if (!this.room2key2StoringResourceTypes[roomName] || !this.room2key2StoringResourceTypes[roomName][resourceType]) return 0;
@@ -243,7 +243,7 @@ class ResourceManager {
                             .map(a => a.FreeAmount)
                     )
                     : 0;
-            return sum(options.key) + (options.key !== "default" && !options.excludeDefault)? sum("default") : 0;
+            return sum(options.key) + ((options.key !== "default" && !options.excludeDefault)? sum("default") : 0);
     }
     /**
      * Query returns the best suitable object to be extracted or to store.

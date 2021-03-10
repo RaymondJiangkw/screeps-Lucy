@@ -899,20 +899,15 @@ class TaskManager {
     IsSaturated(roomName, tag) {
         const tasks = this.roomName2information[roomName].tags[tag];
         if (tasks.total === 0) return true;
-        /**
-         * I expect the following property :
-         *  - expectedNum should be logorithm-like.
-         *  - When # working tasks = 1, expectedNum should be 1.
-         *  - When # working tasks = e^2, expectedNum should be 2.
-         */
-        const expectedNum = Math.floor(Math.log(tasks.total) * 0.5 + 1);
-        const workingNum = tasks.working.length;
-        /**
-         * NOTICE : For a group of Task, there could be the case that some of them still needs more workers and, when
-         * they employee more workers, the total workingNum remains the same.
-         */
-        if (workingNum <= expectedNum) return false;
-        else return true;
+        const patchType = this.patchInformation[tag] ? this.patchInformation[tag].type : "logarithm";
+        switch (patchType) {
+            case "unlimited":
+                return tasks.waiting.length === 0;
+            case "single":
+                return tasks.working.length > 0;
+            case "logarithm":
+                return Math.floor(Math.log(tasks.total) * 0.5 + 1) <= tasks.working.length;
+        }
     }
     /**
      * @param {string} id
@@ -992,6 +987,13 @@ class TaskManager {
             this.room2ticks[roomName] = `${(Game.cpu.getUsed() - _cpuUsed).toFixed(3)}`;
         }
     }
+    /**
+     * @param {string} patch
+     * @param {"unlimited" | "logarithm" | "single"} type
+     */
+    DescribePatch(patch, type) {
+        this.patchInformation[patch] = {type : type};
+    }
     constructor() {
         /** @type { {[id : string] : {[key : string] : Array<string>}} } @private */
         this.id2key2tasks = {};
@@ -1003,6 +1005,8 @@ class TaskManager {
         this.roomName2information = {};
         /** @type {{[index : string] : Task}} @private*/
         this.taskPools = {};
+        /** @type { {[patch : string] : {type : "unlimited" | "logarithm" | "single"}} } @private */
+        this.patchInformation     = {};
         /** Used for Calculation of Ticks */
         /** @type { {[roomName : string] : number} } @private */
         this.room2ticks = {};
@@ -1010,12 +1014,14 @@ class TaskManager {
         this.room2tag2ticks = {};
     }
 };
-const _taskManager = new TaskManager();
+const taskManager = new TaskManager();
+taskManager.DescribePatch("default", "unlimited");
+taskManager.DescribePatch("Repair", "single");
 profiler.registerClass(TaskManager, 'TaskManager');
 const _taskConstructor = new TaskConstructor();
 /** @type {import("./lucy.app").AppLifecycleCallbacks} */
 const TaskManagerPlugin = {
-    init: () => global.TaskManager = _taskManager,
+    init: () => global.TaskManager = taskManager,
     beforeTickStart : () => global.TaskManager.Check(),
     tickStart : () => {
         /**

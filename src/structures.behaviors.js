@@ -506,7 +506,7 @@ function giveContainerBehaviors() {
         if (Game.getTagById(this.id) === "forSource" || Game.getTagById(this.id) === "remoteSource") {
             target = this.room.sources.filter(e => e.pos.getRangeTo(this.pos) === 1)[0] || null;
         } else if (Game.getTagById(this.id) === "forMineral") {
-            if (!this.room[STRUCTURE_EXTRACTOR]) return;
+            if (this.room.find(FIND_STRUCTURES, {filter : {structureType : STRUCTURE_EXTRACTOR}}).length === 0) return;
             target = this.room.mineral;
         } else return;
         if (!target) {
@@ -938,6 +938,13 @@ function giveRampartBehaviors() {
         });
     };
 }
+function giveExtractorBehaviors() {
+    StructureExtractor.prototype.trigger = function() {
+        const container = global.MapMonitorManager.FetchAroundStructure(this.room.name, this.pos.y, this.pos.x).filter(s => s.structureType === STRUCTURE_CONTAINER)[0];
+        if (!container) return;
+        container.triggerHarvesting();
+    };
+}
 function mount() {
     giveControllerBehaviors();
     giveSpawnBehaviors();
@@ -949,6 +956,7 @@ function mount() {
     giveStorageBehaviors();
     giveLinkBehaviors();
     giveRampartBehaviors();
+    giveExtractorBehaviors();
 }
 global.Lucy.App.mount(mount);
 /** @type {import("./lucy.app").AppLifecycleCallbacks} */

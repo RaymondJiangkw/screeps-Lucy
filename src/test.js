@@ -13,5 +13,11 @@ global.Test = {
             console.log(`[${key}]\t${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`);
         }
         console.log(`Total : ${(Game.cpu.getUsed() - _cpuUsed).toFixed(2)}`);
+    },
+    /**
+     * @param {string} tag
+     */
+    Clean : (tag) => {
+        Object.values(Game.creeps).filter(c => !c.task && c.memory.tag === tag).forEach(c => c.suicide());
     }
 };

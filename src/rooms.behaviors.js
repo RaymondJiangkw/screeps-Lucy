@@ -671,9 +671,9 @@ const ticks = {};
 /** @type {import("./lucy.app").AppLifecycleCallbacks} */
 const RoomPlugin = {
     reset : () => {
+        for (const room of global.Lucy.Collector.colonies) global.Map.AutoPlan("normal", room.name);
+        for (const room of global.Lucy.Collector.otherRooms) if (room.memory.asRemoteMiningRoom) global.Map.AutoPlan("remoteMining_energy", room.name, room.memory.asRemoteMiningRoom, true);
         for (const roomName in Game.rooms) {
-            if (isMyRoom(Game.rooms[roomName])) global.Map.AutoPlan("normal", roomName);
-            else if (Game.rooms[roomName].memory.asRemoteMiningRoom) global.Map.AutoPlan("remoteMining_energy", roomName, Game.rooms[roomName].memory.asRemoteMiningRoom, true);
             global.Map.updateAdjacentRooms(roomName, {fullDistrict : true});
             global.Map.updateDistanceBetweenRooms(roomName);
         }

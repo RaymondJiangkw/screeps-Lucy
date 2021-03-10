@@ -18,6 +18,17 @@ class Collector {
         } else return this[key];
     }
     /**
+     * @returns {Room[]}
+     */
+    get otherRooms() {
+        const key = "_otherRooms";
+        if (!this[`${key}_tick`] || this[`${key}_tick`] < Game.time) {
+            this[`${key}_tick`] = Game.time;
+            /** @private */
+            return this[key] = Object.values(Game.rooms).filter(r => !r.controller || !r.controller.my);
+        } else return this[key];
+    }
+    /**
      * @param {string} targetRoomName
      * @returns { {roomName : string, distance : number} }
      */

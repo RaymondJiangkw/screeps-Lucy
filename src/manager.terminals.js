@@ -297,7 +297,7 @@ class TerminalManager {
      * @param {number} amount
      */
     Request(roomName, resourceType, amount) {
-        const terminal = this.Query().filter(t => Game.map.getRoomLinearDistance(t.room.name, roomName) <= 1).sort((u, v) => Game.map.getRoomLinearDistance(u, roomName) - Game.map.getRoomLinearDistance(v, roomName))[0];
+        const terminal = this.Query().filter(t => Game.map.getRoomLinearDistance(t.room.name, roomName) <= 1).sort((u, v) => Game.map.getRoomLinearDistance(u.room.name, roomName) - Game.map.getRoomLinearDistance(v.room.name, roomName))[0];
         if (terminal) terminal.Request(resourceType, amount);
     }
     /**
